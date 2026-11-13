@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 
 import {
   currentPipelineStage,
+  localizePipelineAppointments,
   pipelineMissingLabel,
   pipelineStageLabel,
   pipelineStageSection,
@@ -150,7 +151,7 @@ export function OrderPipelinePanel({
     setError(null);
     apiFetch<OrderPipeline>(`/orders/${orderId}/pipeline`)
       .then((payload) => {
-        if (!cancelled) setPipeline(payload);
+        if (!cancelled) setPipeline(localizePipelineAppointments(payload));
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));

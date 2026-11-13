@@ -27,6 +27,23 @@ fn can_view_order_medical(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::CeoAssistant | Role::PatientManager)
 }
 
+/// Same title as the blocked slot of the appointment list
+/// (`routes/appointments.rs`, `frontend/src/lib/blocked-appointment.ts`).
+const BLOCKED_MEDICAL_SLOT_TITLE: &str = "Blocked medical slot";
+
+/// A medical visit of the order is shown as a blocked slot to a role without
+/// the clinical view (Billing): no title, place, doctor or interpreter.
+fn appointment_is_blocked(medical_visible: bool, appointment_type: &str) -> bool {
+    !medical_visible && appointment_type == "medical"
+}
+
+/// The care team names doctors, their titles and specialties: a role without
+/// the clinical view sees only the non-medical providers of the order (the
+/// concierge rule for providers, `routes/providers.rs`).
+fn care_team_row_visible(medical_visible: bool, provider_type: &str) -> bool {
+    medical_visible || provider_type == "non_medical"
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum StageState {
@@ -423,7 +440,8 @@ async fn get_order_pipeline(
             .is_ok_and(|status| status == "completed"),
     };
 
-    let medical = if can_view_order_medical(auth.role) {
+    let medical_visible = can_view_order_medical(auth.role);
+    let medical = if medical_visible {
         json!({
             "visible": true,
             "required": facts.medical_required,
@@ -456,7 +474,12 @@ async fn get_order_pipeline(
         "status": order.try_get::<String, _>("status").unwrap_or_default(),
         "stages": derive_stages(&facts),
         "medical": medical,
-        "care_team": care_team.iter().map(|row| json!({
+        "care_team": care_team.iter().filter(|row| {
+            care_team_row_visible(
+                medical_visible,
+                &row.try_get::<String, _>("provider_type").unwrap_or_default(),
+            )
+        }).map(|row| json!({
             "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or_default(),
             "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
             "provider_type": row.try_get::<String, _>("provider_type").unwrap_or_default(),
@@ -467,7 +490,36 @@ async fn get_order_pipeline(
             "services": count(row, "services"),
             "appointments": count(row, "appointments"),
         })).collect::<Vec<Value>>(),
-        "appointments": appointments.iter().map(|row| json!({
+        "appointments": appointments.iter().map(|row| {
+            let appointment_type = row.try_get::<String, _>("appointment_type").unwrap_or_default();
+            if appointment_is_blocked(medical_visible, &appointment_type) {
+                // A role without the clinical view (Billing) keeps the
+                // scheduling facts it bills by — date, time, status and the
+                // quote warning — but not what the visit is, where, or with
+                // whom (QA final-C S1-C2 2026-11-13; `/appointments` and
+                // `/patients/{id}/appointments` refuse Billing outright).
+                return json!({
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "title": BLOCKED_MEDICAL_SLOT_TITLE,
+                    "appointment_type": appointment_type,
+                    "date": row.try_get::<chrono::NaiveDate, _>("date").map(|value| value.to_string()).unwrap_or_default(),
+                    "time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or(None).map(|value| value.format("%H:%M").to_string()),
+                    "time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or(None).map(|value| value.format("%H:%M").to_string()),
+                    "status": appointment_status(row),
+                    "location": None::<String>,
+                    "provider_name": None::<String>,
+                    "doctor_name": None::<String>,
+                    "provider_id": None::<Uuid>,
+                    "doctor_id": None::<Uuid>,
+                    "interpreter_id": None::<Uuid>,
+                    "interpreter_name": None::<String>,
+                    "interpreter_response": None::<String>,
+                    "portal_released_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_released_at").unwrap_or(None).map(|value| value.to_rfc3339()),
+                    "outside_signed_quote": row.try_get::<Option<bool>, _>("outside_signed_quote").unwrap_or(None).unwrap_or(false),
+                    "is_blocked": true,
+                });
+            }
+            json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "title": row.try_get::<String, _>("title").unwrap_or_default(),
             "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
@@ -488,7 +540,9 @@ async fn get_order_pipeline(
             "portal_released_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_released_at").unwrap_or(None).map(|value| value.to_rfc3339()),
             // Completing it adds a new invoice line (owner decision 2026-11-02).
             "outside_signed_quote": row.try_get::<Option<bool>, _>("outside_signed_quote").unwrap_or(None).unwrap_or(false),
-        })).collect::<Vec<Value>>(),
+            "is_blocked": false,
+            })
+        }).collect::<Vec<Value>>(),
         "services": {
             "total": services_total,
             "planned": facts.services_planned,
@@ -514,6 +568,17 @@ mod tests {
             .into_iter()
             .map(|stage| stage.state)
             .collect()
+    }
+
+    #[test]
+    fn billing_sees_medical_visits_as_blocked_slots_and_no_medical_care_team() {
+        assert!(!can_view_order_medical(Role::Billing));
+        assert!(appointment_is_blocked(false, "medical"));
+        assert!(!appointment_is_blocked(false, "non_medical"));
+        assert!(!appointment_is_blocked(true, "medical"));
+        assert!(!care_team_row_visible(false, "medical"));
+        assert!(care_team_row_visible(false, "non_medical"));
+        assert!(care_team_row_visible(true, "medical"));
     }
 
     #[test]

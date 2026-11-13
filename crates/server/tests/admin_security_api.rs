@@ -486,6 +486,63 @@ async fn audit_analytics_hides_portal_readers_from_the_it_admin() {
     );
 }
 
+/// QA final-C S3-C4 (2026-11-13): like the activity log, the security
+/// analytics name no patient record id to the IT admin; the CEO sees it.
+#[tokio::test]
+async fn audit_analytics_hides_patient_record_ids_from_the_it_admin() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pool = app.suite.pool.clone();
+    let ceo_id = seed_user(&pool, "audit-analytics-record", "ceo").await;
+    let patient_record = Uuid::new_v4();
+    let event_id: i64 = sqlx::query_scalar(
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context, ip_address, created_at)
+           VALUES ($1, 'view_patient', 'patient', $2, '{"is_ceo_access":true}'::jsonb, 'sha256:ip-c', now())
+           RETURNING id"#,
+    )
+    .bind(ceo_id)
+    .bind(patient_record)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let event_of = |body: &Value| -> Option<Value> {
+        body["recent_suspicious_events"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["id"] == event_id).cloned())
+    };
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/audit-analytics",
+        &auth_header_for("it_admin", app.it_admin_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !body.to_string().contains(&patient_record.to_string()),
+        "{body}"
+    );
+    if let Some(event) = event_of(&body) {
+        assert_eq!(event["entity_id"], Value::Null, "{event}");
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/audit-analytics",
+        &auth_header_for("ceo", ceo_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let event = event_of(&body).expect("the executive read is listed");
+    assert_eq!(event["entity_id"], patient_record.to_string(), "{event}");
+}
+
 /// QA E-14: "Datenänderungen 24 h" counted only rows with an HTTP write
 /// method, so domain events (`update_lead`, `create_invoice`, ...) never
 /// counted. Reads, downloads, sign-ins and technical rows still do not.

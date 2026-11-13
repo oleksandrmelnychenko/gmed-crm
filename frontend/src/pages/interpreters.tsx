@@ -2627,9 +2627,11 @@ export function InterpretersPage() {
                             {billingLineStatusLabel(item.status, lang)}
                           </span>
                           <span className="mt-1 block text-muted-foreground">
-                            {displayValue(item.description)} ·{" "}
-                            {displayNumber(item.unit_price)}{" "}
-                            {displayValue(item.currency)}
+                            {displayValue(item.description)}
+                            {/* A role without the finance right gets no price (null). */}
+                            {item.unit_price == null
+                              ? null
+                              : ` · ${displayNumber(item.unit_price)} ${displayValue(item.currency)}`}
                           </span>
                         </div>
                       )}

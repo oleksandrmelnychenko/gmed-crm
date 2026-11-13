@@ -3921,3 +3921,207 @@ async fn dashboard_statistics_hide_amounts_from_roles_without_finance_right() {
         }
     }
 }
+
+async fn seed_upcoming_appointment(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    created_by: Uuid,
+    title: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, appointment_type, title, location,
+                date, time_start, time_end, status, created_by
+           ) VALUES (
+                $1, $2, 'medical', $3, 'Cardiology ward',
+                CURRENT_DATE + 1, '09:00', '10:00', 'planned', $4
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(title)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// QA final-C S1-C1 2026-11-13: the dashboard list of upcoming appointments
+/// follows the row scope of `/appointments` — a patient manager sees only the
+/// visits of its own patients, the interpreter team lead only its team
+/// context.
+#[tokio::test]
+async fn upcoming_appointments_follow_the_appointment_row_scope() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("upcoming-scope");
+    let pm_one = seed_user(&pool, &format!("{tag}-pm1"), "patient_manager").await;
+    let pm_two = seed_user(&pool, &format!("{tag}-pm2"), "patient_manager").await;
+    let teamlead = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let patient_one = seed_patient(&pool, admin_id, &format!("{tag}-a"), "DE").await;
+    let patient_two = seed_patient(&pool, admin_id, &format!("{tag}-b"), "DE").await;
+    seed_patient_assignment(&pool, patient_one, pm_one, admin_id).await;
+    seed_patient_assignment(&pool, patient_two, pm_two, admin_id).await;
+    let visit_one = seed_upcoming_appointment(
+        &pool,
+        patient_one,
+        provider_id,
+        admin_id,
+        &format!("Cardiology one {tag}"),
+    )
+    .await;
+    let visit_two = seed_upcoming_appointment(
+        &pool,
+        patient_two,
+        provider_id,
+        admin_id,
+        &format!("Cardiology two {tag}"),
+    )
+    .await;
+
+    let ids = |body: &Value| -> Vec<String> {
+        body.as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|row| row["id"].as_str().map(str::to_string))
+            .collect()
+    };
+
+    for (user_id, own, foreign) in [
+        (pm_one, visit_one, visit_two),
+        (pm_two, visit_two, visit_one),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            "/api/v1/stats/appointments/upcoming",
+            &auth_header_for(user_id, "patient_manager"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let seen = ids(&body);
+        assert!(seen.contains(&own.to_string()), "{body}");
+        assert!(!seen.contains(&foreign.to_string()), "{body}");
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/appointments/upcoming",
+        &auth_header_for(teamlead, "teamlead_interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let seen = ids(&body);
+    assert!(!seen.contains(&visit_one.to_string()), "{body}");
+    assert!(!seen.contains(&visit_two.to_string()), "{body}");
+}
+
+/// QA final-C S1-C2 2026-11-13: Billing reads the order pipeline without the
+/// clinical side — medical visits come as blocked slots (date, time, status)
+/// and the care team keeps only non-medical providers, no doctors.
+#[tokio::test]
+async fn billing_order_pipeline_hides_medical_visits_and_doctors() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("pipeline-billing");
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let clinic_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let hotel_id = seed_provider_with_type(&pool, &format!("{tag}-hotel"), "non_medical").await;
+    let doctor_id = seed_doctor(&pool, clinic_id, &tag).await;
+    let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+    let medical_visit = seed_appointment(
+        &pool,
+        patient_id,
+        clinic_id,
+        Some(doctor_id),
+        order_id,
+        interpreter_id,
+        admin_id,
+        admin_id,
+        &tag,
+    )
+    .await;
+    let hotel_visit = seed_non_medical_appointment(
+        &pool, patient_id, hotel_id, order_id, admin_id, admin_id, &tag,
+    )
+    .await;
+
+    let (status, pipeline) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/pipeline"),
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pipeline}");
+    assert_eq!(pipeline["medical"]["visible"], false, "{pipeline}");
+
+    let appointments = pipeline["appointments"].as_array().unwrap();
+    let medical = appointments
+        .iter()
+        .find(|row| row["id"] == medical_visit.to_string())
+        .expect("the medical visit stays as a slot");
+    assert_eq!(medical["title"], "Blocked medical slot", "{medical}");
+    assert_eq!(medical["is_blocked"], true, "{medical}");
+    assert_eq!(medical["status"], "completed", "{medical}");
+    assert!(!medical["date"].as_str().unwrap_or_default().is_empty());
+    for key in [
+        "location",
+        "provider_name",
+        "provider_id",
+        "doctor_name",
+        "doctor_id",
+        "interpreter_id",
+        "interpreter_name",
+    ] {
+        assert!(medical[key].is_null(), "{key}: {medical}");
+    }
+    let hotel = appointments
+        .iter()
+        .find(|row| row["id"] == hotel_visit.to_string())
+        .expect("the non-medical visit stays");
+    assert_eq!(hotel["title"], format!("Concierge visit {tag}"), "{hotel}");
+
+    let care_team = pipeline["care_team"].as_array().unwrap();
+    assert!(
+        care_team
+            .iter()
+            .all(|row| row["provider_type"] == "non_medical" && row["doctor_id"].is_null()),
+        "{pipeline}"
+    );
+    assert!(
+        care_team
+            .iter()
+            .any(|row| row["provider_id"] == hotel_id.to_string()),
+        "{pipeline}"
+    );
+    let body = pipeline.to_string();
+    assert!(!body.contains(&format!("Visit {tag}")), "{body}");
+    assert!(!body.contains(&format!("Doctor {tag}")), "{body}");
+
+    // The CEO still reads the whole clinical picture.
+    let (status, pipeline) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/pipeline"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pipeline}");
+    let body = pipeline.to_string();
+    assert!(body.contains(&format!("Visit {tag}")), "{body}");
+    assert!(body.contains(&format!("Doctor {tag}")), "{body}");
+}

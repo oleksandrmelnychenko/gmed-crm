@@ -1235,30 +1235,80 @@ async fn upcoming_appointments(
         return e;
     }
 
-    match sqlx::query!(
+    // Row scope of the appointments list (`GET /appointments`): the same
+    // `access::AppointmentScope` predicates, so a patient manager sees only
+    // the visits of its own patients and the interpreter team lead only its
+    // team context (QA final-C S1-C1 2026-11-13).
+    let scope = crate::access::AppointmentScope::for_role(auth.role);
+    let sql = format!(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.appointment_type,
                   a.status, a.location,
                   p.first_name, p.last_name
            FROM appointments a
            JOIN patients p ON p.id = a.patient_id
            WHERE a.date >= CURRENT_DATE AND a.status IN ('planned', 'confirmed')
-           ORDER BY a.date, a.time_start LIMIT 10"#
-    )
-    .fetch_all(&state.db)
-    .await
+             AND (
+                $1::boolean
+                OR ($2::boolean AND a.interpreter_id = $5)
+                OR ($3::boolean AND a.owner_user_id = $5)
+                OR ($4::boolean AND EXISTS (
+                    SELECT 1
+                    FROM patient_assignments scoped_assignment
+                    WHERE scoped_assignment.patient_id = a.patient_id
+                      AND scoped_assignment.user_id = $5
+                      AND scoped_assignment.revoked_at IS NULL
+                ))
+                OR ($6::boolean AND (
+                    a.interpreter_id IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM interpreter_reports team_report
+                        WHERE team_report.appointment_id = a.id
+                    )
+                    OR {awaits_first_interpreter}
+                ))
+             )
+           ORDER BY a.date, a.time_start LIMIT 10"#,
+        awaits_first_interpreter = crate::access::APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL,
+    );
+
+    match sqlx::query(&sql)
+        .bind(scope.all)
+        .bind(scope.as_interpreter)
+        .bind(scope.as_owner)
+        .bind(scope.via_patient_assignment)
+        .bind(auth.user_id)
+        .bind(scope.interpreter_team)
+        .fetch_all(&state.db)
+        .await
     {
         Ok(rows) => {
             let mut data: Vec<serde_json::Value> = Vec::with_capacity(rows.len());
             for r in rows {
+                let appointment_type: String = r.try_get("appointment_type").unwrap_or_default();
+                // Same medical redaction as the appointments list.
+                let blocked =
+                    crate::routes::appointments::is_blocked_slot(&auth, &appointment_type);
+                let first_name: String = r.try_get("first_name").unwrap_or_default();
+                let last_name: String = r.try_get("last_name").unwrap_or_default();
                 data.push(serde_json::json!({
-                    "id": r.id,
-                    "title": r.title,
-                    "date": r.date,
-                    "time_start": r.time_start,
-                    "type": r.appointment_type,
-                    "status": r.status,
-                    "location": r.location,
-                    "patient_name": format!("{} {}", r.first_name, r.last_name),
+                    "id": r.try_get::<uuid::Uuid, _>("id").ok(),
+                    "title": if blocked {
+                        "Blocked medical slot".to_string()
+                    } else {
+                        r.try_get::<String, _>("title").unwrap_or_default()
+                    },
+                    "date": r.try_get::<chrono::NaiveDate, _>("date").ok(),
+                    "time_start": r
+                        .try_get::<Option<chrono::NaiveTime>, _>("time_start")
+                        .unwrap_or_default(),
+                    "type": appointment_type,
+                    "status": r.try_get::<String, _>("status").unwrap_or_default(),
+                    "location": if blocked {
+                        None
+                    } else {
+                        r.try_get::<Option<String>, _>("location").unwrap_or_default()
+                    },
+                    "patient_name": format!("{} {}", first_name, last_name),
                 }));
             }
             Json(data).into_response()
@@ -5799,7 +5849,9 @@ async fn dashboard_clinical(
     // The main request reason is free text from the case anamnesis, part of
     // the clinical record: the other dashboard roles get no reasons.
     let top_case_reasons = if can_read_case_reasons(&auth) {
-        load_top_case_reasons(&state, &clause)
+        let assigned_to =
+            crate::access::requires_patient_assignment(auth.role).then_some(auth.user_id);
+        load_top_case_reasons(&state, &clause, assigned_to)
             .await
             .unwrap_or_default()
     } else {
@@ -6018,17 +6070,33 @@ async fn load_patients_count(state: &AppState, clause: &str) -> Result<i64, sqlx
 
 /* ── Clinical loaders ── */
 
-async fn load_top_case_reasons(state: &AppState, clause: &str) -> Result<Vec<Value>, sqlx::Error> {
+/// `assigned_to`: a role inside the assignment model (patient manager) reads
+/// the free-text reasons of its own patients' cases only (QA final-C sibling
+/// audit 2026-11-13).
+async fn load_top_case_reasons(
+    state: &AppState,
+    clause: &str,
+    assigned_to: Option<uuid::Uuid>,
+) -> Result<Vec<Value>, sqlx::Error> {
     let sql = format!(
         r#"SELECT NULLIF(TRIM(hauptanfragegrund), '') AS reason, COUNT(*)::bigint AS c
            FROM cases
            WHERE hauptanfragegrund IS NOT NULL
              AND TRIM(hauptanfragegrund) <> '' {clause}
+             AND ($1::uuid IS NULL OR EXISTS (
+                 SELECT 1 FROM patient_assignments scoped_assignment
+                 WHERE scoped_assignment.patient_id = cases.patient_id
+                   AND scoped_assignment.user_id = $1
+                   AND scoped_assignment.revoked_at IS NULL
+             ))
            GROUP BY 1
            ORDER BY 2 DESC
            LIMIT 10"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(&sql)
+        .bind(assigned_to)
+        .fetch_all(&state.db)
+        .await?;
     Ok(rows
         .into_iter()
         .filter_map(|r| {

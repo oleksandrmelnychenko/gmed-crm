@@ -4725,16 +4725,19 @@ async fn get_doctor(
                 Ok(items) => items,
                 Err(resp) => return resp,
             };
-            let interactions = match filter_accessible_patient_items(
-                &state,
-                &auth,
-                interactions,
-                "patient_uuid",
-            )
-            .await
-            {
-                Ok(items) => items,
-                Err(resp) => return resp,
+            // Same rule as the provider card (`get_provider`): the interpreter
+            // roles get no interaction rows — they carry other interpreters'
+            // visits with notes and order-line prices (QA final-C sibling
+            // audit 2026-11-13).
+            let interactions = if provider_prices_hidden(auth.role) {
+                Vec::new()
+            } else {
+                match filter_accessible_patient_items(&state, &auth, interactions, "patient_uuid")
+                    .await
+                {
+                    Ok(items) => items,
+                    Err(resp) => return resp,
+                }
             };
             let relationships = match load_doctor_relationships_json(
                 &state,

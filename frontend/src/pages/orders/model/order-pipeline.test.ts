@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { BLOCKED_MEDICAL_SLOT_TITLE } from "@/lib/blocked-appointment";
+
 import { ORDER_WORKSPACE_SECTIONS, normalizeOrderSectionKey } from "../sections";
 import {
   currentPipelineStage,
+  localizePipelineAppointments,
   pipelineMissingLabel,
   pipelineStageSection,
   type OrderPipelineStage,
@@ -40,5 +43,28 @@ describe("order pipeline", () => {
     expect(pipelineMissingLabel("doctor_missing", "de")).toBe("Kein Arzt ausgewählt");
     expect(pipelineMissingLabel("doctor_missing", "ru")).toBe("Врач не выбран");
     expect(pipelineMissingLabel("something_new", "ru")).toBe("something_new");
+  });
+
+  it("localizes only the blocked medical slots of the pipeline", () => {
+    const base = {
+      appointment_type: "medical",
+      date: "2026-11-20",
+      time_start: null,
+      time_end: null,
+      status: "planned",
+      location: null,
+      provider_name: null,
+      doctor_name: null,
+      interpreter_name: null,
+      interpreter_response: null,
+    };
+    const localized = localizePipelineAppointments({
+      appointments: [
+        { ...base, id: "a", title: BLOCKED_MEDICAL_SLOT_TITLE, is_blocked: true },
+        { ...base, id: "b", title: "Cardiology follow-up" },
+      ],
+    });
+    expect(localized.appointments[0].title).not.toBe(BLOCKED_MEDICAL_SLOT_TITLE);
+    expect(localized.appointments[1].title).toBe("Cardiology follow-up");
   });
 });

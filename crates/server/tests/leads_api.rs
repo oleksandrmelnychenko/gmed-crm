@@ -791,6 +791,35 @@ async fn leads_list_ok_for_ceo() {
     assert!(body.is_array());
 }
 
+/// QA final-C S3-C6 (2026-11-13): a role without the right to issue parent
+/// access is refused before its body is read; an allowed role still gets the
+/// body rejection.
+#[tokio::test]
+async fn guardian_access_checks_the_role_before_the_body() {
+    let Some(app) = test_app().await else { return };
+    let path = format!("/api/v1/leads/{}/portal-guardians", Uuid::new_v4());
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &app.auth_header("sales"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &app.auth_header("patient_manager"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+}
+
 // ── CRUD tests ──────────────────────────────────────────────
 
 #[tokio::test]

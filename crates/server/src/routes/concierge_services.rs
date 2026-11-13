@@ -2837,7 +2837,14 @@ async fn list_concierge_service_partner_interactions(
     Extension(auth): Extension<AuthUser>,
     Path(service_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+    // The CEO Assistant reads every service, read-only (owner decision
+    // 2026-10-11, QA final-C S3-C5; `can_read_service`).
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Concierge,
+    ]) {
         return e;
     }
 
@@ -2846,7 +2853,9 @@ async fn list_concierge_service_partner_interactions(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
         Err(resp) => return resp,
     };
-    if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
+    if auth.role != Role::CeoAssistant
+        && let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await
+    {
         return resp;
     }
     if let Err(resp) = load_service_non_medical_partner_id(&state, &service).await {

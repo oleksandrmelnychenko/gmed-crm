@@ -614,10 +614,15 @@ async fn list_appointment_doctor_participants(
     Extension(auth): Extension<AuthUser>,
     Path(appointment_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+    // The CEO Assistant reads every appointment, read-only (owner decision
+    // 2026-10-11, QA final-C S3-C5); the write below stays CEO and PM only.
+    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::CeoAssistant])
+    {
         return resp;
     }
-    if let Err(resp) = ensure_appointment_access(&state, &auth, appointment_id).await {
+    if auth.role != Role::CeoAssistant
+        && let Err(resp) = ensure_appointment_access(&state, &auth, appointment_id).await
+    {
         return resp;
     }
 

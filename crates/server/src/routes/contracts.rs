@@ -4582,6 +4582,31 @@ async fn list_order_quotes(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
+    if !can_read_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    // The order's quotes answer like the order itself: a caller without
+    // access to the order's patient or lead is refused, not served an empty
+    // list (QA final-C S3-C3 2026-11-13).
+    let order_ctx = match load_order_access_context(&state, order_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(resp) => return resp,
+    };
+    let order_subject = match order_ctx.subject() {
+        Ok(subject) => subject,
+        Err(error) => {
+            tracing::error!(?error, order_id = %order_id, "invalid quote order subject");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Order has invalid subject",
+            );
+        }
+    };
+    if let Err(resp) = ensure_subject_access(&state, &auth, order_subject).await {
+        return resp;
+    }
+
     list_quotes(
         State(state),
         Extension(auth),

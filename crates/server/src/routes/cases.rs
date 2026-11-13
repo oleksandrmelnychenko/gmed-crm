@@ -334,7 +334,7 @@ async fn list_cases(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListCasesQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::CeoAssistant]) {
         return e;
     }
 
@@ -875,7 +875,7 @@ async fn get_case_full(
     Extension(auth): Extension<AuthUser>,
     Path(case_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::CeoAssistant]) {
         return e;
     }
 
@@ -2642,7 +2642,7 @@ async fn get_case_history(
     Path(case_uuid): Path<Uuid>,
     Query(query): Query<CaseHistoryQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::CeoAssistant]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -3314,7 +3314,9 @@ async fn can_access_case_subject(
     patient_id: Option<Uuid>,
     lead_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
-    if auth.role.has_full_access() {
+    // The CEO Assistant reads every case, read-only (owner decision
+    // 2026-10-11, QA final-C S3-C5): only the read routes admit the role.
+    if auth.role.has_full_access() || auth.role == Role::CeoAssistant {
         return Ok(true);
     }
 

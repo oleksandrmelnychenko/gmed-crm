@@ -100,7 +100,12 @@ async fn list_interpreter_profiles(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListInterpreterProfilesQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_capability(Capability::InterpretersView) {
+    // The CEO Assistant reads the list too, read-only (owner decision
+    // 2026-10-11, QA final-C S3-C5). It gets no `interpreters.view`: that
+    // capability also opens the profile create below.
+    if auth.role != Role::CeoAssistant
+        && let Err(resp) = auth.require_capability(Capability::InterpretersView)
+    {
         return resp;
     }
 
@@ -536,7 +541,14 @@ async fn get_interpreter_profile_operations(
         return resp;
     }
 
-    match load_interpreter_operations_payload(&state, interpreter_id).await {
+    // A patient manager reads the visits, reports and tasks of its own
+    // patients only; a role without the finance right gets no prices
+    // (QA final-C sibling audit 2026-11-13).
+    let viewer = OperationsViewer {
+        assigned_to: (auth.role == Role::PatientManager).then_some(auth.user_id),
+        show_money: auth.role.can_see_financial_data(),
+    };
+    match load_interpreter_operations_payload(&state, interpreter_id, viewer).await {
         Ok(payload) => Json(payload).into_response(),
         Err(error) => {
             tracing::error!(error = %error, interpreter_id = %interpreter_id, "load interpreter operations profile");
@@ -1131,9 +1143,20 @@ async fn replace_interpreter_languages(
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
+/// Who reads an interpreter's operations profile.
+#[derive(Debug, Clone, Copy)]
+struct OperationsViewer {
+    /// `Some(user)`: only patients with an active assignment of that user
+    /// (patient manager). `None`: every patient of the interpreter.
+    assigned_to: Option<Uuid>,
+    /// Prices and billing totals only for roles with the finance right.
+    show_money: bool,
+}
+
 async fn load_interpreter_operations_payload(
     state: &AppState,
     interpreter_id: Uuid,
+    viewer: OperationsViewer,
 ) -> Result<Value, sqlx::Error> {
     let summary_row = sqlx::query(
         r#"SELECT
@@ -1264,6 +1287,12 @@ async fn load_interpreter_operations_payload(
              -- A declined booking is not the interpreter's visit: the lists
              -- follow the same rule as the summary counts above (QA D-17).
              AND a.interpreter_response IS DISTINCT FROM 'declined'
+             AND ($2::uuid IS NULL OR EXISTS (
+                 SELECT 1 FROM patient_assignments scoped_assignment
+                 WHERE scoped_assignment.patient_id = a.patient_id
+                   AND scoped_assignment.user_id = $2
+                   AND scoped_assignment.revoked_at IS NULL
+             ))
            GROUP BY p.id, pref.preference
            ORDER BY active_relation DESC,
                     next_appointment_date ASC NULLS LAST,
@@ -1272,6 +1301,7 @@ async fn load_interpreter_operations_payload(
            LIMIT 12"#,
     )
     .bind(interpreter_id)
+    .bind(viewer.assigned_to)
     .fetch_all(&state.db)
     .await?;
 
@@ -1288,10 +1318,17 @@ async fn load_interpreter_operations_payload(
              AND a.date >= CURRENT_DATE
              AND a.status <> 'cancelled'
              AND a.interpreter_response IS DISTINCT FROM 'declined'
+             AND ($2::uuid IS NULL OR EXISTS (
+                 SELECT 1 FROM patient_assignments scoped_assignment
+                 WHERE scoped_assignment.patient_id = a.patient_id
+                   AND scoped_assignment.user_id = $2
+                   AND scoped_assignment.revoked_at IS NULL
+             ))
            ORDER BY a.date ASC, a.time_start ASC NULLS LAST
            LIMIT 8"#,
     )
     .bind(interpreter_id)
+    .bind(viewer.assigned_to)
     .fetch_all(&state.db)
     .await?;
 
@@ -1306,6 +1343,12 @@ async fn load_interpreter_operations_payload(
            LEFT JOIN orders o ON o.id = t.order_id
            WHERE t.assigned_to = $1
              AND t.status IN ('open', 'in_progress')
+             AND ($2::uuid IS NULL OR EXISTS (
+                 SELECT 1 FROM patient_assignments scoped_assignment
+                 WHERE scoped_assignment.patient_id = t.patient_id
+                   AND scoped_assignment.user_id = $2
+                   AND scoped_assignment.revoked_at IS NULL
+             ))
            ORDER BY CASE t.priority
                         WHEN 'urgent' THEN 0
                         WHEN 'high' THEN 1
@@ -1317,6 +1360,7 @@ async fn load_interpreter_operations_payload(
            LIMIT 8"#,
     )
     .bind(interpreter_id)
+    .bind(viewer.assigned_to)
     .fetch_all(&state.db)
     .await?;
 
@@ -1331,10 +1375,17 @@ async fn load_interpreter_operations_payload(
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN order_leistungen ol ON ol.source_interpreter_report_id = ir.id
            WHERE ir.interpreter_id = $1
+             AND ($2::uuid IS NULL OR EXISTS (
+                 SELECT 1 FROM patient_assignments scoped_assignment
+                 WHERE scoped_assignment.patient_id = a.patient_id
+                   AND scoped_assignment.user_id = $2
+                   AND scoped_assignment.revoked_at IS NULL
+             ))
            ORDER BY ir.created_at DESC
            LIMIT 8"#,
     )
     .bind(interpreter_id)
+    .bind(viewer.assigned_to)
     .fetch_all(&state.db)
     .await?;
 
@@ -1346,10 +1397,17 @@ async fn load_interpreter_operations_payload(
            JOIN interpreter_reports ir ON ir.id = ol.source_interpreter_report_id
            JOIN orders o ON o.id = ol.order_id
            WHERE ir.interpreter_id = $1
+             AND ($2::uuid IS NULL OR EXISTS (
+                 SELECT 1 FROM patient_assignments scoped_assignment
+                 WHERE scoped_assignment.patient_id = o.patient_id
+                   AND scoped_assignment.user_id = $2
+                   AND scoped_assignment.revoked_at IS NULL
+             ))
            ORDER BY ol.created_at DESC
            LIMIT 8"#,
     )
     .bind(interpreter_id)
+    .bind(viewer.assigned_to)
     .fetch_all(&state.db)
     .await?;
 
@@ -1371,7 +1429,7 @@ async fn load_interpreter_operations_payload(
             "active_tasks": row_i64(&summary_row, "active_tasks"),
             "overdue_tasks": row_i64(&summary_row, "overdue_tasks"),
             "synced_billing_lines": row_i64(&summary_row, "synced_billing_lines"),
-            "synced_billing_net": decimal_json_or_zero(&summary_row, "synced_billing_net"),
+            "synced_billing_net": if viewer.show_money { decimal_json_or_zero(&summary_row, "synced_billing_net") } else { Value::Null },
         },
         "patients": patient_rows.into_iter().map(|row| serde_json::json!({
             "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
@@ -1431,7 +1489,7 @@ async fn load_interpreter_operations_payload(
             "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
             "description": row.try_get::<String, _>("description").unwrap_or_default(),
             "quantity": optional_decimal_json(&row, "quantity"),
-            "unit_price": optional_decimal_json(&row, "unit_price"),
+            "unit_price": if viewer.show_money { optional_decimal_json(&row, "unit_price") } else { Value::Null },
             "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
             "status": row.try_get::<String, _>("status").unwrap_or_default(),
             "report_id": row.try_get::<Uuid, _>("report_id").unwrap_or_default(),

@@ -1211,6 +1211,58 @@ async fn interpreter_profile_operations_exposes_live_workload() {
     .await
     .unwrap();
 
+    // QA final-C sibling audit 2026-11-13: a patient manager not assigned to
+    // the patient gets the interpreter's workload counts, but no patient,
+    // visit, task, report or billing row of that patient.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile/operations"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["summary"]["assigned_patients"], 1);
+    for list in [
+        "patients",
+        "upcoming_appointments",
+        "active_tasks",
+        "recent_reports",
+        "billing_lines",
+    ] {
+        assert_eq!(body[list], json!([]), "{list}: {body:?}");
+    }
+
+    // The interpreter team lead has no finance right: no prices.
+    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{interpreter_id}/profile/operations"),
+        &auth_header_for(teamlead_id, "teamlead_interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert!(body["summary"]["synced_billing_net"].is_null(), "{body:?}");
+    assert!(body["billing_lines"][0]["unit_price"].is_null(), "{body:?}");
+    assert_eq!(
+        body["billing_lines"][0]["description"],
+        "Interpreter report sync"
+    );
+
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)"#,
+    )
+    .bind(patient_id)
+    .bind(pm_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let (status, body) = json_request(
         &app,
         "GET",

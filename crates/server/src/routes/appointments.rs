@@ -1059,7 +1059,8 @@ async fn list_appointment_requests(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListAppointmentRequestsQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
+    {
         return resp;
     }
 
@@ -1070,12 +1071,14 @@ async fn list_appointment_requests(
     }
     if let Some(patient_id) = query.patient_id
         && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
-        && auth.role != Role::Ceo
+        && !matches!(auth.role, Role::Ceo | Role::CeoAssistant)
     {
         return resp;
     }
 
-    let scope_user_id = if auth.role == Role::Ceo {
+    // The CEO Assistant reads everything, read-only (owner decision
+    // 2026-10-11, QA final-C S3-C5).
+    let scope_user_id = if matches!(auth.role, Role::Ceo | Role::CeoAssistant) {
         None
     } else {
         Some(auth.user_id)

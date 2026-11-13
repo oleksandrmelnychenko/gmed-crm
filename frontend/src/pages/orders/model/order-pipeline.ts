@@ -1,3 +1,5 @@
+import { localizeBlockedAppointmentTitle } from "@/lib/blocked-appointment";
+
 import type { OrderSectionKey } from "../sections";
 
 export type OrderPipelineStageKey =
@@ -74,7 +76,20 @@ export type OrderPipelineAppointment = {
   portal_released_at?: string | null;
   /** Medical visit whose doctor/provider has no line in the order's accepted quote. */
   outside_signed_quote?: boolean;
+  /**
+   * Medical visit shown to a role without the clinical view (Billing): only
+   * date, time and status; title is the fixed blocked-slot placeholder.
+   */
+  is_blocked?: boolean;
 };
+
+/** Shows the blocked-slot placeholder titles of a pipeline in the UI language. */
+export function localizePipelineAppointments<T extends { appointments: OrderPipelineAppointment[] }>(pipeline: T): T {
+  return {
+    ...pipeline,
+    appointments: (pipeline.appointments ?? []).map((appointment) => localizeBlockedAppointmentTitle(appointment)),
+  };
+}
 
 export const ORDER_APPOINTMENT_STATUS: Record<string, { de: string; ru: string; tone: "neutral" | "info" | "warning" | "success" }> = {
   planned: { de: "Geplant", ru: "Запланирован", tone: "warning" },

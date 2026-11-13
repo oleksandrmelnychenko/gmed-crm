@@ -816,7 +816,15 @@ async fn audit_analytics(
                 .unwrap_or_else(|| serde_json::json!({}));
                 // The record a portal login touched is its own account or
                 // file: hidden together with the actor.
-                let entity_id = if actor_hidden || (!full_access && target_is_portal) {
+                // A business record (patient, document, conversation) is
+                // named by no id either: the IT admin has no patient access,
+                // and the redacted context already hides it (QA final-C S3-C4
+                // 2026-11-13).
+                let business_record = !super::admin_settings::TECHNICAL_AUDIT_ENTITY_TYPES
+                    .contains(&entity_type.as_str());
+                let entity_id = if actor_hidden
+                    || (!full_access && (target_is_portal || business_record))
+                {
                     None
                 } else {
                     row.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default()

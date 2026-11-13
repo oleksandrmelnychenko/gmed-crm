@@ -125,9 +125,9 @@ fn masked_value(value: &serde_json::Value, in_headers: bool) -> serde_json::Valu
                         {
                             // The header's name stays readable.
                             item.clone()
-                        } else if is_secret_key(key) {
-                            mask_scalar(item)
-                        } else if in_headers && !item.is_object() && !item.is_array() {
+                        } else if is_secret_key(key)
+                            || (in_headers && !item.is_object() && !item.is_array())
+                        {
                             mask_scalar(item)
                         } else {
                             masked_value(item, in_headers || is_header_key(key))

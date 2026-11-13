@@ -16,7 +16,7 @@
 
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, State, rejection::JsonRejection},
     http::StatusCode,
     response::IntoResponse,
     routing::post,
@@ -607,7 +607,7 @@ async fn issue_guardian_access(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
-    Json(body): Json<IssueGuardianRequest>,
+    body: Result<Json<IssueGuardianRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !may_issue_portal_password(auth.role) {
         return err(
@@ -615,6 +615,12 @@ async fn issue_guardian_access(
             "Only the CEO or a patient manager can issue patient access",
         );
     }
+    // The body is read after the role check: a role without the right gets
+    // 403 even for a malformed request (QA final-C S3-C6 2026-11-13).
+    let body = match crate::routes::company_financial_accounts::read_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),

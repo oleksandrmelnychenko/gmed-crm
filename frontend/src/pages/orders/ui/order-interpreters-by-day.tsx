@@ -31,7 +31,7 @@ import {
   needsInterpreter,
   type InterpreterDay,
 } from "../model/order-interpreters-by-day";
-import type { OrderPipeline, OrderPipelineAppointment } from "../model/order-pipeline";
+import { localizePipelineAppointments, type OrderPipeline, type OrderPipelineAppointment } from "../model/order-pipeline";
 import { plannedDayLabel, plannedTimeLabel } from "../model/order-planned-appointments";
 
 const INTERPRETER_META_TTL_MS = 60_000;
@@ -114,7 +114,7 @@ export function OrderInterpretersByDay({
     setError(null);
     apiFetch<OrderPipeline>(`/orders/${orderId}/pipeline`)
       .then((pipeline) => {
-        if (!cancelled) setLoaded({ orderId, items: pipeline.appointments ?? [] });
+        if (!cancelled) setLoaded({ orderId, items: localizePipelineAppointments(pipeline).appointments });
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));

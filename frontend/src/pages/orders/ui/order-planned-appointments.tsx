@@ -21,6 +21,7 @@ import {
 } from "../model/order-planned-appointments";
 import {
   ORDER_APPOINTMENT_STATUS,
+  localizePipelineAppointments,
   type OrderPipeline,
   type OrderPipelineAppointment,
   type OrderPipelineCareTeamMember,
@@ -161,7 +162,7 @@ export function OrderPlannedAppointments({
     apiFetch<OrderPipeline>(`/orders/${orderId}/pipeline`)
       .then((pipeline) => {
         if (!cancelled) {
-          setLoaded({ orderId, items: pipeline.appointments, careTeam: pipeline.care_team ?? [] });
+          setLoaded({ orderId, items: localizePipelineAppointments(pipeline).appointments, careTeam: pipeline.care_team ?? [] });
         }
       })
       .catch((reason: unknown) => {
