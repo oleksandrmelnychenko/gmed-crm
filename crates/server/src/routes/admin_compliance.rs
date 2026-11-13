@@ -5451,6 +5451,32 @@ async fn anonymize_patient_record(
         )
     })?;
     for lead_id in &source_lead_ids {
+        // An unfinished repeat request of the patient ends with the erasure:
+        // its draft orders are withdrawn like those of a deleted lead
+        // (cancelled_at, planned services, checklist). This replaces the
+        // database trigger `archive_repeat_intake_orders`, which only set the
+        // status (migration 20261113210000, QA F10).
+        let open_repeat_request: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM leads
+                   WHERE id = $1
+                     AND repeat_patient_id IS NOT NULL
+                     AND failed_outcome_status = 'none')"#,
+        )
+        .bind(*lead_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| failed(e, "check open repeat request"))?;
+        if open_repeat_request {
+            crate::routes::orders::withdraw_lead_orders_in_tx(
+                &mut tx,
+                *lead_id,
+                actor_id,
+                crate::routes::orders::LEAD_DELETED_CANCELLATION_REASON,
+                "dsgvo_erasure",
+            )
+            .await?;
+        }
         super::lead_portal_account::disable_for_lead_in_tx(&mut tx, *lead_id, Some(actor_id))
             .await
             .map_err(|e| {

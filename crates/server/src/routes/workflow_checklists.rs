@@ -264,8 +264,12 @@ pub(crate) async fn ensure_default_order_workflow(
     order_id: Uuid,
     fallback_user_id: Option<Uuid>,
 ) -> Result<(), axum::response::Response> {
-    let preparing: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND intake_state='draft')",
+    // A draft order is still being prepared; a cancelled or completed order is
+    // closed and must not get new open checklist items or tasks (also not when
+    // it is first viewed or when its lead is converted).
+    let skip: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 \
+         AND (intake_state='draft' OR status IN ('cancelled','completed')))",
     )
     .bind(order_id)
     .fetch_one(&state.db)
@@ -276,7 +280,7 @@ pub(crate) async fn ensure_default_order_workflow(
             "Failed to load order preparation",
         )
     })?;
-    if preparing {
+    if skip {
         return Ok(());
     }
     let context = load_order_scope_context(state, order_id).await?;
@@ -551,7 +555,62 @@ async fn add_order_workflow_item(
     if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, context.patient_id).await {
         return resp;
     }
+    match order_is_closed(&state.db, order_id).await {
+        Ok(false) => {}
+        Ok(true) => return order_checklist_closed(),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order status for checklist item");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order");
+        }
+    }
     create_custom_workflow_item(&state, &auth, WorkflowScope::Order, order_id, context, body).await
+}
+
+pub(crate) const ORDER_CHECKLIST_CLOSED_CODE: &str = "order_checklist_closed";
+
+/// The refusal of new or reopened checklist work on a cancelled or completed
+/// order: a closed order keeps no open checklist items or tasks.
+pub(crate) fn order_checklist_closed() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": ORDER_CHECKLIST_CLOSED_CODE,
+            "message": "The checklist of a cancelled or completed order cannot get new or reopened items",
+        })),
+    )
+        .into_response()
+}
+
+/// Whether the order is cancelled or completed (closed for checklist work).
+async fn order_is_closed(db: &sqlx::PgPool, order_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND status IN ('cancelled','completed'))",
+    )
+    .bind(order_id)
+    .fetch_one(db)
+    .await
+}
+
+/// Whether reopening this task would reopen a checklist item of a cancelled
+/// or completed order (or one closed by the order's cancellation). The work
+/// center refuses such a reopen instead of reviving closed order work.
+pub(crate) async fn task_reopen_blocked_by_closed_order(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM workflow_checklist_items w
+               LEFT JOIN orders o ON o.id = w.order_id
+               WHERE w.linked_task_id = $1
+                 AND w.is_completed
+                 AND (w.not_required_reason = 'order_cancelled'
+                      OR o.status IN ('cancelled','completed')))"#,
+    )
+    .bind(task_id)
+    .fetch_one(&mut **tx)
+    .await
 }
 
 async fn complete_order_workflow_item(
@@ -701,7 +760,10 @@ async fn change_workflow_item_resolution(
         Err(error) => return failed(error),
     };
     let row = match sqlx::query(
-        r#"SELECT owner_user_id, owner_role, is_completed, not_required, not_required_reason
+        r#"SELECT owner_user_id, owner_role, is_completed, not_required, not_required_reason,
+                  COALESCE((SELECT o.status IN ('cancelled','completed')
+                            FROM orders o
+                            WHERE o.id = workflow_checklist_items.order_id), false) AS order_closed
            FROM workflow_checklist_items
            WHERE id = $1
              AND scope_type = $2
@@ -778,13 +840,13 @@ async fn change_workflow_item_resolution(
         }
         ResolutionChange::Reopen => {
             let reason: Option<String> = row.try_get("not_required_reason").unwrap_or_default();
+            let order_closed: bool = row.try_get("order_closed").unwrap_or(false);
             if !is_completed {
                 None
-            } else if reason.as_deref() == Some("order_cancelled") {
-                return err(
-                    StatusCode::CONFLICT,
-                    "A checklist item of a cancelled order cannot be reopened",
-                );
+            } else if reason.as_deref() == Some("order_cancelled") || order_closed {
+                // Every item of a cancelled or completed order stays closed, not
+                // only those the cancellation resolved (also "phase_passed").
+                return order_checklist_closed();
             } else if !not_required {
                 return err(
                     StatusCode::CONFLICT,

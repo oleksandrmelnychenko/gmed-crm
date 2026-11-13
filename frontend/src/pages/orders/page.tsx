@@ -6792,7 +6792,8 @@ function useOrdersPageContent() {
                             {l("orders_punkte")}: {workflowMetrics.total}
                           </Badge>
                         ) : null}
-                        {permissions.canManagePhase && !workflowPatientRequired ? (
+                        {/* A cancelled or completed order takes no new checklist work (server: order_checklist_closed). */}
+                        {permissions.canManagePhase && !workflowPatientRequired && !orderStepsLocked ? (
                           <Button
                             type="button"
                             className="rounded-xl"
@@ -7108,6 +7109,7 @@ function useOrdersPageContent() {
                                                 </div>
                                               ) : notRequired &&
                                                 item.not_required_reason !== "order_cancelled" &&
+                                                !orderStepsLocked &&
                                                 permissions.canManagePhase ? (
                                                 <Button
                                                   type="button"

@@ -1301,6 +1301,7 @@ async fn cancelling_an_order_closes_its_checklist_and_locks_its_steps() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "order_checklist_closed", "{body}");
 
     // The steps are locked.
     for (path, payload) in [
@@ -1325,6 +1326,247 @@ async fn cancelling_an_order_closes_its_checklist_and_locks_its_steps() {
         assert_eq!(status, StatusCode::CONFLICT, "{path}: {body}");
         assert_eq!(body["code"], "order_steps_locked", "{path}: {body}");
     }
+}
+
+async fn seed_order_with_status(
+    pool: &PgPool,
+    patient_id: Uuid,
+    admin_id: Uuid,
+    tag: &str,
+    status: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, cancelled_at,
+                              needs_description, created_by)
+           VALUES ($1, $2, 'execution', $3,
+                   CASE WHEN $3 = 'cancelled' THEN now() END,
+                   'Synthetic needs', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}-{status}"))
+    .bind(patient_id)
+    .bind(status)
+    .bind(admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn open_checklist_work(pool: &PgPool, order_id: Uuid) -> (i64, i64) {
+    sqlx::query_as(
+        r#"SELECT count(*) FILTER (WHERE NOT item.is_completed),
+                  count(task.id) FILTER (WHERE task.status NOT IN ('completed', 'cancelled'))
+           FROM workflow_checklist_items item
+           LEFT JOIN tasks task ON task.id = item.linked_task_id
+           WHERE item.order_id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// QA F05 (2026-11-13): a cancelled or completed order got open checklist
+/// items and tasks by a first look, a custom item, reopening a passed-stage
+/// item, or reopening the item's task in the work center.
+#[tokio::test]
+async fn closed_orders_get_no_new_or_reopened_checklist_work() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("f05-order");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    for status in ["cancelled", "completed"] {
+        let order_id = seed_order_with_status(&pool, patient_id, admin_id, &tag, status).await;
+        // A first look seeds nothing.
+        let (code, checklist) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/orders/{order_id}/workflow-checklist"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "{status}: {checklist}");
+        let items: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM workflow_checklist_items WHERE order_id = $1")
+                .bind(order_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(items, 0, "{status}: {checklist}");
+        // No custom item either.
+        let (code, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/orders/{order_id}/workflow-checklist"),
+            &bearer,
+            Some(json!({ "item_text": "Synthetic extra step", "priority": "normal" })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "{status}: {body}");
+        assert_eq!(body["error"], "order_checklist_closed", "{status}: {body}");
+        assert_eq!(
+            open_checklist_work(&pool, order_id).await,
+            (0, 0),
+            "{status}"
+        );
+    }
+
+    // An active order gets its checklist, then is cancelled.
+    let order_id = seed_order_with_status(&pool, patient_id, admin_id, &tag, "active").await;
+    let (code, checklist) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/workflow-checklist"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{checklist}");
+    let (code, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &bearer,
+        Some(json!({ "status": "cancelled", "reason": "Synthetic cancellation" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let linked: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        r#"SELECT id, linked_task_id FROM workflow_checklist_items
+           WHERE order_id = $1 AND linked_task_id IS NOT NULL
+           ORDER BY created_at, id"#,
+    )
+    .bind(order_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(linked.len() >= 2, "{checklist}");
+
+    // An item resolved as a passed stage (not by the cancellation) stays closed.
+    let (passed_item, _) = linked[0];
+    sqlx::query(
+        "UPDATE workflow_checklist_items SET not_required_reason = 'phase_passed' WHERE id = $1",
+    )
+    .bind(passed_item)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (code, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/workflow-checklist/{passed_item}/reopen"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "order_checklist_closed", "{body}");
+
+    // Reopening the cancelled task of an `order_cancelled` item in the work
+    // center is refused as a whole: task and item stay closed.
+    let (cancelled_item, task_id) = linked[1];
+    let updated_at: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT updated_at FROM tasks WHERE id = $1")
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (code, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-operational-items/{task_id}/status"),
+        &bearer,
+        Some(json!({ "status": "open", "expected_updated_at": updated_at.to_rfc3339() })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "order_checklist_closed", "{body}");
+    let (task_status, item_completed, reason): (String, bool, Option<String>) = sqlx::query_as(
+        r#"SELECT task.status, item.is_completed, item.not_required_reason
+           FROM workflow_checklist_items item
+           JOIN tasks task ON task.id = item.linked_task_id
+           WHERE item.id = $1"#,
+    )
+    .bind(cancelled_item)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(task_status, "cancelled");
+    assert!(item_completed);
+    assert_eq!(reason.as_deref(), Some("order_cancelled"));
+    assert_eq!(open_checklist_work(&pool, order_id).await, (0, 0));
+
+    // A later look at the cancelled order seeds nothing new.
+    let (code, checklist) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/workflow-checklist"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{checklist}");
+    assert_eq!(open_checklist_work(&pool, order_id).await, (0, 0));
+}
+
+/// QA F10 (2026-11-13): the trigger `archive_repeat_intake_orders` is gone; a
+/// repeat lead's failed outcome written directly no longer flips its draft
+/// order to `cancelled` without `cancelled_at` (the application withdraws
+/// such orders itself).
+#[tokio::test]
+async fn a_repeat_lead_failing_no_longer_cancels_orders_by_trigger() {
+    let Some((_app, pool, admin_id, _bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("f10-repeat");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let triggers: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_trigger WHERE tgname = 'repeat_intake_archive' AND NOT tgisinternal",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(triggers, 0);
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, legal_sex,
+                              qualification_status, compliance_status, intake_source,
+                              intake_model, repeat_patient_id)
+           VALUES ('Repeat', 'Muster', $1, DATE '1990-01-01', 'female', 'new',
+                   'pending', 'staff_wizard', 'patient_first', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.com"))
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, source_lead_id, intake_state, phase,
+                              status, needs_description, created_by)
+           VALUES ($1, $2, $3, 'draft', 'discovery', 'active', 'Synthetic needs', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(lead_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE leads SET failed_outcome_status = 'archived' WHERE id = $1")
+        .bind(lead_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "active");
 }
 
 // ---------------------------------------------------------------------------

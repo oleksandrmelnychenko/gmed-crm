@@ -211,6 +211,8 @@ export type ConciergeTask = {
   workflow_checklist_item_id?: string | null;
   workflow_checklist_scope_type?: "order" | "patient" | null;
   workflow_checklist_scope_id?: string | null;
+  /** Its checklist item belongs to a cancelled or completed order: the closed task is not reopened. */
+  order_checklist_closed?: boolean;
   external_assignee_type: string | null;
   external_assignee_name: string | null;
   external_assignee_phone: string | null;
@@ -385,13 +387,18 @@ export function canChangeConciergeTaskStatus(
 }
 
 export function availableConciergeTaskStatuses(
-  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage"> & { service_billing_locked?: boolean },
+  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage"> & { service_billing_locked?: boolean; order_checklist_closed?: boolean },
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ): ConciergeTaskStatus[] {
   if (!canChangeConciergeTaskStatus(task, actorId, actorRole)) return [task.status];
   // A billed concierge service is not taken back to work (concierge QA B S2-2).
   if (task.status === "completed" && task.service_billing_locked) return [task.status];
+  // A closed task of a cancelled or completed order's checklist stays closed
+  // (server: order_checklist_closed, QA F05).
+  if ((task.status === "completed" || task.status === "cancelled") && task.order_checklist_closed) {
+    return [task.status];
+  }
   const canReview = canModifyConciergeTask(task, actorId, actorRole);
   const transitions: Record<ConciergeTaskStatus, ConciergeTaskStatus[]> = canReview
     ? {

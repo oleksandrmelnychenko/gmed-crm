@@ -247,6 +247,17 @@ describe("filterConciergeTaskAssignees", () => {
     expect(conciergeTaskErrorMessage(refused, "ru", "x")).toContain("уже выставлен в счёт");
   });
 
+  it("offers no reopen for a closed task of a cancelled or completed order's checklist (QA F05)", () => {
+    for (const status of ["completed", "cancelled"] as const) {
+      const closed = task({ status, assigned_by: "ceo", assigned_by_role: "ceo" });
+      expect(availableConciergeTaskStatuses(closed, "ceo", "ceo").length).toBeGreaterThan(1);
+      expect(availableConciergeTaskStatuses({ ...closed, order_checklist_closed: true }, "ceo", "ceo")).toEqual([status]);
+    }
+    // An open task of such an order can still be closed.
+    const open = task({ status: "open", assigned_by: "ceo", assigned_by_role: "ceo", order_checklist_closed: true });
+    expect(availableConciergeTaskStatuses(open, "ceo", "ceo")).toContain("cancelled");
+  });
+
   it("lets the assignee rename or delete only its own checklist steps (owner decision 2026-11-12)", () => {
     const assigned = task({ assigned_by: "creator", assigned_by_role: "patient_manager", assigned_to: "assignee", can_manage: false });
     expect(canEditConciergeChecklistItem(assigned, { created_by: "assignee" }, "assignee", "concierge")).toBe(true);

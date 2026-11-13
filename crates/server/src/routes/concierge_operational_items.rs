@@ -307,6 +307,17 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           checklist_link.id AS workflow_checklist_item_id,
           checklist_link.scope_type AS workflow_checklist_scope_type,
           checklist_link.scope_id AS workflow_checklist_scope_id,
+          -- Reopening this task would revive checklist work of a cancelled or
+          -- completed order: the server refuses it, the work center hides it.
+          EXISTS (
+              SELECT 1
+              FROM workflow_checklist_items closed_item
+              LEFT JOIN orders closed_order ON closed_order.id = closed_item.order_id
+              WHERE closed_item.linked_task_id = t.id
+                AND closed_item.is_completed
+                AND (closed_item.not_required_reason = 'order_cancelled'
+                     OR closed_order.status IN ('cancelled', 'completed'))
+          ) AS order_checklist_closed,
           t.external_assignee_type, t.external_assignee_name,
           t.external_assignee_phone, t.external_assignee_email,
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -460,6 +471,17 @@ async fn list_items(
                   checklist_link.id AS workflow_checklist_item_id,
                   checklist_link.scope_type AS workflow_checklist_scope_type,
                   checklist_link.scope_id AS workflow_checklist_scope_id,
+                  -- Reopening this task would revive checklist work of a cancelled or
+                  -- completed order: the server refuses it, the work center hides it.
+                  EXISTS (
+                      SELECT 1
+                      FROM workflow_checklist_items closed_item
+                      LEFT JOIN orders closed_order ON closed_order.id = closed_item.order_id
+                      WHERE closed_item.linked_task_id = t.id
+                        AND closed_item.is_completed
+                        AND (closed_item.not_required_reason = 'order_cancelled'
+                             OR closed_order.status IN ('cancelled', 'completed'))
+                  ) AS order_checklist_closed,
                   t.external_assignee_type, t.external_assignee_name,
                   t.external_assignee_phone, t.external_assignee_email,
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -5130,6 +5152,7 @@ fn build_item_json(
         "workflow_checklist_item_id": row.try_get::<Option<Uuid>, _>("workflow_checklist_item_id").unwrap_or_default(),
         "workflow_checklist_scope_type": row.try_get::<Option<String>, _>("workflow_checklist_scope_type").unwrap_or_default(),
         "workflow_checklist_scope_id": row.try_get::<Option<Uuid>, _>("workflow_checklist_scope_id").unwrap_or_default(),
+        "order_checklist_closed": row.try_get::<bool, _>("order_checklist_closed").unwrap_or(false),
         "external_assignee_type": row.try_get::<Option<String>, _>("external_assignee_type").unwrap_or_default(),
         "external_assignee_name": row.try_get::<Option<String>, _>("external_assignee_name").unwrap_or_default(),
         "external_assignee_phone": row.try_get::<Option<String>, _>("external_assignee_phone").unwrap_or_default(),
@@ -5209,6 +5232,23 @@ async fn sync_linked_checklist_items(
     status: &str,
     actor_id: Uuid,
 ) -> Result<Vec<crate::routes::workflow_checklists::ChecklistItemSync>, axum::response::Response> {
+    // Reopening a task must not revive a checklist item of a cancelled or
+    // completed order (QA F05); the whole status change is refused.
+    if previous_status != status
+        && matches!(previous_status, "completed" | "cancelled")
+        && !matches!(status, "completed" | "cancelled")
+    {
+        match crate::routes::workflow_checklists::task_reopen_blocked_by_closed_order(tx, item_id)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) => return Err(crate::routes::workflow_checklists::order_checklist_closed()),
+            Err(error) => {
+                tracing::error!(error = %error, item_id = %item_id, "check checklist items of a reopened task");
+                return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
+            }
+        }
+    }
     crate::routes::workflow_checklists::sync_checklist_items_for_task_status(
         tx,
         item_id,
