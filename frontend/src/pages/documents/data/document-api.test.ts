@@ -157,11 +157,25 @@ describe("document preview API", () => {
       cache: "no-store",
     });
     expect(openSpy).not.toHaveBeenCalled();
-    expect(preview).toEqual({
+    expect(preview).toMatchObject({
       contentType: "application/pdf",
       url: "blob:inline-preview",
     });
     expect(previewBlob?.type).toBe("application/pdf");
+    // The bytes travel along so the dialog draws the pages with pdf.js and
+    // never depends on the browser's built-in PDF viewer (owner 2026-11-14).
+    expect(new TextDecoder().decode(preview.pdfData)).toBe("%PDF-1.7");
+  });
+
+  it("hands no PDF bytes for previews that are not a PDF", async () => {
+    apiFetchFileMock.mockResolvedValue({
+      blob: new Blob(["hello"], { type: "text/plain" }),
+      contentType: "text/plain",
+    });
+
+    const preview = await createDocumentPreviewObjectUrl("text-document");
+
+    expect(preview.pdfData).toBeUndefined();
   });
 
   it("neutralizes legacy active content before creating a preview URL", async () => {

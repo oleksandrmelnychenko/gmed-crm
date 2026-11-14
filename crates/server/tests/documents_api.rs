@@ -6589,6 +6589,31 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     .execute(&pool)
     .await
     .unwrap();
+    // The plan names the visit by the doctor's specialization and prints the
+    // day's preparation note, never the doctor, the clinic or the place
+    // (owner 2026-11-14).
+    sqlx::query(
+        r#"UPDATE appointments
+           SET title = $2, time_start = '09:30', time_end = '10:30',
+               category = 'consultation', location = $3,
+               patient_preparation_note = 'Bitte nicht frühstücken!'
+           WHERE id = $1"#,
+    )
+    .bind(appointment_id)
+    .bind(format!("Doctor {tag}"))
+    .bind(format!("Clinic Street 1, City {tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO provider_doctor_specializations (doctor_id, specialization_id, is_primary)
+           SELECT $1, id, TRUE FROM medical_specializations WHERE code = 'kardiologie'
+           ON CONFLICT DO NOTHING"#,
+    )
+    .bind(doctor_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, catalog_body) = json_request(
         &app,
@@ -6628,6 +6653,27 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     assert!(preview_html.contains("Behandlungsplan"));
     assert!(preview_html.contains("Bitte nüchtern bleiben"));
     assert!(!preview_html.contains("Patient benötigt Dolmetscherkoordination"));
+    assert!(preview_html.contains("Mi., 15.04.2026"), "{preview_html}");
+    assert!(
+        preview_html.contains("Bitte nicht frühstücken!"),
+        "{preview_html}"
+    );
+    assert!(
+        preview_html.contains("Beratung – Kardiologie"),
+        "{preview_html}"
+    );
+    assert!(preview_html.contains("09:30"), "{preview_html}");
+    for hidden in [
+        format!("Doctor {tag}"),
+        format!("Clinic {tag}"),
+        format!("City {tag}"),
+        "Leistungserbringer".to_string(),
+        "Arzt:".to_string(),
+        "Ort:".to_string(),
+        "10:30".to_string(),
+    ] {
+        assert!(!preview_html.contains(&hidden), "{hidden}: {preview_html}");
+    }
 
     let (status, detail_body) = json_request(
         &app,
@@ -6655,6 +6701,8 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     let pdf_text = extract_pdf_text(&bytes);
     assert!(!pdf_text.contains("Planungsnotiz"));
     assert!(!pdf_text.contains("Patient benötigt Dolmetscherkoordination"));
+    assert!(!pdf_text.contains("Leistungserbringer"), "{pdf_text}");
+    assert!(!pdf_text.contains(&format!("Doctor {tag}")), "{pdf_text}");
     // The patient's plan is no working document (QA round 14).
     assert!(!pdf_text.contains("Arbeitsdokument"), "{pdf_text}");
 }

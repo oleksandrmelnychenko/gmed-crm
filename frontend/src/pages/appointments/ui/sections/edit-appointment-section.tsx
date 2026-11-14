@@ -1322,6 +1322,45 @@ function useEditAppointmentSectionContentContent({
             rows={3}
           />
         </Field>
+        {/* The patient's treatment plan names neither the doctor nor the
+            clinic (owner 2026-11-14): this line replaces the generated
+            «Untersuchung und Beratung – <Fachrichtung>». */}
+        <Field compact label={lang === "de" ? "Text für den Patienten (Behandlungsplan)" : "Текст для пациента (план лечения)"}>
+          <Input
+            value={form.patientPlanText ?? ""}
+            maxLength={300}
+            onChange={(event) =>
+              setFormFromUser((current) => ({
+                ...current,
+                patientPlanText: event.target.value,
+              }))
+            }
+            className={inputClassName}
+          />
+          <span className="text-xs text-muted-foreground">
+            {lang === "de"
+              ? "Ohne Arzt und Klinik, z. B. «Präoperative Untersuchung beim Kardiologen (EKG)». Leer: Fachrichtung des Arztes."
+              : "Без врача и клиники, например «Предоперационное обследование кардиолога (ЭКГ)». Пусто — по специализации врача."}
+          </span>
+        </Field>
+        <Field compact label={lang === "de" ? "Hinweis für den Patienten zum Tag" : "Указание пациенту на этот день"}>
+          <Input
+            value={form.patientPreparationNote ?? ""}
+            maxLength={300}
+            onChange={(event) =>
+              setFormFromUser((current) => ({
+                ...current,
+                patientPreparationNote: event.target.value,
+              }))
+            }
+            className={inputClassName}
+          />
+          <span className="text-xs text-muted-foreground">
+            {lang === "de"
+              ? "Steht fett unter dem Tag im Behandlungsplan, z. B. «Bitte nicht frühstücken!»."
+              : "Печатается жирным под днём в плане лечения, например «Пожалуйста, не завтракайте!»."}
+          </span>
+        </Field>
         </section>
         {detail.recurrence_frequency ? (
           <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">

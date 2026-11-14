@@ -77,6 +77,12 @@ export type DocumentDetailBundle = {
 export type DocumentPreviewObjectUrl = {
   contentType: string;
   url: string;
+  /**
+   * The bytes of a PDF preview. The preview draws them with pdf.js, because a
+   * PDF `<iframe>` stays blank where the browser's built-in viewer is missing
+   * or switched off (owner report 2026-11-14, generated treatment plan).
+   */
+  pdfData?: ArrayBuffer;
 };
 
 function normalizedMime(contentType?: string | null) {
@@ -241,10 +247,14 @@ export async function createDocumentPreviewObjectUrl(
 ): Promise<DocumentPreviewObjectUrl> {
   const { blob, contentType, filename } = await fetchDocumentBlob(id, true);
   const previewBlob = await safePreviewBlob(blob, contentType, filename ?? undefined);
+  const previewType = previewBlob.type || "application/octet-stream";
 
   return {
-    contentType: previewBlob.type || "application/octet-stream",
+    contentType: previewType,
     url: URL.createObjectURL(previewBlob),
+    ...(previewType === "application/pdf"
+      ? { pdfData: await previewBlob.arrayBuffer() }
+      : {}),
   };
 }
 

@@ -227,6 +227,10 @@ export type AppointmentDetail = AppointmentListItem & {
   preparation_notes: string | null;
   followup_notes: string | null;
   notes: string | null;
+  /** The visit's own line in the patient's treatment plan (owner 2026-11-14). */
+  patient_plan_text?: string | null;
+  /** Printed under the visit's day in the treatment plan («Bitte nüchtern …»). */
+  patient_preparation_note?: string | null;
   order_id: string | null;
   order_number: string | null;
   recurrence_parent_series_id: string | null;
@@ -658,6 +662,12 @@ export type AppointmentFormState = {
   location: string;
   category: string;
   notes: string;
+  /**
+   * The visit's line and preparation note in the patient's treatment plan.
+   * Only the edit form carries them; left out, nothing is sent.
+   */
+  patientPlanText?: string;
+  patientPreparationNote?: string;
   skipMedicalProviderBinding: boolean;
   repeatEnabled: boolean;
   repeatFrequency: AppointmentRecurrenceFrequency;

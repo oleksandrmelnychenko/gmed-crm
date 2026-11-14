@@ -340,17 +340,35 @@ struct TextBlockDefinition {
     uk: &'static str,
 }
 
+/// One line of the patient's treatment plan. The plan never names the doctor,
+/// the clinic or the place (owner 2026-11-14: the patient must not go to the
+/// doctor directly); a visit is described by its own patient text, a title
+/// that names no person or institution, or its specialization.
 #[derive(Clone)]
 struct GeneratedAppointmentLine {
     date: NaiveDate,
     time_start: Option<NaiveTime>,
-    time_end: Option<NaiveTime>,
+    kind: TreatmentPlanLineKind,
     title: String,
-    provider_name: Option<String>,
-    doctor_name: Option<String>,
-    location: Option<String>,
+    /// The raw appointment category (`consultation`, `imaging`, …).
     category: Option<String>,
-    notes: Option<String>,
+    /// The doctor's (else the institution's) specialization in the document
+    /// language.
+    specialization: Option<String>,
+    patient_plan_text: Option<String>,
+    patient_preparation_note: Option<String>,
+    /// Names the line must never print: the doctor, the doctor's surname and
+    /// the institution.
+    private_names: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TreatmentPlanLineKind {
+    MedicalVisit,
+    OtherAppointment,
+    /// A GMED concierge service with a start time (transfer, pick-up, …),
+    /// carrying its `service_kind`.
+    ConciergeService(&'static str),
 }
 
 #[derive(Clone)]
@@ -384,6 +402,9 @@ struct GeneratedTreatmentPlanContext {
     introduction: Option<String>,
     closing_note: Option<String>,
     treatment_plan_note: Option<String>,
+    /// The patient's own language when it differs from the document's: the
+    /// day headings name the weekday in both («Mo./Пн., 20.04.2026»).
+    weekday_second_language: Option<String>,
     appointments: Vec<GeneratedAppointmentLine>,
     text_blocks: Vec<String>,
     agency: AgencyContractSettings,
@@ -7631,21 +7652,435 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
 
 /// The category of an appointment on a German plan: stored as a technical
 /// key by some screens, free text by others (QA 2026-11-01).
-fn appointment_category_label(language: &str, category: &str) -> String {
-    let german = match category.trim().to_ascii_lowercase().as_str() {
-        _ if !language.starts_with("de") => None,
-        "consultation" => Some("Beratung"),
-        "examination" => Some("Untersuchung"),
-        "diagnostics" => Some("Diagnostik"),
-        "treatment" => Some("Behandlung"),
-        "surgery" => Some("Operation"),
-        "transfer" => Some("Transfer"),
-        "hotel" => Some("Hotel"),
-        "interpreter" => Some("Dolmetscher"),
-        "followup" | "follow_up" => Some("Nachsorge"),
-        _ => None,
+/// The kind of a medical visit in the patient's plan, from its category.
+/// `None` for a visit without a known category.
+fn treatment_plan_visit_kind(language: &str, category: Option<&str>) -> Option<&'static str> {
+    let category = category?.trim().to_ascii_lowercase();
+    let kind = match (category.as_str(), language) {
+        ("consultation", "ru") => "Консультация",
+        ("consultation", "uk") => "Консультація",
+        ("consultation", "en") => "Consultation",
+        ("consultation", _) => "Beratung",
+        ("examination", "ru") => "Обследование",
+        ("examination", "uk") => "Обстеження",
+        ("examination", "en") => "Examination",
+        ("examination", _) => "Untersuchung",
+        ("screening", "ru") => "Профилактическое обследование",
+        ("screening", "uk") => "Профілактичне обстеження",
+        ("screening", "en") => "Check-up",
+        ("screening", _) => "Vorsorgeuntersuchung",
+        ("diagnostics" | "imaging", "ru") => "Диагностика",
+        ("diagnostics" | "imaging", "uk") => "Діагностика",
+        ("diagnostics" | "imaging", "en") => "Diagnostics",
+        ("diagnostics" | "imaging", _) => "Diagnostik",
+        ("treatment", "ru") => "Лечение",
+        ("treatment", "uk") => "Лікування",
+        ("treatment", "en") => "Treatment",
+        ("treatment", _) => "Behandlung",
+        ("surgery", "ru") => "Операция",
+        ("surgery", "uk") => "Операція",
+        ("surgery", "en") => "Surgery",
+        ("surgery", _) => "Operation",
+        ("followup" | "follow_up", "ru") => "Контрольный осмотр",
+        ("followup" | "follow_up", "uk") => "Контрольний огляд",
+        ("followup" | "follow_up", "en") => "Follow-up visit",
+        ("followup" | "follow_up", _) => "Kontrolluntersuchung",
+        _ => return None,
     };
-    german.map_or_else(|| category.to_string(), ToOwned::to_owned)
+    Some(kind)
+}
+
+/// «Examination and consultation» — a visit with a specialization but no
+/// known category.
+fn treatment_plan_default_visit_kind(language: &str) -> &'static str {
+    match language {
+        "ru" => "Обследование и консультация",
+        "uk" => "Обстеження та консультація",
+        "en" => "Examination and consultation",
+        _ => "Untersuchung und Beratung",
+    }
+}
+
+/// The neutral line of a visit nothing else describes.
+fn treatment_plan_neutral_visit(language: &str) -> &'static str {
+    match language {
+        "ru" => "Приём у врача",
+        "uk" => "Прийом у лікаря",
+        "en" => "Medical appointment",
+        _ => "Ärztlicher Termin",
+    }
+}
+
+/// The line of a GMED concierge service: the patient learns that GMED
+/// meets or drives them, never the driver's or the vendor's name.
+fn treatment_plan_concierge_line(language: &str, service_kind: &str) -> &'static str {
+    match (service_kind, language) {
+        ("transfer", "ru") => "Трансфер",
+        ("transfer", "uk") => "Трансфер",
+        ("transfer", _) => "Transfer",
+        ("vip_terminal", "ru") => "VIP-сервис в аэропорту",
+        ("vip_terminal", "uk") => "VIP-сервіс в аеропорту",
+        ("vip_terminal", "en") => "VIP airport service",
+        ("vip_terminal", _) => "VIP-Service am Flughafen",
+        (_, "ru") => "Встреча",
+        (_, "uk") => "Зустріч",
+        (_, "en") => "Meeting",
+        _ => "Treffen",
+    }
+}
+
+/// The concierge services that appear in the patient's plan: GMED meets,
+/// picks up or accompanies the patient at a time.
+const TREATMENT_PLAN_CONCIERGE_KINDS: [&str; 4] = [
+    "transfer",
+    "chauffeur",
+    "vip_terminal",
+    "translation_support",
+];
+
+fn treatment_plan_concierge_kind(service_kind: &str) -> Option<&'static str> {
+    TREATMENT_PLAN_CONCIERGE_KINDS
+        .iter()
+        .copied()
+        .find(|kind| *kind == service_kind)
+}
+
+/// Whether a staff title may be printed for the patient: not empty and
+/// naming neither the doctor (full name, surname, a «Herr …»/«Dr. …» form)
+/// nor the institution. Visit titles are often just the doctor's name
+/// («Herr Ulrich Hölzenbein», owner 2026-11-14).
+fn treatment_plan_title_is_printable(title: &str, private_names: &[String]) -> bool {
+    let title = title.trim();
+    if title.is_empty() {
+        return false;
+    }
+    let lowered = title.to_lowercase();
+    const PERSON_PREFIXES: [&str; 12] = [
+        "herr ",
+        "frau ",
+        "dr.",
+        "dr ",
+        "prof.",
+        "prof ",
+        "mr ",
+        "mr.",
+        "mrs ",
+        "ms ",
+        "г-н",
+        "доктор",
+    ];
+    if PERSON_PREFIXES
+        .iter()
+        .any(|prefix| lowered.starts_with(prefix))
+    {
+        return false;
+    }
+    let words: Vec<&str> = lowered
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    !private_names.iter().any(|name| {
+        let name = name.trim().to_lowercase();
+        if name.chars().count() < 3 {
+            return false;
+        }
+        if name.contains(' ') || name.contains('-') {
+            lowered.contains(&name)
+        } else {
+            words.contains(&name.as_str())
+        }
+    })
+}
+
+/// The description of one plan line (owner 2026-11-14): the visit's own
+/// patient text, else a title that names no person or institution, else the
+/// visit kind with the specialization, else a neutral word.
+fn treatment_plan_line_text(item: &GeneratedAppointmentLine, language: &str) -> String {
+    if let Some(text) = item
+        .patient_plan_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return text.to_string();
+    }
+    match item.kind {
+        TreatmentPlanLineKind::ConciergeService(service_kind) => {
+            treatment_plan_concierge_line(language, service_kind).to_string()
+        }
+        TreatmentPlanLineKind::OtherAppointment
+            if treatment_plan_title_is_printable(&item.title, &item.private_names) =>
+        {
+            item.title.trim().to_string()
+        }
+        TreatmentPlanLineKind::OtherAppointment => {
+            treatment_plan_concierge_line(language, "meeting").to_string()
+        }
+        TreatmentPlanLineKind::MedicalVisit => {
+            let specialization = item
+                .specialization
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let kind = treatment_plan_visit_kind(language, item.category.as_deref());
+            match (kind, specialization) {
+                (Some(kind), Some(specialization)) => format!("{kind} – {specialization}"),
+                (None, Some(specialization)) => format!(
+                    "{} – {specialization}",
+                    treatment_plan_default_visit_kind(language)
+                ),
+                _ if treatment_plan_title_is_printable(&item.title, &item.private_names) => {
+                    item.title.trim().to_string()
+                }
+                (Some(kind), None) => kind.to_string(),
+                (None, None) => treatment_plan_neutral_visit(language).to_string(),
+            }
+        }
+    }
+}
+
+fn short_weekday(language: &str, weekday: Weekday) -> &'static str {
+    match (language, weekday) {
+        ("ru", Weekday::Mon) => "Пн.",
+        ("ru", Weekday::Tue) => "Вт.",
+        ("ru", Weekday::Wed) => "Ср.",
+        ("ru", Weekday::Thu) => "Чт.",
+        ("ru", Weekday::Fri) => "Пт.",
+        ("ru", Weekday::Sat) => "Сб.",
+        ("ru", Weekday::Sun) => "Вс.",
+        ("uk", Weekday::Mon) => "Пн.",
+        ("uk", Weekday::Tue) => "Вт.",
+        ("uk", Weekday::Wed) => "Ср.",
+        ("uk", Weekday::Thu) => "Чт.",
+        ("uk", Weekday::Fri) => "Пт.",
+        ("uk", Weekday::Sat) => "Сб.",
+        ("uk", Weekday::Sun) => "Нд.",
+        ("en", Weekday::Mon) => "Mon.",
+        ("en", Weekday::Tue) => "Tue.",
+        ("en", Weekday::Wed) => "Wed.",
+        ("en", Weekday::Thu) => "Thu.",
+        ("en", Weekday::Fri) => "Fri.",
+        ("en", Weekday::Sat) => "Sat.",
+        ("en", Weekday::Sun) => "Sun.",
+        (_, Weekday::Mon) => "Mo.",
+        (_, Weekday::Tue) => "Di.",
+        (_, Weekday::Wed) => "Mi.",
+        (_, Weekday::Thu) => "Do.",
+        (_, Weekday::Fri) => "Fr.",
+        (_, Weekday::Sat) => "Sa.",
+        (_, Weekday::Sun) => "So.",
+    }
+}
+
+/// The day heading of the plan: the German short weekday and, when the
+/// patient's language differs, theirs too — «Mo./Пн., 20.04.2026».
+fn treatment_plan_day_heading(
+    date: NaiveDate,
+    language: &str,
+    second_language: Option<&str>,
+) -> String {
+    let mut weekdays = vec![short_weekday("de", date.weekday())];
+    for extra in [Some(language), second_language].into_iter().flatten() {
+        let label = short_weekday(extra, date.weekday());
+        if !weekdays.contains(&label) {
+            weekdays.push(label);
+        }
+    }
+    let weekdays = weekdays
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            // «Mo./Пн.»: only the last weekday keeps its full stop.
+            if index + 1 < weekdays.len() {
+                label.trim_end_matches('.')
+            } else {
+                *label
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("./");
+    format!("{weekdays}, {}", date.format("%d.%m.%Y"))
+}
+
+/// The preparation notes of one day, each once, in plan order.
+fn treatment_plan_day_notes(items: &[&GeneratedAppointmentLine]) -> Vec<String> {
+    let mut notes: Vec<String> = Vec::new();
+    for item in items {
+        if let Some(note) = item
+            .patient_preparation_note
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            && !notes.iter().any(|known| known == note)
+        {
+            notes.push(note.to_string());
+        }
+    }
+    notes
+}
+
+fn treatment_plan_time(item: &GeneratedAppointmentLine) -> String {
+    item.time_start
+        .map(|value| value.format("%H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// The patient's language for the second weekday of the day headings; none
+/// when the patient reads the document's language.
+fn treatment_plan_second_language(
+    document_language: &str,
+    patient_languages: &[String],
+) -> Option<String> {
+    let languages = patient_languages
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if languages.iter().any(|value| value == document_language) {
+        return None;
+    }
+    languages
+        .into_iter()
+        .find(|value| matches!(value.as_str(), "ru" | "uk" | "en"))
+}
+
+#[cfg(test)]
+mod treatment_plan_line_tests {
+    use super::{
+        GeneratedAppointmentLine, TreatmentPlanLineKind, treatment_plan_day_heading,
+        treatment_plan_day_notes, treatment_plan_line_text, treatment_plan_second_language,
+        treatment_plan_title_is_printable,
+    };
+    use chrono::{NaiveDate, NaiveTime};
+
+    fn visit(title: &str) -> GeneratedAppointmentLine {
+        GeneratedAppointmentLine {
+            date: NaiveDate::from_ymd_opt(2026, 4, 20).unwrap(),
+            time_start: NaiveTime::from_hms_opt(10, 0, 0),
+            kind: TreatmentPlanLineKind::MedicalVisit,
+            title: title.to_string(),
+            category: None,
+            specialization: None,
+            patient_plan_text: None,
+            patient_preparation_note: None,
+            private_names: vec![
+                "Herr Ulrich Hölzenbein".to_string(),
+                "Hölzenbein".to_string(),
+                "Klinik am See".to_string(),
+            ],
+        }
+    }
+
+    #[test]
+    fn a_title_naming_the_doctor_or_the_clinic_is_never_printed() {
+        let names = visit("").private_names;
+        assert!(!treatment_plan_title_is_printable(
+            "Herr Ulrich Hölzenbein",
+            &names
+        ));
+        assert!(!treatment_plan_title_is_printable(
+            "Termin Hölzenbein",
+            &names
+        ));
+        assert!(!treatment_plan_title_is_printable("Dr. Muster", &names));
+        assert!(!treatment_plan_title_is_printable(
+            "Vorgespräch Klinik am See",
+            &names
+        ));
+        assert!(!treatment_plan_title_is_printable("  ", &names));
+        assert!(treatment_plan_title_is_printable("Belastungs-EKG", &names));
+    }
+
+    #[test]
+    fn a_medical_visit_is_named_by_its_specialization_never_by_the_doctor() {
+        let mut item = visit("Herr Ulrich Hölzenbein");
+        item.specialization = Some("Kardiologie".to_string());
+        assert_eq!(
+            treatment_plan_line_text(&item, "de"),
+            "Untersuchung und Beratung – Kardiologie"
+        );
+        item.category = Some("consultation".to_string());
+        assert_eq!(
+            treatment_plan_line_text(&item, "de"),
+            "Beratung – Kardiologie"
+        );
+        assert_eq!(
+            treatment_plan_line_text(&item, "ru"),
+            "Консультация – Kardiologie"
+        );
+
+        // No specialization: a meaningful title, else a neutral word.
+        item.specialization = None;
+        assert_eq!(treatment_plan_line_text(&item, "de"), "Beratung");
+        item.category = None;
+        assert_eq!(treatment_plan_line_text(&item, "de"), "Ärztlicher Termin");
+        item.title = "Belastungs-EKG".to_string();
+        assert_eq!(treatment_plan_line_text(&item, "de"), "Belastungs-EKG");
+
+        // The staff's own patient text always wins.
+        item.patient_plan_text = Some("Предоперационное обследование кардиолога (ЭКГ)".to_string());
+        assert_eq!(
+            treatment_plan_line_text(&item, "de"),
+            "Предоперационное обследование кардиолога (ЭКГ)"
+        );
+    }
+
+    #[test]
+    fn concierge_services_and_other_appointments_name_no_person() {
+        let mut item = visit("");
+        item.kind = TreatmentPlanLineKind::ConciergeService("chauffeur");
+        assert_eq!(treatment_plan_line_text(&item, "ru"), "Встреча");
+        assert_eq!(treatment_plan_line_text(&item, "de"), "Treffen");
+        item.kind = TreatmentPlanLineKind::ConciergeService("transfer");
+        assert_eq!(treatment_plan_line_text(&item, "de"), "Transfer");
+        item.kind = TreatmentPlanLineKind::OtherAppointment;
+        item.title = "Reisebriefing".to_string();
+        assert_eq!(treatment_plan_line_text(&item, "de"), "Reisebriefing");
+        item.title = "Herr Ulrich Hölzenbein".to_string();
+        assert_eq!(treatment_plan_line_text(&item, "de"), "Treffen");
+    }
+
+    #[test]
+    fn the_day_heading_names_the_weekday_in_german_and_in_the_patients_language() {
+        let monday = NaiveDate::from_ymd_opt(2026, 4, 20).unwrap();
+        assert_eq!(
+            treatment_plan_day_heading(monday, "de", None),
+            "Mo., 20.04.2026"
+        );
+        assert_eq!(
+            treatment_plan_day_heading(monday, "de", Some("ru")),
+            "Mo./Пн., 20.04.2026"
+        );
+        assert_eq!(
+            treatment_plan_day_heading(monday, "ru", None),
+            "Mo./Пн., 20.04.2026"
+        );
+        assert_eq!(
+            treatment_plan_second_language("de", &["uk".to_string(), "en".to_string()]),
+            Some("uk".to_string())
+        );
+        assert_eq!(
+            treatment_plan_second_language("de", &["ar".to_string(), "en".to_string()]),
+            Some("en".to_string())
+        );
+        // A patient who reads German gets the German weekday only.
+        assert_eq!(
+            treatment_plan_second_language("de", &["de".to_string(), "en".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn the_preparation_notes_of_a_day_are_printed_once() {
+        let mut first = visit("");
+        first.patient_preparation_note = Some("Пожалуйста, не завтракайте!".to_string());
+        let mut second = visit("");
+        second.patient_preparation_note = Some(" Пожалуйста, не завтракайте! ".to_string());
+        let third = visit("");
+        assert_eq!(
+            treatment_plan_day_notes(&[&first, &second, &third]),
+            vec!["Пожалуйста, не завтракайте!".to_string()]
+        );
+    }
 }
 
 fn localized_weekday(language: &str, weekday: Weekday) -> &'static str {
@@ -7686,15 +8121,6 @@ fn format_localized_date(date: NaiveDate, language: &str) -> String {
             localized_weekday(language, date.weekday()),
             date.format("%d.%m.%Y")
         ),
-    }
-}
-
-fn format_time_range(start: Option<NaiveTime>, end: Option<NaiveTime>) -> String {
-    match (start, end) {
-        (Some(start), Some(end)) => format!("{} - {}", start.format("%H:%M"), end.format("%H:%M")),
-        (Some(start), None) => start.format("%H:%M").to_string(),
-        (None, Some(end)) => format!("until {}", end.format("%H:%M")),
-        (None, None) => "TBD".to_string(),
     }
 }
 
@@ -9424,69 +9850,27 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
     } else {
         for (date, items) in appointments_by_day {
             schedule_markup.push_str(&format!(
-                "<section class=\"day\"><h3>{}</h3><div class=\"entries\">",
-                escape_html(&format_localized_date(date, &context.language))
+                "<section class=\"day\"><h3><u>{}</u></h3>",
+                escape_html(&treatment_plan_day_heading(
+                    date,
+                    &context.language,
+                    context.weekday_second_language.as_deref(),
+                ))
             ));
-            for item in items {
-                let mut meta = Vec::new();
-                if let Some(provider_name) = item
-                    .provider_name
-                    .as_deref()
-                    .filter(|value| !value.is_empty())
-                {
-                    meta.push(format!(
-                        "{}: {}",
-                        translated_label(&context.language, "provider"),
-                        escape_html(provider_name)
-                    ));
-                }
-                if let Some(doctor_name) = item
-                    .doctor_name
-                    .as_deref()
-                    .filter(|value| !value.is_empty())
-                {
-                    meta.push(format!(
-                        "{}: {}",
-                        translated_label(&context.language, "doctor"),
-                        escape_html(doctor_name)
-                    ));
-                }
-                if let Some(location) = item.location.as_deref().filter(|value| !value.is_empty()) {
-                    meta.push(format!(
-                        "{}: {}",
-                        translated_label(&context.language, "location"),
-                        escape_html(location)
-                    ));
-                }
-                if let Some(category) = item.category.as_deref().filter(|value| !value.is_empty()) {
-                    meta.push(format!(
-                        "{}: {}",
-                        translated_label(&context.language, "category"),
-                        escape_html(category)
-                    ));
-                }
-
+            for note in treatment_plan_day_notes(&items) {
                 schedule_markup.push_str(&format!(
-                    "<article class=\"entry\"><div class=\"time\">{}</div><div class=\"content\"><div class=\"headline\">{}</div>{}{}</div></article>",
-                    escape_html(&format_time_range(item.time_start, item.time_end)),
-                    escape_html(&item.title),
-                    if meta.is_empty() {
-                        String::new()
-                    } else {
-                        format!("<div class=\"meta\">{}</div>", meta.join(" · "))
-                    },
-                    item.notes
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(|value| {
-                            format!(
-                                "<div class=\"note\"><span>{}:</span> {}</div>",
-                                escape_html(translated_label(&context.language, "appointment_notes")),
-                                escape_html(value)
-                            )
-                        })
-                        .unwrap_or_default()
+                    "<p class=\"day-note\"><strong><u>{}</u></strong></p>",
+                    escape_html(&note)
+                ));
+            }
+            schedule_markup.push_str("<div class=\"entries\">");
+            // «09:30 Встреча»: the start time and the description, nothing
+            // about the doctor, the clinic or the place (owner 2026-11-14).
+            for item in items {
+                schedule_markup.push_str(&format!(
+                    "<article class=\"entry\"><div class=\"time\">{}</div><div class=\"content\"><div class=\"headline\">{}</div></div></article>",
+                    escape_html(&treatment_plan_time(item)),
+                    escape_html(&treatment_plan_line_text(item, &context.language)),
                 ));
             }
             schedule_markup.push_str("</div></section>");
@@ -9772,7 +10156,11 @@ fn build_treatment_plan_pdf(
 
     for (date, items) in grouped_treatment_plan_appointments(context) {
         layout.text_block(
-            &format_localized_date(date, &context.language),
+            &treatment_plan_day_heading(
+                date,
+                &context.language,
+                context.weekday_second_language.as_deref(),
+            ),
             13.0,
             true,
             0.0,
@@ -9780,90 +10168,36 @@ fn build_treatment_plan_pdf(
             3.0,
             2.0,
         );
-
-        for item in items {
+        for note in treatment_plan_day_notes(&items) {
             layout.text_block(
-                &format!(
-                    "{}  {}",
-                    format_time_range(item.time_start, item.time_end),
-                    item.title
-                ),
+                &note,
                 11.5,
                 true,
+                0.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                1.5,
+            );
+        }
+
+        // «09:30 Встреча»: the start time and the description, nothing about
+        // the doctor, the clinic or the place (owner 2026-11-14).
+        for item in items {
+            let time = treatment_plan_time(item);
+            let line = treatment_plan_line_text(item, &context.language);
+            layout.text_block(
+                &if time.is_empty() {
+                    line
+                } else {
+                    format!("{time}  {line}")
+                },
+                11.5,
+                false,
                 4.0,
                 TreatmentPlanPdfColor::Body,
                 0.0,
                 1.0,
             );
-
-            let mut meta = Vec::new();
-            if let Some(provider_name) = item
-                .provider_name
-                .as_deref()
-                .filter(|value| !value.is_empty())
-            {
-                meta.push(format!(
-                    "{}: {}",
-                    translated_label(&context.language, "provider"),
-                    provider_name
-                ));
-            }
-            if let Some(doctor_name) = item
-                .doctor_name
-                .as_deref()
-                .filter(|value| !value.is_empty())
-            {
-                meta.push(format!(
-                    "{}: {}",
-                    translated_label(&context.language, "doctor"),
-                    doctor_name
-                ));
-            }
-            if let Some(location) = item.location.as_deref().filter(|value| !value.is_empty()) {
-                meta.push(format!(
-                    "{}: {}",
-                    translated_label(&context.language, "location"),
-                    location
-                ));
-            }
-            if let Some(category) = item.category.as_deref().filter(|value| !value.is_empty()) {
-                meta.push(format!(
-                    "{}: {}",
-                    translated_label(&context.language, "category"),
-                    category
-                ));
-            }
-            if !meta.is_empty() {
-                layout.text_block(
-                    &meta.join(" · "),
-                    10.0,
-                    false,
-                    10.0,
-                    TreatmentPlanPdfColor::Muted,
-                    0.0,
-                    1.0,
-                );
-            }
-            if let Some(notes) = item
-                .notes
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                layout.text_block(
-                    &format!(
-                        "{}: {}",
-                        translated_label(&context.language, "appointment_notes"),
-                        notes
-                    ),
-                    10.0,
-                    false,
-                    10.0,
-                    TreatmentPlanPdfColor::Body,
-                    0.0,
-                    1.0,
-                );
-            }
             layout.spacer(1.0);
         }
     }
@@ -18703,13 +19037,46 @@ async fn generate_document(
             (preview, pdf_bytes)
         }
         "treatment_plan" => {
+            // The doctor's catalogue specialization (the primary one first),
+            // else the doctor's own Fachbereich, else — for a visit without a
+            // doctor — the institution's primary specialization. The doctor's
+            // and the institution's names are loaded only so that a title
+            // repeating them is never printed (owner 2026-11-14).
             let appointment_rows = match sqlx::query(
-                r#"SELECT a.id, a.date, a.time_start, a.time_end, a.title, a.location, a.category, a.notes,
+                r#"SELECT a.id, a.date, a.time_start, a.title, a.category, a.appointment_type,
+                          a.patient_plan_text, a.patient_preparation_note,
                           provider.name AS provider_name,
-                          doctor.name AS doctor_name
+                          doctor.name AS doctor_name,
+                          doctor.last_name AS doctor_last_name,
+                          doctor_spec.name_de AS doctor_spec_de,
+                          doctor_spec.name_en AS doctor_spec_en,
+                          doctor_spec.name_ru AS doctor_spec_ru,
+                          NULLIF(btrim(COALESCE(doctor.fachbereich, '')), '') AS doctor_fachbereich,
+                          provider_spec.name_de AS provider_spec_de,
+                          provider_spec.name_en AS provider_spec_en,
+                          provider_spec.name_ru AS provider_spec_ru
                    FROM appointments a
                    LEFT JOIN providers provider ON provider.id = a.provider_id
                    LEFT JOIN provider_doctors doctor ON doctor.id = a.doctor_id
+                   LEFT JOIN LATERAL (
+                       SELECT ms.name_de, ms.name_en, ms.name_ru
+                       FROM provider_doctor_specializations pds
+                       JOIN medical_specializations ms ON ms.id = pds.specialization_id
+                       WHERE pds.doctor_id = a.doctor_id
+                         AND ms.deleted_at IS NULL
+                       ORDER BY pds.is_primary DESC, ms.sort_order ASC, ms.name_de ASC
+                       LIMIT 1
+                   ) doctor_spec ON TRUE
+                   LEFT JOIN LATERAL (
+                       SELECT ms.name_de, ms.name_en, ms.name_ru
+                       FROM provider_specializations ps
+                       JOIN medical_specializations ms ON ms.id = ps.specialization_id
+                       WHERE ps.provider_id = a.provider_id
+                         AND a.doctor_id IS NULL
+                         AND ps.is_primary
+                         AND ms.deleted_at IS NULL
+                       LIMIT 1
+                   ) provider_spec ON TRUE
                    WHERE a.patient_id = $1
                      AND ($2::uuid IS NULL OR a.order_id = $2)
                      AND ($3::uuid IS NULL OR a.id = $3)
@@ -18732,35 +19099,65 @@ async fn generate_document(
                 }
             };
 
-            let appointments = appointment_rows
-                .into_iter()
-                .map(|row| GeneratedAppointmentLine {
-                    date: row
-                        .try_get::<NaiveDate, _>("date")
-                        .unwrap_or_else(|_| crate::app_time::today()),
-                    time_start: row
-                        .try_get::<Option<NaiveTime>, _>("time_start")
-                        .unwrap_or_default(),
-                    time_end: row
-                        .try_get::<Option<NaiveTime>, _>("time_end")
-                        .unwrap_or_default(),
-                    title: row.try_get::<String, _>("title").unwrap_or_default(),
-                    provider_name: row
-                        .try_get::<Option<String>, _>("provider_name")
-                        .unwrap_or_default(),
-                    doctor_name: row
-                        .try_get::<Option<String>, _>("doctor_name")
-                        .unwrap_or_default(),
-                    location: row
-                        .try_get::<Option<String>, _>("location")
-                        .unwrap_or_default(),
-                    category: row
-                        .try_get::<Option<String>, _>("category")
+            let localized_specialization = |row: &sqlx::postgres::PgRow, prefix: &str| {
+                let column = |suffix: &str| {
+                    row.try_get::<Option<String>, _>(format!("{prefix}_{suffix}").as_str())
                         .unwrap_or_default()
-                        .map(|category| appointment_category_label(language, &category)),
-                    notes: row
-                        .try_get::<Option<String>, _>("notes")
-                        .unwrap_or_default(),
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                };
+                match language {
+                    "ru" => column("ru").or_else(|| column("de")),
+                    "en" => column("en").or_else(|| column("de")),
+                    _ => column("de"),
+                }
+            };
+            let mut appointments = appointment_rows
+                .iter()
+                .map(|row| {
+                    let optional_text = |column: &str| {
+                        row.try_get::<Option<String>, _>(column)
+                            .unwrap_or_default()
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                    };
+                    let kind = match row
+                        .try_get::<String, _>("appointment_type")
+                        .unwrap_or_default()
+                        .as_str()
+                    {
+                        "medical" => TreatmentPlanLineKind::MedicalVisit,
+                        _ => TreatmentPlanLineKind::OtherAppointment,
+                    };
+                    let specialization = localized_specialization(row, "doctor_spec")
+                        .or_else(|| {
+                            // The free-text Fachbereich is German.
+                            if language == "de" {
+                                optional_text("doctor_fachbereich")
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| localized_specialization(row, "provider_spec"));
+                    let private_names = ["doctor_name", "doctor_last_name", "provider_name"]
+                        .into_iter()
+                        .filter_map(optional_text)
+                        .collect::<Vec<_>>();
+                    GeneratedAppointmentLine {
+                        date: row
+                            .try_get::<NaiveDate, _>("date")
+                            .unwrap_or_else(|_| crate::app_time::today()),
+                        time_start: row
+                            .try_get::<Option<NaiveTime>, _>("time_start")
+                            .unwrap_or_default(),
+                        kind,
+                        title: row.try_get::<String, _>("title").unwrap_or_default(),
+                        category: optional_text("category"),
+                        specialization,
+                        patient_plan_text: optional_text("patient_plan_text"),
+                        patient_preparation_note: optional_text("patient_preparation_note"),
+                        private_names,
+                    }
                 })
                 .collect::<Vec<_>>();
 
@@ -18770,6 +19167,72 @@ async fn generate_document(
                     "Treatment plan template requires at least one appointment in scope",
                 );
             }
+
+            // GMED meets, picks up or accompanies the patient: the timed
+            // concierge services of the same scope join the plan as their own
+            // lines («09:30 Встреча»), without the driver's or vendor's name.
+            let concierge_rows = match sqlx::query(
+                r#"SELECT cs.service_kind, cs.starts_at
+                   FROM concierge_services cs
+                   WHERE cs.patient_id = $1
+                     AND cs.starts_at IS NOT NULL
+                     AND cs.status <> 'cancelled'
+                     AND cs.service_kind = ANY($4)
+                     AND ($2::uuid IS NULL
+                          OR cs.order_id = $2
+                          OR cs.appointment_id IN (SELECT id FROM appointments WHERE order_id = $2))
+                     AND ($3::uuid IS NULL OR cs.appointment_id = $3)
+                   ORDER BY cs.starts_at ASC"#,
+            )
+            .bind(patient_uuid)
+            .bind(order_id)
+            .bind(appointment_id)
+            .bind(
+                TREATMENT_PLAN_CONCIERGE_KINDS
+                    .iter()
+                    .map(|kind| kind.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .fetch_all(&state.db)
+            .await
+            {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::error!(error = %e, patient_id = %patient_uuid, "load template concierge services");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to load appointment context",
+                    );
+                }
+            };
+            for row in concierge_rows {
+                let service_kind = row.try_get::<String, _>("service_kind").unwrap_or_default();
+                let Some(service_kind) = treatment_plan_concierge_kind(&service_kind) else {
+                    continue;
+                };
+                let Ok(starts_at) = row.try_get::<chrono::DateTime<chrono::Utc>, _>("starts_at")
+                else {
+                    continue;
+                };
+                let local = crate::app_time::local(starts_at).naive_local();
+                appointments.push(GeneratedAppointmentLine {
+                    date: local.date(),
+                    time_start: Some(local.time()),
+                    kind: TreatmentPlanLineKind::ConciergeService(service_kind),
+                    title: String::new(),
+                    category: None,
+                    specialization: None,
+                    patient_plan_text: None,
+                    patient_preparation_note: None,
+                    private_names: Vec::new(),
+                });
+            }
+            // A stable sort keeps the visits' own order within one start time;
+            // a line without a time ends its day.
+            appointments
+                .sort_by_key(|item| (item.date, item.time_start.is_none(), item.time_start));
+            let weekday_second_language =
+                treatment_plan_second_language(language, &patient_languages);
 
             // The planning note is the staff's agreement note (QA 2026-11-02);
             // the plan the patient receives never prints it.
@@ -18792,6 +19255,7 @@ async fn generate_document(
                 introduction,
                 closing_note,
                 treatment_plan_note,
+                weekday_second_language,
                 appointments,
                 text_blocks,
                 agency,

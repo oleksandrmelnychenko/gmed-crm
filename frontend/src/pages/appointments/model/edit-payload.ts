@@ -158,6 +158,20 @@ export function buildEditAppointmentUpdatePayload({
   ) {
     payload.interpreter_needed = form.interpreterNeeded;
   }
+  // The patient's plan texts only when the form carries them and they
+  // changed: an untouched form keeps what is stored.
+  if (
+    form.patientPlanText !== undefined &&
+    form.patientPlanText.trim() !== (detail.patient_plan_text ?? "").trim()
+  ) {
+    payload.patient_plan_text = form.patientPlanText.trim() || null;
+  }
+  if (
+    form.patientPreparationNote !== undefined &&
+    form.patientPreparationNote.trim() !== (detail.patient_preparation_note ?? "").trim()
+  ) {
+    payload.patient_preparation_note = form.patientPreparationNote.trim() || null;
+  }
   if (canEditAppointmentType) {
     payload.appointment_type = form.appointmentType;
   }

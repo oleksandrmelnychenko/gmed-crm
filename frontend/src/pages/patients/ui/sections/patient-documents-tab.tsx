@@ -56,6 +56,7 @@ import type {
 import { PatientDocumentGenerateDialog } from "../sheets/patient-document-generate-dialog";
 import { PatientDocumentEditSheet } from "../sheets/patient-document-edit-sheet";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import { DocumentPreviewSurface } from "@/pages/documents/ui/document-preview-surface";
 import { DocumentStatusBadges } from "@/pages/documents/ui/document-demo-signature-badge";
 import {
   DocumentTranslationDialog,
@@ -81,6 +82,7 @@ type PatientDocumentPreview = {
   title: string;
   contentType?: string;
   url?: string;
+  pdfData?: ArrayBuffer;
 };
 
 type PatientDocumentsTabProps = {
@@ -390,6 +392,7 @@ export function PatientDocumentsTab({
         title: documentDisplayName(doc, l),
         contentType: preview.contentType,
         url: preview.url,
+        pdfData: preview.pdfData,
       });
     } catch {
       if (documentPreviewRequestRef.current === requestId) {
@@ -897,14 +900,20 @@ export function PatientDocumentsTab({
               </div>
             ) : documentPreview?.url &&
               supportsInlinePreview(documentPreview.contentType) ? (
-              <iframe
-                title={documentPreview.title || t.documents_preview}
-                src={documentPreview.url}
-                sandbox={patientDocumentPreviewSandbox(
-                  documentPreview.contentType,
-                )}
-                className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
-              />
+              documentPreview.pdfData ? (
+                <DocumentPreviewSurface
+                  preview={documentPreview}
+                  title={documentPreview.title || t.documents_preview}
+                  className="h-full min-h-[560px] w-full"
+                />
+                ) : (
+                <iframe
+                  title={documentPreview.title || t.documents_preview}
+                  src={documentPreview.url}
+                  sandbox={patientDocumentPreviewSandbox(documentPreview.contentType)}
+                  className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
+                />
+                )
             ) : documentPreview?.url ? (
               <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-card p-8 text-center">
                 <FileWarning className="mb-3 size-8 text-muted-foreground" />

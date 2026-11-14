@@ -242,6 +242,13 @@ struct UpdateAppointment {
     category: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
     notes: Option<Option<String>>,
+    /// The visit's own line in the patient's treatment plan. Absent keeps it;
+    /// an explicit null or blank clears it.
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    patient_plan_text: Option<Option<String>>,
+    /// The preparation note printed under the visit's day in the plan.
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    patient_preparation_note: Option<Option<String>>,
     recurrence_frequency: Option<String>,
     recurrence_interval: Option<i32>,
     #[serde(default, deserialize_with = "deserialize_explicit_nullable_i32")]
@@ -5290,7 +5297,7 @@ async fn get_appointment(
                   a.appointment_type, a.care_path_kind, a.followup_milestone, a.title, a.date, a.time_start, a.time_end, a.location,
                   a.category, a.status, a.interpreter_response, a.interpreter_response_comment,
                   a.checklist_phase,
-                  a.preparation_notes, a.followup_notes, a.notes, a.created_at,
+                  a.preparation_notes, a.followup_notes, a.notes, a.patient_plan_text, a.patient_preparation_note, a.created_at,
                   -- The visit's own mark, else its order's planning
                   -- (access::APPOINTMENT_INTERPRETER_NEEDED_SQL).
                   COALESCE(
@@ -7095,6 +7102,32 @@ async fn update_appointment(
                 .await
         {
             tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: interpreter needed mark");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    // The patient's plan texts belong to this one visit, never to its series;
+    // absent keeps what is stored.
+    if body.patient_plan_text.is_some() || body.patient_preparation_note.is_some() {
+        let set_plan_text = body.patient_plan_text.is_some();
+        let plan_text = normalize_optional_text(body.patient_plan_text.clone().flatten());
+        let set_preparation_note = body.patient_preparation_note.is_some();
+        let preparation_note =
+            normalize_optional_text(body.patient_preparation_note.clone().flatten());
+        if let Err(e) = sqlx::query(
+            r#"UPDATE appointments
+               SET patient_plan_text = CASE WHEN $2 THEN $3 ELSE patient_plan_text END,
+                   patient_preparation_note = CASE WHEN $4 THEN $5 ELSE patient_preparation_note END
+               WHERE id = $1"#,
+        )
+        .bind(apt_id)
+        .bind(set_plan_text)
+        .bind(plan_text)
+        .bind(set_preparation_note)
+        .bind(preparation_note)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: patient plan texts");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
@@ -12738,6 +12771,8 @@ fn build_appointment_detail_json(
         "preparation_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("preparation_notes").unwrap_or_default() },
         "followup_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("followup_notes").unwrap_or_default() },
         "notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("notes").unwrap_or_default() },
+        "patient_plan_text": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("patient_plan_text").unwrap_or_default() },
+        "patient_preparation_note": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("patient_preparation_note").unwrap_or_default() },
         "patient_id": patient_id,
         "patient_name": patient_name,
         "patient_pid": row.try_get::<String, _>("patient_code").unwrap_or_default(),

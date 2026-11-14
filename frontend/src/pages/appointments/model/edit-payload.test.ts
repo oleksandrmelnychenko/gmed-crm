@@ -93,6 +93,37 @@ const validationMessages = {
 };
 
 describe("buildEditAppointmentUpdatePayload", () => {
+  it("sends the patient's plan texts only when they changed", () => {
+    const untouched = buildEditAppointmentUpdatePayload({
+      detail,
+      form: buildEditAppointmentForm(detail),
+      recurrenceScope: "single",
+      canEditAppointmentType: false,
+      canManageChecklist: false,
+    });
+    expect(untouched.payload).not.toHaveProperty("patient_plan_text");
+    expect(untouched.payload).not.toHaveProperty("patient_preparation_note");
+
+    const changed = buildEditAppointmentUpdatePayload({
+      detail: { ...detail, patient_preparation_note: "Bitte nüchtern" },
+      form: {
+        ...form,
+        patientPlanText: " Präoperative Untersuchung beim Kardiologen ",
+        patientPreparationNote: "  ",
+      },
+      recurrenceScope: "single",
+      canEditAppointmentType: false,
+      canManageChecklist: false,
+    });
+    expect(changed.payload).toEqual(
+      expect.objectContaining({
+        patient_plan_text: "Präoperative Untersuchung beim Kardiologen",
+        // A cleared note is sent as null so the server removes it.
+        patient_preparation_note: null,
+      }),
+    );
+  });
+
   it("defaults every recurring appointment edit to one occurrence", () => {
     expect(defaultEditAppointmentRecurrenceScope()).toBe("single");
   });

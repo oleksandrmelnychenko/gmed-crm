@@ -165,7 +165,6 @@ import {
   createBulkDocumentShares,
   createDocumentShare,
   createDocumentPreviewObjectUrl,
-  documentPreviewSandbox,
   createTranslationRequest,
   deleteStoredDocumentFile,
   downloadDocumentFile,
@@ -272,6 +271,7 @@ import type {
 } from "./model/types";
 import { MarkComplianceSignedControl } from "./ui/mark-compliance-signed-control";
 import { DocumentSignatureAction } from "./ui/document-signature-action";
+import { DocumentPreviewSurface } from "./ui/document-preview-surface";
 import {
   DocumentTranslationDialog,
   type DocumentTranslationEditTarget,
@@ -1288,6 +1288,7 @@ function StaffDocumentsPage({
   const [documentPreview, setDocumentPreview] = useState<{
     contentType: string;
     id: string;
+    pdfData?: ArrayBuffer;
     title: string;
     url: string;
   } | null>(null);
@@ -1297,6 +1298,7 @@ function StaffDocumentsPage({
   const [editPreview, setEditPreview] = useState<{
     contentType: string;
     id: string;
+    pdfData?: ArrayBuffer;
     title: string;
     url: string;
   } | null>(null);
@@ -6420,12 +6422,11 @@ function StaffDocumentsPage({
                   ) : editPreviewError ? (
                     <Banner tone="error">{editPreviewError}</Banner>
                   ) : editPreview ? (
-                    <iframe
+                    <DocumentPreviewSurface
+                      preview={editPreview}
                       title={editPreview.title || t.documents_preview}
-                      src={editPreview.url}
-                      sandbox={documentPreviewSandbox(editPreview.contentType)}
-                      className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
-                    />
+                      className="h-full min-h-[560px] w-full"
+                      />
                   ) : (
                     <p className="max-w-sm text-center text-sm text-muted-foreground">
                       {detail?.has_stored_file
@@ -6576,12 +6577,11 @@ function StaffDocumentsPage({
           </DialogHeader>
           <div className="min-h-0 flex-1 bg-muted p-3">
             {documentPreview ? (
-              <iframe
+              <DocumentPreviewSurface
+                preview={documentPreview}
                 title={documentPreview.title || t.documents_preview}
-                src={documentPreview.url}
-                sandbox={documentPreviewSandbox(documentPreview.contentType)}
-                className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
-              />
+                className="h-full min-h-[560px] w-full"
+                />
             ) : null}
           </div>
         </DialogContent>

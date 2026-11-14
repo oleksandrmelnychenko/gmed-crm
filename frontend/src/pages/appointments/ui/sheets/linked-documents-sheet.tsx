@@ -28,9 +28,9 @@ import {
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 import {
   createDocumentPreviewObjectUrl,
-  documentPreviewSandbox,
   revokeDocumentPreviewObjectUrl,
 } from "@/pages/documents/data/document-api";
+import { DocumentPreviewSurface } from "@/pages/documents/ui/document-preview-surface";
 
 export type LinkedDocumentsSheetProps = {
   open: boolean;
@@ -54,6 +54,7 @@ function LinkedDocumentsSheet({
   const [preview, setPreview] = useState<{
     contentType: string;
     id: string;
+    pdfData?: ArrayBuffer;
     title: string;
     url: string;
   } | null>(null);
@@ -184,11 +185,10 @@ function LinkedDocumentsSheet({
           </DialogHeader>
           <div className="min-h-0 flex-1 bg-muted p-3">
             {preview ? (
-              <iframe
+              <DocumentPreviewSurface
+                preview={preview}
                 title={preview.title || t.documents_preview}
-                src={preview.url}
-                sandbox={documentPreviewSandbox(preview.contentType)}
-                className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
+                className="h-full min-h-[560px] w-full"
               />
             ) : null}
           </div>
