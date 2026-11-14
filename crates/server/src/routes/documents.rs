@@ -1483,7 +1483,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "patient_sticker_sheet",
-        label: "Patientenetikett · Bogen 70 x 37 mm",
+        label: "Patientenetikett · Bogen 70 x 36 mm (HERMA 4360)",
         description: "Kleines Patientenetikett im Bogenformat mit Kontaktblock der Agentur.",
         art: "patient_sticker",
         category: "administrative",

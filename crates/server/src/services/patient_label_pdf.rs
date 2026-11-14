@@ -1,9 +1,10 @@
 //! Patient labels («Печать наклейки» on the staff patient card, owner request
 //! 2026-11-14), printed from a server PDF.
 //!
-//! The layout follows the agency's own Word sheet (ADMIN-Etiketten): an A4
-//! sheet of 3 × 8 labels, columns 65 / 70 / 70 mm, rows of exactly 36 mm,
-//! 4.5 mm from the top and 1.8 mm from the left edge, Arial. The sheet holds
+//! The sheet is the HERMA 4360 stock the agency prints on (owner 2026-11-14):
+//! A4, 3 × 8 labels of 70 × 36 mm, edge to edge horizontally, 4.5 mm from the
+//! top. The label kinds and type sizes follow the agency's own Word sheet
+//! (ADMIN-Etiketten), Arial. The sheet holds
 //! five kinds of labels, row by row:
 //!
 //! 1. rows 1–2: the full patient label (ID, salutation, «Nachname, Vorname»,
@@ -59,12 +60,13 @@ pub struct PatientLabelAgency {
 const A4_WIDTH_MM: f32 = 210.0;
 const A4_HEIGHT_MM: f32 = 297.0;
 const SHEET_TOP_MM: f32 = 4.5;
-const SHEET_LEFT_MM: f32 = 1.8;
-const SHEET_COLUMNS_MM: [f32; 3] = [65.0, 70.0, 70.0];
+const SHEET_LEFT_MM: f32 = 0.0;
+const SHEET_COLUMNS_MM: [f32; 3] = [70.0, 70.0, 70.0];
 const SHEET_ROW_HEIGHT_MM: f32 = 36.0;
 const SHEET_ROWS: usize = 8;
-/// Word's cell margin of the reference table (70 twips).
-const SHEET_CELL_PADDING_MM: f32 = 1.23;
+/// Text inset inside a label: the Word sheet put its first column's text 3 mm
+/// from the paper edge, which also keeps it clear of the printer's margin.
+const SHEET_CELL_PADDING_MM: f32 = 3.0;
 /// Word's single line spacing for Arial.
 const LINE_SPACING: f32 = 1.15;
 /// Arial's ascender, as a share of the font size.

@@ -188,7 +188,7 @@ export const PATIENT_LABEL_FORMAT_OPTIONS: PatientLabelFormat[] = [
     id: "sheet-70x37",
     labelKey: "patients_label_format_sheet_70x37",
     width_mm: 70,
-    height_mm: 37,
+    height_mm: 36,
   },
 ];
 

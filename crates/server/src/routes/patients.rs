@@ -1544,9 +1544,9 @@ pub(crate) const PATIENT_LABEL_FORMATS: [PatientLabelFormat; 3] = [
     },
     PatientLabelFormat {
         id: "sheet-70x37",
-        label: "Sheet 70 x 37 mm",
+        label: "Sheet 70 x 36 mm",
         width_mm: 70,
-        height_mm: 37,
+        height_mm: 36,
     },
 ];
 

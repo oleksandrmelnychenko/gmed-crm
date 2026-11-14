@@ -702,12 +702,12 @@ describe("patient label menu", () => {
     expect(PATIENT_LABEL_FORMAT_OPTIONS.map((option) => label("ru", option.labelKey))).toEqual([
       "Компактная 90 x 48 mm",
       "Стандартная 105 x 74 mm",
-      "Лист 70 x 37 mm",
+      "Лист 70 x 36 mm",
     ]);
     expect(PATIENT_LABEL_FORMAT_OPTIONS.map((option) => label("de", option.labelKey))).toEqual([
       "Kompakt 90 x 48 mm",
       "Standard 105 x 74 mm",
-      "Bogen 70 x 37 mm",
+      "Bogen 70 x 36 mm",
     ]);
     expect(label("ru", "patients_print_label")).toBe("Печать наклейки");
     expect(label("de", "patients_print_label")).toBe("Etikett drucken");

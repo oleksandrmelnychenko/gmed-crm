@@ -52,12 +52,12 @@ const formats = {
   ru: [
     ["Компактная 90 x 48 mm", "compact-90x48"],
     ["Стандартная 105 x 74 mm", "standard-105x74"],
-    ["Лист 70 x 37 mm", "sheet-70x37"],
+    ["Лист 70 x 36 mm", "sheet-70x37"],
   ],
   de: [
     ["Kompakt 90 x 48 mm", "compact-90x48"],
     ["Standard 105 x 74 mm", "standard-105x74"],
-    ["Bogen 70 x 37 mm", "sheet-70x37"],
+    ["Bogen 70 x 36 mm", "sheet-70x37"],
   ],
 } as const;
 
