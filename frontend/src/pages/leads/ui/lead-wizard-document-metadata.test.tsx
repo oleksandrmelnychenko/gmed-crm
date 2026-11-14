@@ -235,3 +235,25 @@ describe("LeadWizardDocumentMetadata", () => {
     ).toContain(">3 МБ<");
   });
 });
+
+describe("signature status on client-signed documents (owner 2026-11-14)", () => {
+  it("says «Не подписан» until signed and «Подписан DD.MM.YYYY» afterwards; other documents show nothing", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { LeadWizardDocumentMetadata } = await import("./lead-wizard-document-metadata");
+    const base = {
+      id: "d1", document_number: "KV-20261114-0005", file_size: 1000, created_at: "2026-11-14T16:49:00Z",
+      generated_template_id: "order_cost_estimate", generated_bindings: null,
+    };
+    const unsigned = renderToStaticMarkup(<LeadWizardDocumentMetadata document={base} lang="ru" />);
+    expect(unsigned).toContain('data-document-signature="unsigned"');
+    expect(unsigned).toContain("Не подписан");
+    const signed = renderToStaticMarkup(
+      <LeadWizardDocumentMetadata document={{ ...base, signed_at: "2026-11-15T09:00:00Z" }} lang="de" />,
+    );
+    expect(signed).toContain("Unterschrieben 15.11.2026");
+    const other = renderToStaticMarkup(
+      <LeadWizardDocumentMetadata document={{ ...base, generated_template_id: "cost_estimate" }} lang="ru" />,
+    );
+    expect(other).not.toContain("data-document-signature");
+  });
+});

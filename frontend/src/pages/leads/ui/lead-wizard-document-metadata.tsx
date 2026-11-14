@@ -14,7 +14,7 @@ type LeadWizardDocumentMetadataProps = {
   document: Pick<
     DocumentItem,
     "created_at" | "document_number" | "file_size" | "generated_bindings" | "generated_template_id" | "id"
-  > & Partial<Pick<DocumentItem, "version_number" | "version_count" | "is_latest_version">>;
+  > & Partial<Pick<DocumentItem, "version_number" | "version_count" | "is_latest_version" | "signed_at">>;
   lang: Lang;
 };
 
@@ -92,6 +92,20 @@ export function leadWizardDocumentTotal(
   return typeof total === "string" && total.trim() ? total.trim() : null;
 }
 
+/** Documents the client signs: their row says whether the signature is there (owner 2026-11-14). */
+const SIGNED_BY_CLIENT = new Set([
+  "order_cost_estimate",
+  "single_order",
+  "framework_contract",
+  "privacy_consents",
+  "confidentiality_release",
+  "lead_self_disclosure",
+]);
+
+export function leadWizardDocumentNeedsSignature(document: { generated_template_id?: string | null }) {
+  return SIGNED_BY_CLIENT.has(document.generated_template_id ?? "");
+}
+
 const GERMAN_AMOUNT = cachedNumberFormat("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
@@ -153,6 +167,19 @@ export function LeadWizardDocumentMetadata({
           className={cn(metadataPillClass, STATUS_TONE.info)}
         >
           <time dateTime={document.created_at}>{generatedAtLabel}</time>
+        </Badge>
+      ) : null}
+      {leadWizardDocumentNeedsSignature(document) ? (
+        <Badge
+          variant="outline"
+          data-document-signature={document.signed_at ? "signed" : "unsigned"}
+          className={cn(metadataPillClass, document.signed_at ? STATUS_TONE.success : STATUS_TONE.error)}
+        >
+          {document.signed_at
+            ? `${lang === "de" ? "Unterschrieben" : "Подписан"} ${formatDateTime(document.signed_at, lang === "de" ? "de-DE" : "ru-RU", "").slice(0, 10)}`
+            : lang === "de"
+              ? "Nicht unterschrieben"
+              : "Не подписан"}
         </Badge>
       ) : null}
       <PatientUploadMark documentId={document.id} lang={lang} />
