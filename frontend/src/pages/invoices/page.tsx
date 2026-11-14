@@ -3350,7 +3350,7 @@ function useStaffInvoicesPageContent() {
                 >
                   <div className="space-y-4">
                     {detail.status === "draft" && !isInvoiceReleased(detail) ? (
-                      <ShellBanner tone="info">
+                      <ShellBanner tone="warning">
                         <span data-testid="invoice-draft-explainer">
                           {lang === "de"
                             ? "Entwurf ohne Nummer: Positionen, Fälligkeit, Anmerkung und Empfänger lassen sich noch ändern, der Entwurf kann gelöscht werden. „Ausstellen“ vergibt die Rechnungsnummer und das Rechnungsdatum (heute), archiviert das PDF unverändert und zeigt die Rechnung dem Patienten im Portal (sofern sichtbar) mit einer Benachrichtigung. Danach ist sie nur noch per Stornorechnung zu korrigieren."

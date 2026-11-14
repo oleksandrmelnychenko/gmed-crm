@@ -250,7 +250,7 @@ export function DraftInvoiceEditorDialog({
               </div>
 
               {payload.lines_mode === "locked" ? (
-                <ShellBanner tone="info">
+                <ShellBanner tone="warning">
                   {copy[`locked_${payload.lines_locked_reason ?? "other_sources"}`] ?? copy.locked_other_sources}
                 </ShellBanner>
               ) : null}
