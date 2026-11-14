@@ -817,10 +817,6 @@ function useStaffInvoicesPageContent() {
     reversed: lang === "de" ? "Storniert" : "Сторнирован",
     correctionNotePrefix: lang === "de" ? "Korrektur: " : "Исправление: ",
     refunds: lang === "de" ? "Rückzahlungen" : "Возвраты пациенту",
-    refundsDescription:
-      lang === "de"
-        ? "Tatsächlich an den Patienten ausgezahltes Guthaben. Eine Rückzahlung ist nur bis zur verfügbaren Bar-Gutschrift möglich."
-        : "Фактически возвращённые пациенту деньги. Возврат возможен только в пределах доступной денежной переплаты.",
     recordRefund: lang === "de" ? "Rückzahlung erfassen" : "Записать возврат",
     refundEntry: lang === "de" ? "Rückzahlung" : "Возврат",
     refundAmount: lang === "de" ? "Rückzahlung brutto" : "Сумма возврата брутто",
@@ -3878,10 +3874,7 @@ function useStaffInvoicesPageContent() {
 
                 <SectionCard icon={Undo2} title={text.refunds}>
                   <div className="space-y-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <p className="max-w-3xl text-sm text-muted-foreground">
-                        {text.refundsDescription}
-                      </p>
+                    <div className="flex flex-wrap items-start justify-end gap-3">
                       <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-right">
                         <div className="text-xs text-muted-foreground">
                           {lang === "de" ? "Verfügbar zur Auszahlung" : "Доступно к возврату"}
