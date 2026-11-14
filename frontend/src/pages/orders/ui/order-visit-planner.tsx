@@ -31,6 +31,7 @@ import {
   gridDays,
   gridRangeLabel,
   gridSlots,
+  coveredSlotStarts,
   minutesToTime,
   newDraft,
   scopesLabel,
@@ -572,6 +573,19 @@ export function OrderVisitPlanner({
             );
           })}
         </ol>
+        <span
+          data-testid="order-visit-planner-legend"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <span
+            aria-hidden="true"
+            className="inline-block h-3 w-4 rounded-sm border border-border bg-card bg-[repeating-linear-gradient(135deg,var(--color-muted)_0_3px,transparent_3px_6px)]"
+          />
+          {tx(
+            "занято: другой приём пациента, врача или переводчика",
+            "belegt: anderer Termin des Patienten, Arztes oder Dolmetschers",
+          )}
+        </span>
         <div className="flex items-center gap-1.5">
           <Button
             type="button"
@@ -626,7 +640,9 @@ export function OrderVisitPlanner({
               ) : null,
             )}
           </div>
-          {days.map((day, dayIndex) => (
+          {days.map((day, dayIndex) => {
+            const covered = coveredSlotStarts(day, busy, drafts);
+            return (
             <div
               key={day}
               data-testid="order-visit-planner-day"
@@ -655,9 +671,11 @@ export function OrderVisitPlanner({
                   )}
                   style={{ height: ROW_PX }}
                 >
-                  <span className="hidden pl-1.5 text-[11px] font-semibold text-orange-600 group-hover:inline group-focus-visible:inline">
-                    + {tx("приём", "Termin")}
-                  </span>
+                  {covered.has(minutes) ? null : (
+                    <span className="hidden pl-1.5 text-[11px] font-semibold text-orange-600 group-hover:inline group-focus-visible:inline">
+                      + {tx("приём", "Termin")}
+                    </span>
+                  )}
                 </button>
               ))}
               {busy
@@ -675,10 +693,10 @@ export function OrderVisitPlanner({
                       key={`busy-${index}`}
                       data-testid="order-visit-planner-busy"
                       title={`${slot.time_start ?? ""}–${slot.time_end ?? ""} ${text}`}
-                      className="pointer-events-none absolute inset-x-0.5 z-0 overflow-hidden rounded border border-border bg-[repeating-linear-gradient(135deg,var(--color-muted)_0_6px,transparent_6px_10px)] px-1 text-[11px] leading-4 text-muted-foreground"
+                      className="pointer-events-none absolute inset-x-0.5 z-[1] overflow-hidden rounded border border-border bg-card bg-[repeating-linear-gradient(135deg,var(--color-muted)_0_6px,transparent_6px_10px)] px-1 text-[11px] leading-4 text-muted-foreground"
                       style={{ top: topOf(start) + 1, height: ((end - start) / GRID_STEP_MINUTES) * ROW_PX - 2 }}
                     >
-                      {`${slot.time_start ?? ""} ${text}`}
+                      <span className="rounded-sm bg-card/90 px-0.5">{`${slot.time_start ?? ""} ${text}`}</span>
                     </div>
                   );
                 })}
@@ -710,7 +728,8 @@ export function OrderVisitPlanner({
                 ))}
               {renderPopover(day, dayIndex)}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

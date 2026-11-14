@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   batchFailureText,
+  coveredSlotStarts,
   batchPayload,
   draftConflicts,
   gridDays,
@@ -58,6 +59,19 @@ describe("order visit planner grid", () => {
     });
     expect(newDraft("b", mri, "2026-11-16", 19 * 60 + 30).duration).toBe(30);
     expect(newDraft("c", mri, "2026-11-16", 8 * 60).title).toBe("Radiologie Mitte");
+  });
+});
+
+describe("coveredSlotStarts", () => {
+  it("marks every half hour a taken time or a planned visit touches, so no hint shows through a card", () => {
+    const visit = { ...newDraft("a", mueller, "2026-11-17", 12 * 60), duration: 45 };
+    const covered = coveredSlotStarts(
+      "2026-11-17",
+      [busy({ date: "2026-11-17", time_start: "10:00", time_end: "11:00" }), busy({ date: "2026-11-18" })],
+      [visit, newDraft("b", schmidt, "2026-11-18", 9 * 60)],
+    );
+    expect([...covered].map(minutesToTime)).toEqual(["10:00", "10:30", "12:00", "12:30"]);
+    expect(covered.has(11 * 60)).toBe(false);
   });
 });
 

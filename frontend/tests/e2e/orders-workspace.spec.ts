@@ -585,6 +585,11 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
   const slot = (date: string, time: string) =>
     planner.locator(`[data-testid="order-visit-planner-day"][data-date="${date}"] [data-slot-time="${time}"]`);
   const create = planner.getByTestId("order-visit-planner-create");
+  // A card covers its slots: the «+ приём» hint is only drawn in free slots, never through a card.
+  await expect(planner.getByTestId("order-visit-planner-legend")).toContainText("занято");
+  await expect(slot("2026-11-16", "08:30").getByText("+ приём")).toHaveCount(0);
+  await expect(slot("2026-11-16", "09:00").getByText("+ приём")).toHaveCount(0);
+  await expect(slot("2026-11-16", "09:30").getByText("+ приём")).toHaveCount(1);
 
   const choose = planner.getByTestId("order-visit-planner-choose");
   const editor = planner.getByTestId("order-visit-planner-editor");

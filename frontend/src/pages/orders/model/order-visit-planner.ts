@@ -79,6 +79,36 @@ export function gridRangeLabel(days: readonly string[]): string {
     : `${full(first)} – ${full(last)}`;
 }
 
+/**
+ * Half-hour slots of a day that a card covers (taken time or a planned
+ * visit): the «+ приём» hover hint is not drawn there, so it never shows
+ * through a card.
+ */
+export function coveredSlotStarts(
+  date: string,
+  busy: readonly BusySlot[],
+  drafts: readonly DraftVisit[],
+): Set<number> {
+  const ranges: Array<[number, number]> = [
+    ...busy
+      .filter((slot) => slot.date === date)
+      .map((slot): [number, number] => [
+        timeToMinutes(slot.time_start) ?? 0,
+        timeToMinutes(slot.time_end) ?? 24 * 60,
+      ]),
+    ...drafts
+      .filter((draft) => draft.date === date)
+      .map((draft): [number, number] => [draft.start, draft.start + draft.duration]),
+  ];
+  const covered = new Set<number>();
+  for (const minutes of gridSlots()) {
+    if (ranges.some(([start, end]) => minutes < end && start < minutes + GRID_STEP_MINUTES)) {
+      covered.add(minutes);
+    }
+  }
+  return covered;
+}
+
 export function gridSlots(): number[] {
   const slots: number[] = [];
   for (let minutes = GRID_START_MINUTES; minutes < GRID_END_MINUTES; minutes += GRID_STEP_MINUTES) {
