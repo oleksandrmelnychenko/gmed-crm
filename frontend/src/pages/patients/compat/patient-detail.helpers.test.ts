@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { t as translateCatalog } from "@/lib/i18n";
 
 import {
-  buildPatientLabelPrintHtml,
   buildPatientTimelineSummary,
   canManagePatientProfile,
   canOpenPatientDocumentsWorkspace,
@@ -23,6 +22,8 @@ import {
 import {
   canLoadPatientAssignableStaff,
   canPrintPatientLabel,
+  PATIENT_LABEL_FORMAT_OPTIONS,
+  patientLabelPdfPath,
   canViewPatientAssignmentsSurface,
   isPatientDetailTabReadOnly,
 } from "../model/detail-model";
@@ -270,48 +271,6 @@ describe("formatRelatedPatientName", () => {
   });
 });
 
-describe("buildPatientLabelPrintHtml", () => {
-  it("renders a print-ready patient label with the requested format metadata", () => {
-    const tr = translateCatalog("ru");
-    const html = buildPatientLabelPrintHtml({
-      patient_id: "P-20260410-0001",
-      title: "Dr.",
-      salutation: "Herr",
-      first_name: "Max",
-      last_name: "Mustermann",
-      birth_date: "1990-04-10",
-      country_code: "DE",
-      insurance_provider: "AXA",
-      agency: {
-        name: "GMED",
-        care_of: "c/o GMED",
-        address: "Main Street 1, Berlin",
-        phone: "+49 30 000000",
-        email: "ops@gmed.de",
-      },
-      format: {
-        id: "sheet-70x37",
-        label: "Sheet 70 x 37 mm",
-        width_mm: 70,
-        height_mm: 37,
-      },
-      generated_at: "2026-04-10T12:00:00Z",
-    });
-
-    expect(html).toContain("@page");
-    // Inline scripts are forbidden by the page CSP; the opener starts printing.
-    expect(html).not.toMatch(/<script|\son\w+=/i);
-    expect(html).toContain("70mm 37mm");
-    expect(html).toContain("Herr Dr. Max Mustermann");
-    expect(html).toContain("P-20260410-0001");
-    // The birth date is a calendar date: same day whatever the browser zone.
-    expect(html).toContain(`${tr.patient_label_print_dob} 10.04.1990`);
-    expect(html).toContain(`${tr.patient_label_print_insurance} AXA`);
-    expect(html).toContain("c/o GMED");
-    // Generated 12:00 UTC = 14:00 in Berlin (CEST).
-    expect(html).toContain(`${tr.patient_label_print_generated} 10.04.2026 14:00`);
-  });
-});
 
 describe("patient surface access helpers", () => {
   it("gives Concierge the service-side patient card without clinical or financial surfaces", () => {
@@ -729,5 +688,37 @@ describe("normalizePatientDetailTab", () => {
         canViewInvoices: true,
       })
     ).toBe("invoices");
+  });
+});
+
+describe("patient label menu", () => {
+  it("offers the three label formats in the owner's wording", () => {
+    const label = (lang: "ru" | "de", key: string) => translateCatalog(lang).uiText[key];
+    expect(PATIENT_LABEL_FORMAT_OPTIONS.map((option) => option.id)).toEqual([
+      "compact-90x48",
+      "standard-105x74",
+      "sheet-70x37",
+    ]);
+    expect(PATIENT_LABEL_FORMAT_OPTIONS.map((option) => label("ru", option.labelKey))).toEqual([
+      "Компактная 90 x 48 mm",
+      "Стандартная 105 x 74 mm",
+      "Лист 70 x 37 mm",
+    ]);
+    expect(PATIENT_LABEL_FORMAT_OPTIONS.map((option) => label("de", option.labelKey))).toEqual([
+      "Kompakt 90 x 48 mm",
+      "Standard 105 x 74 mm",
+      "Bogen 70 x 37 mm",
+    ]);
+    expect(label("ru", "patients_print_label")).toBe("Печать наклейки");
+    expect(label("de", "patients_print_label")).toBe("Etikett drucken");
+  });
+
+  it("asks the server for the PDF of the chosen format", () => {
+    expect(patientLabelPdfPath("4f1c-uuid", "sheet-70x37")).toBe(
+      "/patients/4f1c-uuid/label.pdf?format=sheet-70x37",
+    );
+    expect(patientLabelPdfPath("a/b", "compact-90x48")).toBe(
+      "/patients/a%2Fb/label.pdf?format=compact-90x48",
+    );
   });
 });

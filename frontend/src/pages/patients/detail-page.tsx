@@ -25,7 +25,7 @@ import { toast } from "@/components/ui/toast";
 import {
   localizeWorkflowGroupLabel,
 } from "@/lib/workflow-labels";
-import { clearApiCache } from "@/lib/api";
+import { clearApiCache, downloadBlob } from "@/lib/api";
 import {
   addDaysToDateKey,
   appDateKey,
@@ -83,12 +83,10 @@ import {
   DEFAULT_PATIENT_LABEL_FORMAT_ID,
   normalizePatientDetailTab,
   type PatientLabelFormatId,
-  type PatientLabelPayload,
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
   isPatientDetailTabReadOnly,
   patientRelationTypeLabel,
-  usePatientDetailLabels,
 } from "./model/detail-model";
 import {
   patientPermissions,
@@ -106,7 +104,7 @@ import {
   deletePatientRelation,
   linkPatientRelation,
   exportPatientComplianceArchive,
-  fetchPatientLabelPayload,
+  fetchPatientLabelPdf,
   revokePatientAssignment,
   updateFrameworkContractStatus,
   updateInvoiceStatus,
@@ -957,7 +955,6 @@ function usePatientDetailPageContent() {
     orderPhaseLabel,
     parseOptionalIntegerInput,
     patientDetailStatusLabel,
-    patientDetailText,
     priorityLabel,
     relationTypeLabel,
     timelineDateGroupLabel,
@@ -968,7 +965,6 @@ function usePatientDetailPageContent() {
     getPatientLegalStatusChecklist,
     getPatientLegalStatusCompletion,
   } = useLegalStatusLabels();
-  const { buildPatientLabelPrintHtml } = usePatientDetailLabels();
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { staffGo, canStaffPath } = useStaffNavigate();
@@ -1955,33 +1951,29 @@ function usePatientDetailPageContent() {
     if (!id) return;
     const chosenFormat = format ?? patientLabelFormatRef.current;
 
-    // With "noopener" `window.open` returns null even when the tab opened, so
-    // the tab is opened plainly and detached from this page.
+    // The tab is opened before the request so the pop-up blocker lets it
+    // through; it shows the server PDF (the browser's viewer prints and saves
+    // it). With "noopener" `window.open` returns null even when the tab
+    // opened, so the tab is opened plainly and detached from this page.
     const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      setTabActionError(patientDetailText("patients_error_allow_popups_print_label"));
-      return;
-    }
-    printWindow.opener = null;
+    if (printWindow) printWindow.opener = null;
 
     setPatientLabelBusy(true);
     setTabActionError("");
 
     try {
-      const payload = await fetchPatientLabelPayload<PatientLabelPayload>(id, chosenFormat);
-      printWindow.document.open();
-      printWindow.document.write(buildPatientLabelPrintHtml(payload));
-      printWindow.document.close();
-      toast.info(l("patients_label_opened"));
-      // The label carries no script (the page's CSP forbids inline scripts):
-      // printing starts from here once the written document is laid out.
-      window.setTimeout(() => {
-        if (printWindow.closed) return;
-        printWindow.focus();
-        printWindow.print();
-      }, 80);
+      const { blob, filename } = await fetchPatientLabelPdf(id, chosenFormat);
+      const pdf = blob.type === "application/pdf" ? blob : new Blob([blob], { type: "application/pdf" });
+      if (printWindow && !printWindow.closed) {
+        const url = URL.createObjectURL(pdf);
+        printWindow.location.href = url;
+        window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+        toast.info(l("patients_label_opened"));
+      } else {
+        downloadBlob(pdf, filename || `etikett-${chosenFormat}.pdf`);
+      }
     } catch (error) {
-      printWindow.close();
+      printWindow?.close();
       setTabActionError(
         error instanceof Error ? error.message : t.common_failed_create
       );

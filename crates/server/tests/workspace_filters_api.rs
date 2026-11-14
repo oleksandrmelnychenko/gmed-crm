@@ -6302,6 +6302,144 @@ async fn interpreter_cannot_fetch_patient_label_payload() {
 }
 
 #[tokio::test]
+async fn patient_label_pdf_prints_the_word_sheet_and_single_labels() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-label-pdf");
+    let patient_uuid = seed_patient(&pool, admin_id, &tag).await;
+    let number = format!("P-{}", &tag[tag.len() - 8..]);
+    sqlx::query(
+        r#"UPDATE patients
+           SET patient_id = $2, first_name = 'Erika', last_name = 'Beispiel',
+               birth_date = '1951-03-02', gender = 'female',
+               insurance_type = 'self_pay', insurance_provider = NULL,
+               languages = ARRAY['de', 'uk']
+           WHERE id = $1"#,
+    )
+    .bind(patient_uuid)
+    .bind(&number)
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (key, value) in [
+        ("agency_name", "GMED Label Test"),
+        ("agency_care_of", "Kontakt Person"),
+        (
+            "agency_address",
+            "Teststraße 1 · 12345 Musterstadt · Deutschland",
+        ),
+        ("agency_phone", "+49 30 1234567"),
+        ("agency_email", "office@example.test"),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO system_settings (key, value, description, updated_by)
+               VALUES ($1, to_jsonb($2::text), $1, $3)
+               ON CONFLICT (key)
+               DO UPDATE SET value = EXCLUDED.value, updated_at = now()"#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    seed_patient_assignment(&pool, patient_uuid, pm_id, admin_id).await;
+    let path = |format: &str| format!("/api/v1/patients/{patient_uuid}/label.pdf?format={format}");
+
+    let (status, sheet) = bytes_request(&app, "GET", &path("sheet-70x37"), &pm_bearer).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(sheet.starts_with(b"%PDF"));
+    let text = pdf_extract::extract_text_from_mem(&sheet).unwrap();
+    assert_eq!(text.matches(&format!("ID: {number}")).count(), 12, "{text}");
+    assert_eq!(text.matches("Beispiel, Erika").count(), 18, "{text}");
+    assert_eq!(text.matches("geb. am 02.03.1951").count(), 18, "{text}");
+    assert_eq!(text.matches("KT1: SZ").count(), 6, "{text}");
+    assert_eq!(text.matches("UKR").count(), 6, "{text}");
+    assert_eq!(text.matches("Frau").count(), 18, "{text}");
+    assert_eq!(text.matches("c/o Kontakt Person").count(), 9, "{text}");
+    assert_eq!(text.matches("12345 Musterstadt").count(), 9, "{text}");
+    assert!(!text.contains("Deutschland"), "{text}");
+    assert_eq!(text.matches("Tel.: +49 30 1234567").count(), 6, "{text}");
+    assert_eq!(
+        text.matches("E-Mail: office@example.test").count(),
+        6,
+        "{text}"
+    );
+
+    for format in ["compact-90x48", "standard-105x74"] {
+        let (status, pdf) = bytes_request(&app, "GET", &path(format), &pm_bearer).await;
+        assert_eq!(status, StatusCode::OK, "{format}");
+        let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
+        assert_eq!(text.matches(&format!("ID: {number}")).count(), 1, "{text}");
+        assert!(
+            text.contains("Beispiel, Erika") && text.contains("KT2:"),
+            "{text}"
+        );
+        assert!(!text.contains("c/o"), "{text}");
+    }
+
+    let (status, _) = bytes_request(&app, "GET", &path("a4-poster"), &pm_bearer).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The CEO assistant reads the card and may print; roles without the card
+    // (Billing, interpreters) and a PM without the patient may not.
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let (status, _) = bytes_request(
+        &app,
+        "GET",
+        &path("compact-90x48"),
+        &auth_header_for(assistant_id, "ceo_assistant"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for role in ["billing", "interpreter", "sales", "concierge"] {
+        let user_id = seed_user(&pool, &tag, role).await;
+        seed_patient_assignment(&pool, patient_uuid, user_id, admin_id).await;
+        let (status, _) = bytes_request(
+            &app,
+            "GET",
+            &path("sheet-70x37"),
+            &auth_header_for(user_id, role),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}");
+    }
+    let other_pm = seed_user(&pool, &format!("{tag}-other"), "patient_manager").await;
+    let (status, _) = bytes_request(
+        &app,
+        "GET",
+        &path("sheet-70x37"),
+        &auth_header_for(other_pm, "patient_manager"),
+    )
+    .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+        "unassigned PM got {status}"
+    );
+
+    support::wait_until("patient label PDF audit", || async {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM audit_log
+               WHERE action = 'generate_patient_label'
+                 AND entity_id = $1
+                 AND context->>'output' = 'pdf'"#,
+        )
+        .bind(patient_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        count >= 4
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn concierge_sees_medical_appointments_as_blocked_slots() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

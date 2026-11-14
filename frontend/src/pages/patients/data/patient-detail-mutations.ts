@@ -1,5 +1,6 @@
-import { apiFetch, downloadApiFile } from "@/lib/api";
+import { apiFetch, apiFetchFile, downloadApiFile } from "@/lib/api";
 import { getLang } from "@/lib/i18n";
+import { patientLabelPdfPath, type PatientLabelFormatId } from "../model/detail-model";
 import type { RelationItem } from "../model/detail-tab-types";
 
 export const PATIENT_RELATIONS_UPDATED_EVENT = "gmed:patient-relations-updated";
@@ -131,8 +132,8 @@ export async function exportPatientComplianceArchive(patientId: string, filename
   return downloadApiFile(`/admin/compliance/patient/${patientId}/export?format=zip`, filename);
 }
 
-export async function fetchPatientLabelPayload<T>(patientId: string, format: string) {
-  return apiFetch<T>(`/patients/${patientId}/label?format=${encodeURIComponent(format)}`);
+export async function fetchPatientLabelPdf(patientId: string, format: PatientLabelFormatId) {
+  return apiFetchFile(patientLabelPdfPath(patientId, format), { cache: "no-store" });
 }
 
 export async function updatePatientMedicalOrderLifecycle(

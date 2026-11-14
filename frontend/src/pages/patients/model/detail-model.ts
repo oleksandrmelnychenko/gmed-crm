@@ -1,4 +1,3 @@
-import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -40,27 +39,6 @@ export type PatientLabelFormat = {
   labelKey: string;
   width_mm: number;
   height_mm: number;
-};
-
-export type PatientLabelPayload = {
-  patient_id: string;
-  title?: string | null;
-  salutation: string;
-  first_name: string;
-  last_name: string;
-  birth_date: string;
-  country_code?: string | null;
-  insurance_provider?: string | null;
-  agency: {
-    name: string;
-    care_of: string;
-    address?: string | null;
-    phone?: string | null;
-    email?: string | null;
-  };
-  format: PatientLabelFormat;
-  available_formats?: PatientLabelFormat[];
-  generated_at: string;
 };
 
 export type PatientTimelineRangeFilter = "all" | "30d" | "90d" | "180d" | "365d";
@@ -314,6 +292,14 @@ const PATIENT_LABEL_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo_assistant",
   "patient_manager",
 ]);
+
+/**
+ * The print-ready label PDF of a format (server-rendered in the layout of the
+ * agency's Word label sheet).
+ */
+export function patientLabelPdfPath(patientId: string, format: PatientLabelFormatId) {
+  return `/patients/${encodeURIComponent(patientId)}/label.pdf?format=${encodeURIComponent(format)}`;
+}
 
 /** "Print label" in the patient card. */
 export function canPrintPatientLabel(actor?: Actor) {
@@ -703,172 +689,12 @@ export function formatRelatedPatientName(option: {
   return name || option.patient_id;
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function formatPrintValue(value?: string | null, fallback?: string) {
-  const normalized = value?.trim();
-  return normalized ? normalized : fallback ?? translateCatalog(getLang()).common_not_set;
-}
-
-/** When the label was generated, in German time. */
-function formatPatientLabelGeneratedAt(value?: string | null) {
-  return formatAppDateTime(value?.trim() ? value : new Date()) || formatPrintValue(value);
-}
-
-function formatPatientLabelBirthDate(value: string) {
-  return formatAppDate(value) || value;
-}
-
-function resolvePatientLabelFormat(formatId: string): PatientLabelFormat {
-  return (
-    PATIENT_LABEL_FORMAT_OPTIONS.find((option) => option.id === formatId) ??
-    PATIENT_LABEL_FORMAT_OPTIONS[0]
-  );
-}
-
-export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
-  const lang = getLang();
-  const tr = translateCatalog(lang);
-  const format = resolvePatientLabelFormat(payload.format?.id ?? DEFAULT_PATIENT_LABEL_FORMAT_ID);
-  const labelWidth = Math.max(format.width_mm - 10, 48);
-  const labelHeight = Math.max(format.height_mm - 10, 24);
-  const titleLine = [payload.salutation, payload.title, payload.first_name, payload.last_name]
-    .filter((value) => Boolean(value && value.trim()))
-    .join(" ");
-  const birthDateLine = payload.birth_date
-    ? `${tr.patient_label_print_dob} ${formatPatientLabelBirthDate(payload.birth_date)}`
-    : "";
-  const metaLine = [
-    birthDateLine,
-    payload.country_code ? `${tr.patient_label_print_country} ${payload.country_code}` : "",
-    payload.insurance_provider
-      ? `${tr.patient_label_print_insurance} ${payload.insurance_provider}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("  ·  ");
-  const agencyLine = [
-    payload.agency.care_of || payload.agency.name,
-    payload.agency.address,
-    payload.agency.phone,
-    payload.agency.email,
-  ]
-    .filter((value) => Boolean(value && value.trim()))
-    .join("  ·  ");
-  const footerLine = `${tr.patient_label_print_generated} ${formatPatientLabelGeneratedAt(payload.generated_at)}`;
-  const documentTitle = tr.patient_label_print_browser_title.replace(
-    "{patientId}",
-    payload.patient_id,
-  );
-
-  return `<!doctype html>
-<html lang="${lang}">
-  <head>
-    <meta charset="utf-8" />
-    <title>${escapeHtml(documentTitle)}</title>
-    <style>
-      @page {
-        size: ${format.width_mm}mm ${format.height_mm}mm;
-        margin: 5mm;
-      }
-
-      :root {
-        color-scheme: light;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        min-height: 100%;
-        background: #f3f4f6;
-        font-family: "Onest Variable", sans-serif;
-        color: #0f172a;
-      }
-
-      body {
-        display: grid;
-        place-items: center;
-        padding: 6mm;
-      }
-
-      .label {
-        width: ${labelWidth}mm;
-        min-height: ${labelHeight}mm;
-        border: 1px solid #cbd5e1;
-        border-radius: 4mm;
-        background:
-          radial-gradient(circle at top right, rgba(15, 23, 42, 0.06), transparent 42%),
-          linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-        padding: 4mm;
-        display: grid;
-        gap: 2.2mm;
-        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-      }
-
-      .eyebrow {
-        font-size: 8pt;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        color: #475569;
-      }
-
-      .patient-id {
-        font-size: 12pt;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-      }
-
-      .name {
-        font-size: ${format.height_mm <= 40 ? "11.5pt" : "14pt"};
-        font-weight: 700;
-        line-height: 1.15;
-      }
-
-      .meta,
-      .agency,
-      .footer {
-        font-size: ${format.height_mm <= 40 ? "7.5pt" : "8.5pt"};
-        line-height: 1.35;
-        color: #334155;
-      }
-
-      .footer {
-        color: #64748b;
-      }
-    </style>
-  </head>
-  <body>
-    <article class="label">
-      <div class="eyebrow">${escapeHtml(patientLabelFormatLabel(format))}</div>
-      <div class="patient-id">${escapeHtml(payload.patient_id)}</div>
-      <div class="name">${escapeHtml(titleLine || payload.patient_id)}</div>
-      <div class="meta">${escapeHtml(metaLine || tr.patient_label_print_dob_not_set)}</div>
-      <div class="agency">${escapeHtml(agencyLine || payload.agency.name || tr.patient_label_print_agency_not_configured)}</div>
-      <div class="footer">${escapeHtml(footerLine)}</div>
-    </article>
-  </body>
-</html>`;
-}
-
 /**
  * The helpers of this module that read the UI language themselves.
  * Components and hooks take them from `usePatientDetailLabels()`, which binds them to
  * the current language, so their text follows a live language switch.
  */
 export const PATIENT_DETAIL_LANGUAGE_HELPERS = {
-  buildPatientLabelPrintHtml,
   patientLabelFormatLabel,
   patientRelationTypeLabel,
 };

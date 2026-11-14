@@ -161,6 +161,10 @@ pub fn router() -> Router<AppState> {
             get(list_relations).post(create_relation),
         )
         .route("/patients/{patient_id}/label", get(get_patient_label))
+        .route(
+            "/patients/{patient_id}/label.pdf",
+            get(get_patient_label_pdf),
+        )
         .route("/patients/{patient_id}/timeline", get(get_patient_timeline))
         .route("/patients/{patient_id}/update", post(update_patient))
         .route("/patients/{patient_id}/assign", post(assign_patient))
@@ -9787,6 +9791,153 @@ async fn get_patient_label(
     ));
 
     Ok(Json(payload))
+}
+
+/// «Печать наклейки» on the card: the label as a print-ready PDF in the
+/// layout of the agency's Word sheet (see [`crate::services::patient_label_pdf`]).
+/// Same roles and patient scope as [`get_patient_label`]; audited as
+/// `generate_patient_label` with `output: pdf`.
+async fn get_patient_label_pdf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientLabelQuery>,
+) -> Result<axum::response::Response, axum::response::Response> {
+    use crate::services::patient_label_pdf as label_pdf;
+
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::CeoAssistant])?;
+    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+
+    let format = resolve_patient_label_format(query.format.as_deref())?;
+    let agency = load_patient_label_agency_settings(&state).await?;
+
+    let failed = |e: &dyn std::fmt::Display| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient label");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient label",
+        )
+    };
+    let patient = sqlx::query(
+        r#"SELECT patient_id, first_name, last_name, birth_date, gender,
+                  insurance_type, insurance_provider,
+                  COALESCE(languages, ARRAY[]::text[]) AS languages
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| failed(&e))?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?;
+
+    let patient_number: String = patient.try_get("patient_id").map_err(|e| failed(&e))?;
+    let gender: Option<String> = patient.try_get("gender").map_err(|e| failed(&e))?;
+    let insurance_type: Option<String> =
+        patient.try_get("insurance_type").map_err(|e| failed(&e))?;
+    let insurance_provider: Option<String> = patient
+        .try_get("insurance_provider")
+        .map_err(|e| failed(&e))?;
+    let languages: Vec<String> = patient.try_get("languages").map_err(|e| failed(&e))?;
+    let (kt1, kt2) =
+        label_pdf::cost_bearer_codes(insurance_type.as_deref(), insurance_provider.as_deref());
+    let language_code = label_pdf::label_language_code(&languages);
+    let data = label_pdf::PatientLabelData {
+        patient_number: patient_number.clone(),
+        salutation: patient_label_salutation(gender.as_deref().unwrap_or_default()).to_string(),
+        last_name: patient
+            .try_get::<Option<String>, _>("last_name")
+            .map_err(|e| failed(&e))?
+            .unwrap_or_default(),
+        first_name: patient
+            .try_get::<Option<String>, _>("first_name")
+            .map_err(|e| failed(&e))?
+            .unwrap_or_default(),
+        birth_date: patient
+            .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+            .map_err(|e| failed(&e))?
+            .map(|date| date.format("%d.%m.%Y").to_string()),
+        kt1,
+        kt2,
+        language_code: language_code.clone(),
+    };
+    let label_agency = label_pdf::PatientLabelAgency {
+        care_of: agency.care_of.clone(),
+        address_lines: label_pdf::agency_address_lines(agency.address.as_deref()),
+        phone: agency.phone.clone(),
+        email: agency.email.clone(),
+    };
+
+    let rendered = if format.id == "sheet-70x37" {
+        label_pdf::build_label_sheet_pdf(&data, &label_agency)
+    } else {
+        label_pdf::build_single_label_pdf(&data, format.width_mm as f32, format.height_mm as f32)
+    };
+    let bytes = match rendered {
+        Ok(bytes) => bytes,
+        Err(label_pdf::LABEL_DOES_NOT_FIT) => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                label_pdf::LABEL_DOES_NOT_FIT,
+            ));
+        }
+        Err(message) => {
+            tracing::error!(error = message, patient_id = %patient_uuid, "Failed to render patient label PDF");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to render patient label",
+            ));
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "generate_patient_label",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "format": format.id,
+            "output": "pdf",
+            "bytes": bytes.len(),
+            "language_code": language_code,
+        }),
+    ));
+
+    let slug: String = patient_number
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = slug.trim_matches('-');
+    let filename = if slug.is_empty() {
+        format!("etikett-{}.pdf", format.id)
+    } else {
+        format!("etikett-{slug}-{}.pdf", format.id)
+    };
+
+    Ok((
+        [
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, no-store".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/pdf".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                crate::content_disposition::inline(&filename),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 async fn list_patient_invoices(
