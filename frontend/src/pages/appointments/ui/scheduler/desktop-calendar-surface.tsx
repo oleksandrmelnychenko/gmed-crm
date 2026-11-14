@@ -150,6 +150,8 @@ type DesktopCalendarSurfaceProps = {
   calendarDate: string;
   canEditSchedule: boolean;
   dateClick: FullCalendarProps["dateClick"];
+  /** A click or a dragged range on free time: the quick create popover. */
+  select?: FullCalendarProps["select"];
   eventClick: FullCalendarProps["eventClick"];
   eventDrop: FullCalendarProps["eventDrop"];
   eventResize: FullCalendarProps["eventResize"];
@@ -195,6 +197,7 @@ export function DesktopCalendarSurface({
   calendarDate,
   canEditSchedule,
   dateClick,
+  select,
   eventClick,
   eventDrop,
   eventResize,
@@ -428,6 +431,9 @@ export function DesktopCalendarSurface({
           eventDurationEditable={canEditSchedule}
           eventResizableFromStart={canEditSchedule}
           dateClick={dateClick}
+          selectable={Boolean(select)}
+          selectMirror
+          select={select}
           eventClick={eventClick}
           eventDrop={eventDrop}
           eventResize={eventResize}

@@ -13,7 +13,9 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import type FullCalendar from "@fullcalendar/react";
-import type { EventClickArg, EventContentArg } from "@fullcalendar/core";
+import type { DateSelectArg, EventClickArg, EventContentArg } from "@fullcalendar/core";
+import { AppointmentQuickCreate } from "./ui/scheduler/appointment-quick-create";
+import { toDateInput, toTimeInput } from "./model/date-time";
 import {
   LoaderCircle,
 } from "lucide-react";
@@ -139,6 +141,7 @@ import {
 import { MobileDetailSheet, preloadMobileDetailSheet } from "@/pages/appointments/ui/sheets/mobile-detail-sheet";
 import type {
   AppointmentCommunicationEntry,
+  AppointmentFormState,
   AppointmentWorkspaceTab,
   AppointmentListItem,
   CalendarEventExtendedProps,
@@ -1258,6 +1261,44 @@ function useStaffAppointmentsPageContent() {
     },
   });
 
+  // Quick create (owner 2026-11-14): a click or a dragged range in the
+  // calendar opens a small popover next to it instead of the full sheet.
+  const [quickCreate, setQuickCreate] = useState<{
+    seed: AppointmentFormState;
+    anchor: { x: number; y: number };
+  } | null>(null);
+  const handleCalendarSelect = useCallback(
+    (info: DateSelectArg) => {
+      calendarRef.current?.getApi().unselect();
+      if (!permissions.canCreate) return;
+      const base = applyAppointmentCreateContext(
+        blankAppointmentFormForCurrentUser(user?.id, user?.role),
+        { patientId: createContextPatientId, orderId: createContextOrderId },
+      );
+      // A plain click selects one half-hour slot: it starts with an hour, as
+      // the full sheet does; a dragged range keeps its length.
+      const span = info.end ? info.end.getTime() - info.start.getTime() : 0;
+      const end = span > 30 * 60 * 1000
+        ? (info.end as Date)
+        : new Date(info.start.getTime() + 60 * 60 * 1000);
+      const seed: AppointmentFormState = {
+        ...base,
+        date: toDateInput(info.start),
+        timeStart: info.allDay ? "" : toTimeInput(info.start),
+        timeEnd: info.allDay ? "" : toTimeInput(end),
+      };
+      const event = info.jsEvent;
+      setQuickCreate({
+        seed,
+        anchor: {
+          x: event?.clientX ?? window.innerWidth / 2,
+          y: event?.clientY ?? 120,
+        },
+      });
+    },
+    [createContextOrderId, createContextPatientId, permissions.canCreate, user?.id, user?.role],
+  );
+
   const scopedAppointments = useMemo(
     () =>
       appointments.filter((item) =>
@@ -1930,7 +1971,8 @@ function useStaffAppointmentsPageContent() {
             calendarView,
             calendarDate,
             canEditSchedule: permissions.canEditSchedule,
-            dateClick: openCreateSheetFromDate,
+            dateClick: undefined,
+            select: permissions.canCreate ? handleCalendarSelect : undefined,
             eventClick: handleEventClick,
             eventDrop: handleInlineReschedule,
             eventResize: handleInlineReschedule,
@@ -2153,6 +2195,25 @@ function useStaffAppointmentsPageContent() {
         onCancel={dismissPendingCancellation}
         onConfirm={confirmPendingCancellation}
       />
+      {quickCreate ? (
+        <AppointmentQuickCreate
+          key={`${quickCreate.seed.date}-${quickCreate.seed.timeStart}`}
+          seed={quickCreate.seed}
+          anchor={quickCreate.anchor}
+          patients={patients}
+          lang={lang}
+          onClose={() => setQuickCreate(null)}
+          onCreated={(notice) => {
+            setQuickCreate(null);
+            if (notice) reportAppointmentsNotice(notice);
+            refreshAppointments();
+          }}
+          onMore={(form) => {
+            setQuickCreate(null);
+            openCreateSeedSheet(form);
+          }}
+        />
+      ) : null}
     </>
   );
 }

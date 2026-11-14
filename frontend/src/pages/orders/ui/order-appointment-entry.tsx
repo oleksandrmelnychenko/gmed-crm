@@ -199,7 +199,13 @@ export function AppointmentEntryRow({
 
 type PlanningDoctorPickerProps = {
   lang: string;
-  onAdd: (doctor: PlanningDoctor) => void;
+  onAdd?: (doctor: PlanningDoctor) => void;
+  /**
+   * Built into a form (the calendar's quick create): always open, no
+   * «Добавить / Отмена»; every choice is reported through onChange.
+   */
+  inline?: boolean;
+  onChange?: (doctor: PlanningDoctor | null) => void;
   /** In the planning grid's narrow doctor column: fields stacked, one per line. */
   stacked?: boolean;
   /**
@@ -237,10 +243,12 @@ export function PlanningDoctorPicker({
   onAdd,
   stacked = false,
   preferredSpecialtyCodes = [],
+  inline = false,
+  onChange,
 }: PlanningDoctorPickerProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(inline);
   const [providers, setProviders] = useState<ProviderSummary[] | null>(null);
   const [specializations, setSpecializations] = useState<SpecializationItem[] | null>(null);
   const [specializationId, setSpecializationId] = useState("");
@@ -253,6 +261,8 @@ export function PlanningDoctorPicker({
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [doctorId, setDoctorId] = useState("");
   const [error, setError] = useState("");
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!open || providers) return;
@@ -295,6 +305,7 @@ export function PlanningDoctorPicker({
 
   useEffect(() => {
     setProviderId("");
+    if (inline) onChangeRef.current?.(null);
     if (!specializationId) return;
     let cancelled = false;
     fetchProvidersBySpecializations([specializationId])
@@ -334,7 +345,7 @@ export function PlanningDoctorPicker({
     };
   }, [providerId]);
 
-  if (!open) {
+  if (!open && !inline) {
     return (
       <Button
         type="button"
@@ -360,6 +371,21 @@ export function PlanningDoctorPicker({
   const doctor = doctors.find((item) => item.id === doctorId) ?? null;
   const providerLabel = tx("Клиника / провайдер", "Klinik / Anbieter");
   const doctorFieldLabel = tx("Врач", "Arzt");
+  const report = (nextProviderId: string, nextDoctorId: string) => {
+    if (!inline || !onChange) return;
+    const chosen = shownProviders?.find((item) => item.id === nextProviderId) ?? null;
+    const chosenDoctor = doctors.find((item) => item.id === nextDoctorId) ?? null;
+    onChange(
+      chosen
+        ? {
+            providerId: chosen.id,
+            providerName: chosen.name,
+            doctorId: chosenDoctor?.id ?? null,
+            doctorName: chosenDoctor?.name ?? null,
+          }
+        : null,
+    );
+  };
 
   return (
     <div
@@ -396,7 +422,10 @@ export function PlanningDoctorPicker({
         <NativeComboboxSelect
           aria-label={providerLabel}
           value={providerId}
-          onChange={(event) => setProviderId(event.target.value)}
+          onChange={(event) => {
+            setProviderId(event.target.value);
+            report(event.target.value, "");
+          }}
           missingValueLabel={shownProviders ? undefined : tx("Загрузка…", "Wird geladen…")}
           className={appointmentSelectControlClassName}
         >
@@ -415,7 +444,10 @@ export function PlanningDoctorPicker({
           aria-label={doctorFieldLabel}
           value={doctorId}
           disabled={!providerId || doctors.length === 0}
-          onChange={(event) => setDoctorId(event.target.value)}
+          onChange={(event) => {
+            setDoctorId(event.target.value);
+            report(providerId, event.target.value);
+          }}
           className={appointmentSelectControlClassName}
         >
           <option value="">
@@ -429,6 +461,8 @@ export function PlanningDoctorPicker({
             </option>
           ))}
         </NativeComboboxSelect>
+        {inline ? null : (
+        <>
         <Button
           type="button"
           size="sm"
@@ -436,7 +470,7 @@ export function PlanningDoctorPicker({
           disabled={!provider}
           onClick={() => {
             if (!provider) return;
-            onAdd({
+            onAdd?.({
               providerId: provider.id,
               providerName: provider.name,
               doctorId: doctor?.id ?? null,
@@ -457,6 +491,8 @@ export function PlanningDoctorPicker({
         >
           {tx("Отмена", "Abbrechen")}
         </Button>
+        </>
+        )}
       </div>
       {error ? <p className="text-xs text-rose-700">{error}</p> : null}
     </div>
