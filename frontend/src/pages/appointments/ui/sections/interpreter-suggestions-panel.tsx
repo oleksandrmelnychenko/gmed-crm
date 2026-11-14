@@ -2,7 +2,7 @@ import { History, Languages } from "lucide-react";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Banner, CountBadge, Section, tokens } from "@/components/ui-shell";
+import { Banner, CountBadge, Section } from "@/components/ui-shell";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
@@ -70,10 +70,6 @@ export function InterpreterSuggestionsPanel({
       icon={Languages}
       title={t.appointments_interpreter_suggestions_title}
     >
-      <p className={tokens.text.muted}>
-        {t.appointments_interpreter_suggestions_description}
-      </p>
-
       {topSuggestion ? (
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
           <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">

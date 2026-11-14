@@ -181,7 +181,6 @@ export interface ClinicalTranslations {
   appointments_doctor_follow_up_mirror_task: string;
   appointments_doctor_follow_up_create: string;
   appointments_interpreter_suggestions_title: string;
-  appointments_interpreter_suggestions_description: string;
   appointments_interpreter_recommended_now: string;
   appointments_interpreter_score: string;
   appointments_interpreter_use_recommendation: string;
@@ -410,7 +409,6 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_doctor_follow_up_mirror_task: "Отразить это поручение как операционную задачу для выполнения и владения.",
   appointments_doctor_follow_up_create: "Создать контроль по назначению врача",
   appointments_interpreter_suggestions_title: "Рекомендации переводчика",
-  appointments_interpreter_suggestions_description: "Ранжирование учитывает историю пациента, предпочтения, обратную связь и язык. Отсутствующие языковые данные не блокируют рекомендацию. Нежелательные переводчики скрыты из рекомендаций назначения, но остаются видимыми в истории.",
   appointments_interpreter_recommended_now: "Рекомендуется сейчас",
   appointments_interpreter_score: "Оценка",
   appointments_interpreter_use_recommendation: "Использовать рекомендацию",
@@ -641,7 +639,6 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_doctor_follow_up_mirror_task: "Diese ärztliche Anweisung als operative Aufgabe für Ausführung und Ownership spiegeln.",
   appointments_doctor_follow_up_create: "Ärztliche Nachsorge erstellen",
   appointments_interpreter_suggestions_title: "Dolmetscher-Vorschläge",
-  appointments_interpreter_suggestions_description: "Das Ranking nutzt Patientenhistorie, Präferenz, Feedback und Sprache. Fehlende Sprachdaten blockieren den Vorschlag nicht. Vermeidungspräferenzen werden aus Zuweisungsvorschlägen ausgeblendet, bleiben aber in der Historie sichtbar.",
   appointments_interpreter_recommended_now: "Aktuell empfohlen",
   appointments_interpreter_score: "Score",
   appointments_interpreter_use_recommendation: "Empfehlung übernehmen",

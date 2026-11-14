@@ -136,6 +136,13 @@ export function OrderPlanAgreement({
 
   const statusInfo = PLAN_AGREEMENT_STATUS[status];
 
+  const noVisitsText = tx(
+    "Сначала запланируйте хотя бы один приём заказа — план формируется из приёмов.",
+    "Zuerst mindestens einen Termin des Auftrags planen – der Plan entsteht aus den Terminen.",
+  );
+  // No visit was ever added to the order: there is nothing to put in the plan.
+  const noVisits = !appointmentsLastAddedAt;
+
   const generatePdf = async () => {
     if (!patientId || busyRef.current) return;
     busyRef.current = true;
@@ -160,7 +167,13 @@ export function OrderPlanAgreement({
         created_at: new Date().toISOString(),
       } as DocumentItem);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      const message = cause instanceof Error ? cause.message : String(cause);
+      // The plan is built from the order's visits: say so instead of the server's English.
+      setError(
+        message.includes("Treatment plan template requires at least one appointment")
+          ? noVisitsText
+          : message,
+      );
     } finally {
       busyRef.current = false;
       setBusy(null);
@@ -260,7 +273,8 @@ export function OrderPlanAgreement({
               <Button
                 type="button"
                 data-testid="order-plan-pdf"
-                disabled={busy !== null}
+                disabled={busy !== null || noVisits}
+                title={noVisits ? noVisitsText : undefined}
                 onClick={() => void generatePdf()}
                 variant="outline"
                 size="sm"
