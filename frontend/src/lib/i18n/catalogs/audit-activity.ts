@@ -464,6 +464,15 @@ const ACTIONS: Record<string, Pair> = {
   update_phase: ["Фаза заказа изменена", "Auftragsphase geändert"],
   cancel_order: ["Заказ отменён", "Auftrag storniert"],
   reopen_lead_order: ["Заказ лида открыт снова", "Auftrag des Leads wieder geöffnet"],
+  repair_order_cancelled_at: ["Дата отмены заказа восстановлена", "Stornodatum des Auftrags nachgetragen"],
+  repair_order_clear_cancelled_at: [
+    "Дата отмены активного заказа удалена",
+    "Stornodatum eines aktiven Auftrags entfernt",
+  ],
+  repair_cancel_planned_order_service: [
+    "Запланированная услуга отменённого заказа отменена",
+    "Geplante Leistung eines stornierten Auftrags storniert",
+  ],
   group_order: ["Заказы объединены в группу", "Aufträge gruppiert"],
   ungroup_order: ["Группа заказов разделена", "Auftragsgruppe aufgelöst"],
   merge_orders: ["Заказы объединены", "Aufträge zusammengeführt"],

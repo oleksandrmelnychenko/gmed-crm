@@ -107,12 +107,17 @@ async fn assign(pool: &PgPool, patient_id: Uuid, user_id: Uuid, assigned_by: Uui
 }
 
 async fn close_order(pool: &PgPool, order_id: Uuid, status: &str) {
-    sqlx::query("UPDATE orders SET status = $2 WHERE id = $1")
-        .bind(order_id)
-        .bind(status)
-        .execute(pool)
-        .await
-        .unwrap();
+    // cancelled_at follows the status (orders_cancelled_at_consistent).
+    sqlx::query(
+        r#"UPDATE orders
+           SET status = $2, cancelled_at = CASE WHEN $2 = 'cancelled' THEN now() END
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

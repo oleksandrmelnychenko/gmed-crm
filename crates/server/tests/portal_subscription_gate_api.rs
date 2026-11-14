@@ -250,7 +250,7 @@ async fn the_chat_needs_a_current_released_subscription_in_an_order() {
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query("UPDATE orders SET status='cancelled' WHERE id=$1")
+    sqlx::query("UPDATE orders SET status='cancelled',cancelled_at=now() WHERE id=$1")
         .bind(order)
         .execute(pool)
         .await

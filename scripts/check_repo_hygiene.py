@@ -40,6 +40,9 @@ FORBIDDEN_TRACKED_PATHS = (
 # 20260928172437 withdraws the orders of failed leads and audits them inside
 # the migration transaction; the failed-lead workflow withdraws and reopens
 # lead orders through `audit::write_in_transaction` (no handler insert).
+# 20261114120001 repairs legacy cancelled orders (cancelled_at, planned lines,
+# open checklist items and tasks) and audits them inside the migration
+# transaction (no handler insert).
 AUDIT_INSERT_BUDGET = 6
 AUDIT_SEARCH_PATH = "crates/server/src/routes/"
 AUDIT_PATTERN = "INSERT INTO audit_log"

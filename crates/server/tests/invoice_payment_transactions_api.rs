@@ -1325,7 +1325,7 @@ async fn credit_transfer_to_another_recipient_is_refused() {
     }
 
     // Also when the credit comes from a cancelled order.
-    sqlx::query("UPDATE orders SET status = 'cancelled' WHERE id = $1")
+    sqlx::query("UPDATE orders SET status = 'cancelled', cancelled_at = now() WHERE id = $1")
         .bind(order_id)
         .execute(&pool)
         .await

@@ -7624,7 +7624,7 @@ async fn package_decline_and_order_rules_keep_the_overage_billable() {
     assert_eq!(status, StatusCode::OK);
 
     // Nothing is consumed on the tariff of a cancelled order.
-    sqlx::query("UPDATE orders SET status = 'cancelled' WHERE id = $1")
+    sqlx::query("UPDATE orders SET status = 'cancelled', cancelled_at = now() WHERE id = $1")
         .bind(order_id)
         .execute(&pool)
         .await
