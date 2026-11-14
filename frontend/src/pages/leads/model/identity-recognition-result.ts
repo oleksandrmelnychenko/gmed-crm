@@ -30,6 +30,16 @@ export type IdentityRecognition = {
     number: string;
     country: string;
     validUntil: string;
+    /** Read from the printed part of the page (no check digit covers them); empty when not found. */
+    issuedOn: string;
+    authority: string;
+  };
+  /** Whether the two printed values may be ticked by themselves. */
+  visual: {
+    /** The date of issue fits the zone's date of expiry (whole years apart). */
+    issuedOnConfirmed: boolean;
+    /** The authority stood under its label and was read surely. */
+    authorityConfident: boolean;
   };
   holder: IdentityRecognitionHolder;
 };
@@ -50,6 +60,7 @@ export function normalizeIdentityRecognition(raw: unknown): IdentityRecognition 
   const document = record(answer.document);
   const holder = record(answer.holder);
   const checks = record(answer.checks);
+  const visual = record(answer.visual);
   const type = text(document.id_document_type);
   return {
     status,
@@ -67,6 +78,12 @@ export function normalizeIdentityRecognition(raw: unknown): IdentityRecognition 
       number: text(document.id_document_number).split(/\s+/).filter(Boolean).join(" ").toUpperCase(),
       country: text(document.id_issuing_country).toUpperCase(),
       validUntil: dateKey(document.id_valid_until),
+      issuedOn: dateKey(document.id_issued_on),
+      authority: text(document.id_issuing_authority).split(/\s+/).filter(Boolean).join(" ").slice(0, 200),
+    },
+    visual: {
+      issuedOnConfirmed: visual.issued_on_confirmed === true,
+      authorityConfident: visual.issuing_authority_confident === true,
     },
     holder: {
       last_name: textOrNull(holder.last_name),

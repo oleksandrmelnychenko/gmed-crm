@@ -3,6 +3,10 @@
 //! for a PDF. The file never leaves the host; it lives in a private
 //! temporary directory for the run and is removed after it.
 //!
+//! The zone holds neither the date of issue nor the issuing authority: once
+//! a zone is found, the printed part of the page is read too (plain OCR with
+//! word positions, see [`crate::services::identity_visual`]).
+//!
 //! Nothing read is logged or stored here: the caller offers it to staff as a
 //! proposal (see [`crate::services::mrz`]).
 
@@ -13,6 +17,7 @@ use chrono::NaiveDate;
 use uuid::Uuid;
 
 use crate::routes::documents::{create_private_ocr_temp_file, document_ocr_semaphore};
+use crate::services::identity_visual::{self, VisualData, Word};
 use crate::services::mrz::{self, MrzData};
 
 /// The pages of a PDF that are looked at: the data page is the first or second.
@@ -178,13 +183,95 @@ async fn ocr(
         .map(|stdout| String::from_utf8_lossy(&stdout).into_owned()))
 }
 
+/// The words of one image with their boxes, all of the page's text;
+/// `None` when the pass does not run on this host or image.
+async fn ocr_words(
+    image: &Path,
+    mode: &str,
+    thresholding: &str,
+    deadline: tokio::time::Instant,
+) -> Result<Option<Vec<Word>>, RecognitionError> {
+    // German labels and umlauts read better with the German model; a host
+    // without it reads with the English one.
+    for languages in ["eng+deu", "eng"] {
+        let mut command = tokio::process::Command::new("tesseract");
+        command
+            .env("OMP_THREAD_LIMIT", "1")
+            .arg(image)
+            .arg("stdout")
+            .arg("--oem")
+            .arg("1")
+            .arg("--psm")
+            .arg(mode)
+            .arg("-l")
+            .arg(languages)
+            .arg("-c")
+            .arg(format!("thresholding_method={thresholding}"))
+            .arg("tsv");
+        if let Some(stdout) = run(command, deadline, "tesseract").await? {
+            return Ok(Some(identity_visual::words_of_tsv(
+                &String::from_utf8_lossy(&stdout),
+            )));
+        }
+    }
+    Ok(None)
+}
+
+/// The date of issue and the authority from the printed part: the page of
+/// the zone first (as a page, then as sparse text), then the other pages
+/// once — an ID card carries them on the other side. A pass that fails or
+/// runs out of time ends the search; the zone's values stand without them.
+async fn read_visual(
+    images: &[PathBuf],
+    zone_image: usize,
+    zone_mode: &str,
+    thresholding: &str,
+    data: &MrzData,
+    today: NaiveDate,
+    deadline: tokio::time::Instant,
+) -> VisualData {
+    // The zone read only with orientation detection: the page is turned.
+    let modes: [&str; 2] = if zone_mode == "1" {
+        ["1", "12"]
+    } else {
+        ["3", "11"]
+    };
+    let mut visual = VisualData::default();
+    let order =
+        std::iter::once(zone_image).chain((0..images.len()).filter(|index| *index != zone_image));
+    for index in order {
+        let passes = if index == zone_image {
+            &modes[..]
+        } else {
+            &modes[..1]
+        };
+        for mode in passes {
+            match ocr_words(&images[index], mode, thresholding, deadline).await {
+                Ok(Some(words)) => visual.merge(identity_visual::read(
+                    &words,
+                    data.birth_date,
+                    data.valid_until,
+                    today,
+                )),
+                Ok(None) => {}
+                Err(_) => return visual,
+            }
+            if visual.complete() && visual.issued_on_confirmed {
+                return visual;
+            }
+        }
+    }
+    visual
+}
+
 async fn read_images(
     images: &[PathBuf],
     today: NaiveDate,
     deadline: tokio::time::Instant,
 ) -> Result<Option<MrzData>, RecognitionError> {
-    let mut best: Option<MrzData> = None;
-    for image in images {
+    // The best zone with where and how it was read.
+    let mut best: Option<(MrzData, usize, &str, &str)> = None;
+    'pages: for (index, image) in images.iter().enumerate() {
         for (mode, thresholding) in PASSES {
             let Some(text) = ocr(image, mode, thresholding, deadline).await? else {
                 continue;
@@ -192,18 +279,23 @@ async fn read_images(
             let Some(found) = mrz::read(&text, today) else {
                 continue;
             };
-            if found.checks.all() {
-                return Ok(Some(found));
-            }
+            let all = found.checks.all();
             if best
                 .as_ref()
-                .is_none_or(|current| found.checks.passed() > current.checks.passed())
+                .is_none_or(|(current, ..)| found.checks.passed() > current.checks.passed())
             {
-                best = Some(found);
+                best = Some((found, index, mode, thresholding));
+            }
+            if all {
+                break 'pages;
             }
         }
     }
-    Ok(best)
+    let Some((mut data, index, mode, thresholding)) = best else {
+        return Ok(None);
+    };
+    data.visual = read_visual(images, index, mode, thresholding, &data, today, deadline).await;
+    Ok(Some(data))
 }
 
 fn create_private_dir(path: &Path) -> std::io::Result<()> {

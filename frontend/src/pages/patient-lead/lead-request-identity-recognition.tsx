@@ -10,9 +10,9 @@ import { normalizeIdentityRecognition, type IdentityRecognition } from "@/pages/
 import { recognizeLeadIdentityDocument, type LeadRequestDocument } from "./lead-request-api";
 import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
 
-export type RecognitionDocumentField = "id_document_type" | "id_document_number" | "id_issuing_country" | "id_valid_until";
+export type RecognitionDocumentField = "id_document_type" | "id_document_number" | "id_issuing_authority" | "id_issuing_country" | "id_issued_on" | "id_valid_until";
 type DocumentField = RecognitionDocumentField;
-const FIELDS: readonly DocumentField[] = ["id_document_type", "id_document_number", "id_issuing_country", "id_valid_until"];
+const FIELDS: readonly DocumentField[] = ["id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_issued_on", "id_valid_until"];
 
 export type RecognitionRow = {
   field: DocumentField;
@@ -47,25 +47,30 @@ export function recognitionRows(
     id_document_number: result.document.number,
     id_issuing_country: result.document.country,
     id_valid_until: result.document.validUntil,
+    // Read from the printed part of the page, not from the zone.
+    id_issuing_authority: result.document.authority,
+    id_issued_on: result.document.issuedOn,
   };
   const verified: Record<DocumentField, boolean> = {
     id_document_type: all,
     id_issuing_country: all,
     id_document_number: result.checks.document_number,
     id_valid_until: result.checks.valid_until,
+    id_issuing_authority: all && result.visual.authorityConfident,
+    id_issued_on: result.checks.valid_until && result.visual.issuedOnConfirmed,
   };
   const show = (field: DocumentField, value: string) => {
     if (!value) return "";
     if (field === "id_document_type") return (text.idDocumentTypeOptions as Record<string, string>)[value] ?? value;
     if (field === "id_issuing_country") return countryLabel(value, lang) || value;
-    if (field === "id_valid_until") return formatAppDate(value);
+    if (field === "id_valid_until" || field === "id_issued_on") return formatAppDate(value);
     return value;
   };
   const stored = (field: DocumentField) => {
     const value = String(draft[field] ?? "").trim();
     if (field === "id_document_number") return normalNumber(value);
     if (field === "id_issuing_country") return value.toUpperCase();
-    if (field === "id_valid_until") return value.slice(0, 10);
+    if (field === "id_valid_until" || field === "id_issued_on") return value.slice(0, 10);
     return value;
   };
   return FIELDS.flatMap((field) => {

@@ -68,6 +68,9 @@ pub(crate) struct MrzData {
     pub checks: MrzChecks,
     /// The name field is full to its last character: a long name was cut.
     pub names_truncated: bool,
+    /// What the printed part of the page adds (date of issue, authority);
+    /// empty until [`crate::services::identity_recognition`] reads it.
+    pub visual: crate::services::identity_visual::VisualData,
 }
 
 const WEIGHTS: [u32; 3] = [7, 3, 1];
@@ -335,6 +338,7 @@ fn build(parts: Parts<'_>, today: NaiveDate) -> MrzData {
         valid_until: expiry_date(parts.expiry, today),
         checks,
         names_truncated,
+        visual: Default::default(),
     }
 }
 

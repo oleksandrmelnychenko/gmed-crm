@@ -9,7 +9,10 @@
  * fails.
  *
  * The zone holds no issuing authority, no date of issue and no place of
- * birth, so those stay with staff. Names are Latin transliterations.
+ * birth. The first two the server reads from the printed part of the page
+ * (owner 2026-11-14): no check digit covers them, so the date is ticked by
+ * itself only when it fits the zone's date of expiry, the authority only
+ * when it was read surely under its label. Names are Latin transliterations.
  */
 import { countryLabel } from "@/components/ui/country-select";
 import { formatAppDate } from "@/lib/app-time-zone";
@@ -28,8 +31,10 @@ export {
 } from "./identity-recognition-result";
 
 /** The fields of the document form the zone can fill. */
-export type RecognizedDocumentField = "type" | "number" | "country" | "validUntil";
-export const RECOGNIZED_DOCUMENT_FIELDS: readonly RecognizedDocumentField[] = ["type", "number", "country", "validUntil"];
+export type RecognizedDocumentField = "type" | "number" | "authority" | "country" | "issuedOn" | "validUntil";
+export const RECOGNIZED_DOCUMENT_FIELDS: readonly RecognizedDocumentField[] = ["type", "number", "authority", "country", "issuedOn", "validUntil"];
+/** Read from the printed part of the page, not from the zone. */
+export const PRINTED_DOCUMENT_FIELDS: readonly RecognizedDocumentField[] = ["authority", "issuedOn"];
 
 /**
  * `fill`: the form's field is empty. `same`: it already holds this value.
@@ -65,13 +70,17 @@ export function recognitionDocumentRows(
   const show: Record<RecognizedDocumentField, (value: string) => string> = {
     type: (value) => idDocumentTypeLabel(value, tx),
     number: (value) => value,
+    authority: (value) => value,
     country: (value) => countryLabel(value, lang) || value,
+    issuedOn: (value) => formatAppDate(value),
     validUntil: (value) => formatAppDate(value),
   };
   const labels: Record<RecognizedDocumentField, string> = {
     type: tx("Вид документа", "Art des Dokuments"),
     number: tx("Номер документа", "Dokumentnummer"),
+    authority: tx("Кем выдан", "Ausstellende Behörde"),
     country: tx("Страна выдачи", "Ausstellungsland"),
+    issuedOn: tx("Дата выдачи", "Ausstellungsdatum"),
     validUntil: tx("Действителен до", "Gültig bis"),
   };
   const verified: Record<RecognizedDocumentField, boolean> = {
@@ -81,11 +90,17 @@ export function recognitionDocumentRows(
     country: all,
     number: result.checks.document_number,
     validUntil: result.checks.valid_until,
+    // The printed values: the date by the zone's date of expiry, the
+    // authority by how surely it was read.
+    authority: all && result.visual.authorityConfident,
+    issuedOn: result.checks.valid_until && result.visual.issuedOnConfirmed,
   };
   const current: Record<RecognizedDocumentField, string> = {
     type: draft.type,
     number: normalizeDocumentNumber(draft.number),
+    authority: draft.authority.trim(),
     country: draft.country.trim().toUpperCase(),
+    issuedOn: draft.issuedOn,
     validUntil: draft.validUntil,
   };
   return RECOGNIZED_DOCUMENT_FIELDS.flatMap((field) => {

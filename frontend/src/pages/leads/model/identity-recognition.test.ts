@@ -53,7 +53,7 @@ describe("normalizeIdentityRecognition", () => {
   it("reads the server's answer and refuses what is none", () => {
     const result = normalizeIdentityRecognition(answer());
     expect(result?.status).toBe("verified");
-    expect(result?.document).toEqual({ type: "passport", number: "L898902C3", country: "UA", validUntil: "2031-04-15" });
+    expect(result?.document).toEqual({ type: "passport", number: "L898902C3", country: "UA", validUntil: "2031-04-15", issuedOn: "", authority: "" });
     expect(result?.holder.date_of_birth).toBe("1974-08-12");
     expect(normalizeIdentityRecognition(null)).toBeNull();
     expect(normalizeIdentityRecognition({ status: "done" })).toBeNull();
@@ -64,7 +64,7 @@ describe("normalizeIdentityRecognition", () => {
     const result = normalizeIdentityRecognition(
       answer({ document: { id_document_type: "visa", id_document_number: "l898902c3", id_issuing_country: "ua", id_valid_until: "15.04.2031" } }),
     );
-    expect(result?.document).toEqual({ type: "", number: "L898902C3", country: "UA", validUntil: "" });
+    expect(result?.document).toEqual({ type: "", number: "L898902C3", country: "UA", validUntil: "", issuedOn: "", authority: "" });
   });
 });
 
@@ -190,5 +190,33 @@ describe("onlyFields", () => {
     expect(card.map((row) => row.field)).toEqual(["number", "validUntil"]);
     expect(recognitionDocumentPatch(card, new Set(defaultRecognitionSelection(card)))).toEqual({ number: "L898902C3", validUntil: "2031-04-15" });
     expect(onlyFields(rows, undefined)).toBe(rows);
+  });
+});
+
+describe("the printed values of the page (owner 2026-11-14)", () => {
+  const printed = (visual: Record<string, boolean>) =>
+    normalizeIdentityRecognition({
+      ...(answer() as Record<string, unknown>),
+      document: { ...((answer() as { document: Record<string, unknown> }).document), id_issued_on: "2002-04-16", id_issuing_authority: " Stadt   Zenith " },
+      visual,
+    })!;
+
+  it("offers the date of issue and the authority, ticked only when the server is sure", () => {
+    const sure = recognitionDocumentRows(printed({ issued_on_confirmed: true, issuing_authority_confident: true }), emptyDraft, tx, "ru");
+    expect(sure.map((row) => row.field)).toEqual(["type", "number", "authority", "country", "issuedOn", "validUntil"]);
+    expect(sure.find((row) => row.field === "authority")).toMatchObject({ value: "Stadt Zenith", state: "fill", verified: true });
+    expect(sure.find((row) => row.field === "issuedOn")).toMatchObject({ value: "2002-04-16", proposed: "16.04.2002", verified: true });
+    expect(defaultRecognitionSelection(sure)).toEqual(expect.arrayContaining(["authority", "issuedOn"]));
+
+    const unsure = recognitionDocumentRows(printed({ issued_on_confirmed: false, issuing_authority_confident: false }), emptyDraft, tx, "ru");
+    expect(defaultRecognitionSelection(unsure)).not.toEqual(expect.arrayContaining(["authority"]));
+    expect(defaultRecognitionSelection(unsure)).not.toEqual(expect.arrayContaining(["issuedOn"]));
+    expect(recognitionDocumentPatch(unsure, new Set(["authority", "issuedOn"]))).toEqual({ authority: "Stadt Zenith", issuedOn: "2002-04-16" });
+  });
+
+  it("has no such rows when the page gave none", () => {
+    const rows = recognitionDocumentRows(normalizeIdentityRecognition(answer())!, emptyDraft, tx, "ru");
+    expect(rows.map((row) => row.field)).not.toContain("authority");
+    expect(rows.map((row) => row.field)).not.toContain("issuedOn");
   });
 });

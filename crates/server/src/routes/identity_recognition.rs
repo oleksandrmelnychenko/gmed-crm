@@ -104,6 +104,16 @@ pub(crate) fn recognition_json(found: Option<&MrzData>) -> Value {
             "id_document_number": data.document_number,
             "id_issuing_country": data.issuing_country,
             "id_valid_until": data.valid_until,
+            // Read from the printed part of the page, not from the zone.
+            "id_issued_on": data.visual.issued_on,
+            "id_issuing_authority": data.visual.issuing_authority,
+        },
+        // Whether the two printed values may be ticked by themselves: the
+        // date fits the zone's date of expiry; the authority was found under
+        // its label and read surely.
+        "visual": {
+            "issued_on_confirmed": data.visual.issued_on_confirmed,
+            "issuing_authority_confident": data.visual.issuing_authority_confident,
         },
         "holder": {
             "last_name": data.surname,
@@ -331,6 +341,9 @@ mod tests {
         assert_eq!(answer["holder"]["date_of_birth"], "1974-08-12");
         assert_eq!(answer["holder"]["legal_sex"], "female");
         assert_eq!(answer["checks"]["composite"], true);
+        // The printed part was not read here.
+        assert_eq!(answer["document"]["id_issued_on"], Value::Null);
+        assert_eq!(answer["visual"]["issued_on_confirmed"], false);
 
         let misread = zone.replace("1204159", "1304159");
         let answer = recognition_json(mrz::read(&misread, today).as_ref());

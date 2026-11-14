@@ -119,7 +119,7 @@ function Rows<Field extends string>({
   const id = useId();
   const scanLabel = tx("На скане", "Im Scan");
   const currentLabel = tx("сейчас в форме", "im Formular");
-  const unverified = tx("Не подтверждено контрольной цифрой", "Nicht durch Prüfziffer bestätigt");
+  const unverified = tx("Не подтверждено проверкой — сверьте со сканом", "Nicht durch eine Prüfung bestätigt – bitte mit dem Scan vergleichen");
   const columns = "grid-cols-[1rem_minmax(0,1fr)_minmax(0,1fr)] @min-[30rem]:grid-cols-[1rem_minmax(0,1.05fr)_minmax(0,1fr)_minmax(0,1fr)]";
   return (
     <div className="@container min-w-0 rounded-lg border border-border">
@@ -400,7 +400,7 @@ export function LeadIdentityRecognition({
         {state.kind === "running"
           ? `${tx("Читаем машиночитаемую зону файла", "Die maschinenlesbare Zone wird gelesen, Datei")} «${stateFile}»…`
           : state.kind === "applied"
-            ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}». ${documentFields ? tx("Проверьте поля.", "Bitte prüfen.") : tx("Проверьте поля и дополните «Кем выдан».", "Bitte prüfen und die Behörde ergänzen.")}`
+            ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}». ${documentFields ? tx("Проверьте поля.", "Bitte prüfen.") : tx("Проверьте поля; «Кем выдан» и дату выдачи сверьте со сканом.", "Bitte prüfen; Behörde und Ausstellungsdatum mit dem Scan vergleichen.")}`
             : state.kind === "idle" && readable.length > 0
               ? tx("Заполняет поля из машиночитаемой зоны; ничего не сохраняется без вашего подтверждения.", "Füllt die Felder aus der maschinenlesbaren Zone; nichts wird ohne Ihre Bestätigung gespeichert.")
               : null}
@@ -454,10 +454,15 @@ export function LeadIdentityRecognition({
                 <Rows rows={documentRows} selected={documentSelection} selectable={!disabled} onToggle={toggle(setDocumentSelection)} tx={tx} testId={`${testId}-document`} />
               )}
               <p className="text-xs leading-5 text-muted-foreground">
-                {tx(
-                  "«Кем выдан» и дата выдачи в машиночитаемой зоне отсутствуют — внесите их со скана.",
-                  "Ausstellende Behörde und Ausstellungsdatum stehen nicht in der maschinenlesbaren Zone – bitte vom Scan übernehmen.",
-                )}
+                {documentRows.some((row) => row.field === "authority") && documentRows.some((row) => row.field === "issuedOn")
+                  ? tx(
+                    "«Кем выдан» и дата выдачи прочитаны из текста документа, а не из машиночитаемой зоны — сверьте их со сканом.",
+                    "Ausstellende Behörde und Ausstellungsdatum stammen aus dem gedruckten Text, nicht aus der maschinenlesbaren Zone – bitte mit dem Scan vergleichen.",
+                  )
+                  : tx(
+                    "«Кем выдан» и дата выдачи читаются из текста документа; что не прочиталось — внесите со скана.",
+                    "Ausstellende Behörde und Ausstellungsdatum werden aus dem gedruckten Text gelesen; was fehlt, bitte vom Scan übernehmen.",
+                  )}
               </p>
             </section>
             {holderRows.length > 0 ? (
