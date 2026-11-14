@@ -1,11 +1,12 @@
 import { SectionHeading } from "@/components/ui/section-heading";
-import { useEffect, useRef, useState } from "react";
-import { CalendarCheck2, FileText, LoaderCircle } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { CalendarCheck2, Check, FileCheck2, FileText, LoaderCircle, PencilLine, RefreshCw, Send } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { formatAppDateTime } from "@/lib/app-time-zone";
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { fetchDocuments, generateDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
@@ -35,7 +36,9 @@ type OrderPlanAgreementProps = {
   onChanged: () => void;
 };
 
-const BUTTON = buttonVariants({ size: "sm" });
+const STEP_ICONS: Partial<Record<TreatmentPlanStatus, typeof Send>> = {
+  sent: Send, agreed: Check, correction_requested: PencilLine, finalized: FileCheck2,
+};
 
 function latestPlanDocument(documents: DocumentItem[], orderId: string) {
   return (
@@ -63,18 +66,24 @@ export function PlanAgreementSteps({
 }) {
   return (
     <>
-      {planAgreementSteps(status).map((step) => (
-        <button
-          key={step.status}
-          type="button"
-          data-testid={`order-plan-step-${step.status}`}
-          disabled={busy}
-          onClick={() => onStep(step.status)}
-          data-slot="button" data-variant="default" data-size="sm" className={BUTTON}
-        >
-          {lang === "de" ? step.de : step.ru}
-        </button>
-      ))}
+      {planAgreementSteps(status).map((step) => {
+        const Icon = STEP_ICONS[step.status];
+        return (
+          <Button
+            key={step.status}
+            type="button"
+            data-testid={`order-plan-step-${step.status}`}
+            disabled={busy}
+            onClick={() => onStep(step.status)}
+            variant={step.primary ? "default" : "outline"}
+            size="sm"
+            className="h-auto min-h-8 max-w-full gap-1.5 whitespace-normal py-1.5 text-left"
+          >
+            {Icon && <Icon aria-hidden="true" className="size-3.5" />}
+            {lang === "de" ? step.de : step.ru}
+          </Button>
+        );
+      })}
     </>
   );
 }
@@ -106,6 +115,7 @@ export function OrderPlanAgreement({
   // the disabled buttons render.
   const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const noteId = useId();
 
   useEffect(() => setNoteDraft(note ?? ""), [note]);
 
@@ -189,7 +199,6 @@ export function OrderPlanAgreement({
       ? [
           tx("Статус установил", "Status gesetzt von"),
           statusUpdatedByName || tx("сотрудник", "Mitarbeiter"),
-          formatAppDateTime(statusUpdatedAt) || statusUpdatedAt,
         ].join(" ")
       : null;
 
@@ -198,18 +207,19 @@ export function OrderPlanAgreement({
     : null;
 
   return (
-    <div data-testid="order-plan-agreement" className="rounded-lg border border-border bg-card p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <section data-testid="order-plan-agreement" className="overflow-hidden rounded-xl border border-border bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
         <h3><SectionHeading icon={CalendarCheck2}>{tx("План для пациента", "Plan für den Patienten")}</SectionHeading></h3>
-        <StatusBadge tone={statusInfo?.tone ?? "neutral"}>{statusLabel}</StatusBadge>
-      </div>
-      {statusSetLine ? (
-        <p data-testid="order-plan-status-set" className="mt-1 text-xs text-muted-foreground">
-          {statusSetLine}
-        </p>
-      ) : null}
+        <StatusBadge tone={statusInfo?.tone ?? "neutral"} className="h-auto whitespace-normal">{statusLabel}</StatusBadge>
+      </header>
 
-      <div className="mt-2 space-y-2">
+      <div className="space-y-3 p-3">
+        {statusSetLine ? (
+          <p data-testid="order-plan-status-set" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span>{statusSetLine}</span>{" "}
+            <PortalDateChip>{formatAppDateTime(statusUpdatedAt!) || statusUpdatedAt}</PortalDateChip>
+          </p>
+        ) : null}
         {error ? <Banner tone="error">{error}</Banner> : null}
         {pdfStale || statusStale ? (
           <div
@@ -233,48 +243,58 @@ export function OrderPlanAgreement({
         ) : null}
 
         {patientId ? (
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <FileText aria-hidden className="size-4 text-muted-foreground" />
-            {documentHref ? (
-              <StaffLink to={documentHref} className="font-medium text-foreground hover:underline">
-                {tx("PDF плана лечения", "Behandlungsplan (PDF)")}
-              </StaffLink>
-            ) : (
-              <span className="text-muted-foreground">
-                {tx("PDF плана ещё не сформирован", "Noch kein Behandlungsplan als PDF")}
-              </span>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2 text-sm">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+              {documentHref ? (
+                <StaffLink to={documentHref} className="min-w-0 break-words font-medium text-foreground hover:underline">
+                  {tx("PDF плана лечения", "Behandlungsplan (PDF)")}
+                </StaffLink>
+              ) : (
+                <span className="text-muted-foreground">
+                  {tx("PDF плана ещё не сформирован", "Noch kein Behandlungsplan als PDF")}
+                </span>
+              )}
+            </div>
             {canEdit ? (
-              <button
+              <Button
                 type="button"
                 data-testid="order-plan-pdf"
                 disabled={busy !== null}
                 onClick={() => void generatePdf()}
-                data-slot="button" data-variant="default" data-size="sm" className={BUTTON}
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
               >
-                {busy === "pdf" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                {busy === "pdf" ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw aria-hidden="true" className="size-3.5" />}
                 {planDocument
                   ? tx("Обновить PDF", "PDF aktualisieren")
                   : tx("Сформировать PDF", "PDF erstellen")}
-              </button>
+              </Button>
             ) : null}
           </div>
         ) : null}
 
         {canEdit ? (
-          <>
-            <input
-              type="text"
-              data-testid="order-plan-note"
-              value={noteDraft}
-              onChange={(event) => setNoteDraft(event.target.value)}
-              className="h-8 w-full rounded-md border border-border bg-field px-3 text-sm"
-              placeholder={tx(
-                "Заметка к согласованию: что ответил пациент, что поправить",
-                "Notiz zur Abstimmung: Antwort des Patienten, Korrekturen",
-              )}
-            />
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-0 basis-72 grow space-y-1.5">
+              <label htmlFor={noteId} className="block text-xs font-medium text-muted-foreground">
+                {tx("Заметка к согласованию", "Notiz zur Abstimmung")}
+              </label>
+              <input
+                id={noteId}
+                type="text"
+                data-testid="order-plan-note"
+                value={noteDraft}
+                onChange={(event) => setNoteDraft(event.target.value)}
+                className="h-9 w-full rounded-lg border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
+                placeholder={tx(
+                  "Ответ пациента или необходимые изменения",
+                  "Antwort des Patienten oder nötige Änderungen",
+                )}
+              />
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <PlanAgreementSteps
                 status={status}
                 lang={lang}
@@ -283,11 +303,11 @@ export function OrderPlanAgreement({
               />
               {busy === "step" ? <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" /> : null}
             </div>
-          </>
+          </div>
         ) : note ? (
           <p className="text-sm text-muted-foreground">{note}</p>
         ) : null}
       </div>
-    </div>
+    </section>
   );
 }

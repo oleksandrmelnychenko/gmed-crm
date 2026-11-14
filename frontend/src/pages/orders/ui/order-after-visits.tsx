@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ClipboardCheck, FileText, LoaderCircle, Receipt, Upload } from "lucide-react";
+import { CalendarArrowUp, ClipboardCheck, Clock3, FileText, Inbox, Languages, LoaderCircle, Receipt, Upload } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { SectionHeading } from "@/components/ui/section-heading";
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { appDateKey } from "@/lib/app-time-zone";
@@ -194,14 +195,10 @@ export function OrderAfterVisits({
   ));
 
   return (
-    <div data-testid="order-after-visits" className="rounded-lg border border-border bg-card p-3">
-      <SectionHeading icon={ClipboardCheck}>{tx("После приёмов", "Nach den Terminen")}</SectionHeading>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {tx(
-          "Всё, что собрали после визита, — у своего приёма. Счёт клиники привязывать не обязательно.",
-          "Alles nach dem Besuch beim jeweiligen Termin. Eine Klinikrechnung muss nicht zugeordnet werden.",
-        )}
-      </p>
+    <section data-testid="order-after-visits" className="@container overflow-hidden rounded-xl border border-border bg-card">
+      <header className="border-b border-border px-3 py-2.5">
+        <h3><SectionHeading icon={ClipboardCheck}>{tx("После приёмов", "Nach den Terminen")}</SectionHeading></h3>
+      </header>
       <input
         ref={fileInput}
         type="file"
@@ -213,219 +210,191 @@ export function OrderAfterVisits({
           event.target.value = "";
         }}
       />
-      {error ? (
-        <div className="mt-2">
-          <Banner tone="error">{error}</Banner>
-        </div>
-      ) : null}
-      <div className="mt-2 overflow-x-auto">
-        <table className="w-full min-w-[56rem] border-collapse text-[13px]">
-          <thead>
-            <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <th className="px-2 py-1.5 font-semibold">{tx("Приём", "Termin")}</th>
-              <th className="px-2 py-1.5 font-semibold">{tx("Заключения и документы", "Befunde und Dokumente")}</th>
-              <th className="px-2 py-1.5 font-semibold">{tx("Переводчик", "Dolmetscher")}</th>
-              <th className="px-2 py-1.5 font-semibold">{tx("Счета клиник", "Klinikrechnungen")}</th>
-              <th className="px-2 py-1.5 font-semibold">{tx("Дальше", "Weiter")}</th>
-              <th className="px-2 py-1.5 font-semibold">{tx("Статус", "Status")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visits.map((visit) => {
-              const papers = documentsOf(current.documents, visit.id);
-              const invoices = invoicesOf(current.invoices, visit.id);
-              const interpreter = interpreterState(visit, orderRequiresInterpreter);
-              const missing = missingAfterVisit(papers, interpreter);
-              const next = nextVisitAfter(visit, current.appointments);
-              const addable = current.invoices.filter(
-                (invoice) => invoice.status !== "cancelled" && !invoice.appointment_ids.includes(visit.id),
-              );
-              const interp = interpreterText(interpreter);
-              return (
-                <tr key={visit.id} data-testid="order-after-visit-row" className="border-b border-border/60 align-top">
-                  <td className="px-2 py-2">
-                    <div className="font-semibold tabular-nums">
-                      {plannedDayLabel(visit.date, lang)} {plannedTimeLabel(visit)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {[...new Set([visit.doctor_name, visit.provider_name, visit.title].filter(Boolean))].join(" · ")}
-                    </div>
-                  </td>
-                  <td className="px-2 py-2">
-                    <ul className="space-y-0.5">
-                      {papers.map((paper) => (
-                        <li key={paper.id} className="flex items-center gap-1">
-                          <FileText aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                          <StaffLink to={`/documents?document=${encodeURIComponent(paper.id)}`} className="hover:underline">
-                            {documentName(paper)}
-                          </StaffLink>
-                        </li>
-                      ))}
-                    </ul>
-                    {canEdit ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="mt-1 h-7 gap-1 text-xs"
-                        disabled={Boolean(busyKey)}
-                        onClick={() => startUpload(visit.id)}
-                      >
-                        {busyKey === `upload:${visit.id}` ? (
-                          <LoaderCircle className="size-3.5 animate-spin" />
-                        ) : (
-                          <Upload className="size-3.5" />
-                        )}
-                        {tx("Загрузить", "Hochladen")}
-                      </Button>
-                    ) : null}
-                  </td>
-                  <td className="px-2 py-2">
-                    <StatusBadge tone={interp.tone}>{interp.text}</StatusBadge>
-                    {visit.interpreter_name ? (
-                      <div className="mt-0.5 text-xs text-muted-foreground">{visit.interpreter_name}</div>
-                    ) : null}
-                  </td>
-                  <td className="px-2 py-2">
-                    <ul className="space-y-0.5">
-                      {invoices.map((invoice) => (
-                        <li key={invoice.id} className="flex items-center gap-1">
-                          <Receipt aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                          <span className="tabular-nums">{invoiceText(invoice)}</span>
-                          {invoice.appointment_ids.length > 1 ? (
-                            <span className="text-xs text-muted-foreground">
-                              {tx(`(на ${invoice.appointment_ids.length} приёма)`, `(für ${invoice.appointment_ids.length} Termine)`)}
-                            </span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                    {invoices.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">{tx("не привязан", "nicht zugeordnet")}</span>
-                    ) : null}
-                    {canEdit && addable.length > 0 ? (
-                      <NativeComboboxSelect
-                        aria-label={tx("Привязать счёт", "Rechnung zuordnen")}
-                        value=""
-                        disabled={Boolean(busyKey)}
-                        onChange={(event) => {
-                          const invoice = addable.find((item) => item.id === event.target.value);
-                          if (invoice) linkInvoice(invoice, visit.id);
-                        }}
-                        className={`${appointmentSelectControlClassName} mt-1`}
-                      >
-                        <option value="">{tx("Привязать счёт…", "Rechnung zuordnen…")}</option>
-                        {addable.map((invoice) => (
-                          <option key={invoice.id} value={invoice.id}>
-                            {invoiceText(invoice)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                    ) : null}
-                  </td>
-                  <td className="px-2 py-2 text-xs">
-                    {next ? (
-                      <span>
-                        {tx("Следующий приём", "Nächster Termin")}: {plannedDayLabel(next.date, lang)} {plannedTimeLabel(next)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2">
-                    {missing.length === 0 ? (
-                      <StatusBadge tone="success">{tx("Всё внесено", "Vollständig")}</StatusBadge>
-                    ) : (
-                      <StatusBadge tone="warning">
-                        {tx("Не хватает", "Es fehlt")}:{" "}
-                        {missing
-                          .map((item) =>
-                            item === "documents" ? tx("документы", "Dokumente") : tx("отчёт переводчика", "Dolmetscherbericht"),
-                          )
-                          .join(", ")}
-                      </StatusBadge>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-            {looseDocuments.length > 0 || looseInvoices.length > 0 ? (
-              <tr data-testid="order-after-visits-unsorted" className="bg-muted/30 align-top">
-                <td className="px-2 py-2">
-                  <div className="font-semibold">{tx("Без приёма", "Ohne Termin")}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {tx("пришло в заказ, ещё не разложено", "im Auftrag, noch nicht zugeordnet")}
+      <div className="space-y-3 p-3">
+        {error ? <Banner tone="error">{error}</Banner> : null}
+        {visits.map((visit) => {
+          const papers = documentsOf(current.documents, visit.id);
+          const invoices = invoicesOf(current.invoices, visit.id);
+          const interpreter = interpreterState(visit, orderRequiresInterpreter);
+          const missing = missingAfterVisit(papers, interpreter);
+          const next = nextVisitAfter(visit, current.appointments);
+          const addable = current.invoices.filter(
+            (invoice) => invoice.status !== "cancelled" && !invoice.appointment_ids.includes(visit.id),
+          );
+          const interp = interpreterText(interpreter);
+          const missingLabels = missing.map((item) =>
+            item === "documents" ? tx("документы", "Dokumente") : tx("отчёт переводчика", "Dolmetscherbericht"),
+          );
+          const details = [...new Set([visit.doctor_name, visit.provider_name].filter((name) => name && name !== visit.title))];
+          return (
+            <article key={visit.id} data-testid="order-after-visit-row" className="min-w-0 overflow-hidden rounded-lg border border-border">
+              <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-border/70 bg-muted/20 px-3 py-2.5">
+                <div className="min-w-0 flex-1 basis-64 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <PortalDateChip>{plannedDayLabel(visit.date, lang)}</PortalDateChip>
+                    <PortalDateChip icon={Clock3}>{plannedTimeLabel(visit)}</PortalDateChip>
                   </div>
-                </td>
-                <td className="px-2 py-2">
-                  <ul className="space-y-1.5">
-                    {looseDocuments.map((paper) => (
-                      <li key={paper.id} className="space-y-1">
-                        <div className="flex items-center gap-1">
-                          <FileText aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                          <StaffLink to={`/documents?document=${encodeURIComponent(paper.id)}`} className="hover:underline">
+                  <h4 className="break-words text-sm font-semibold text-foreground">{visit.title}</h4>
+                  {details.length > 0 && <p className="break-words text-xs leading-5 text-muted-foreground">{details.join(" · ")}</p>}
+                </div>
+                <StatusBadge tone={missing.length === 0 ? "success" : "warning"} className="h-auto max-w-full whitespace-normal text-left leading-4">
+                  {missing.length === 0
+                    ? tx("Всё внесено", "Vollständig")
+                    : `${tx("Не хватает", "Es fehlt")}: ${missingLabels.join(", ")}`}
+                </StatusBadge>
+              </header>
+
+              <div className="grid min-w-0 grid-cols-1 divide-y divide-border/70 @min-[720px]:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] @min-[720px]:divide-x @min-[720px]:divide-y-0">
+                <section className="min-w-0 space-y-2 p-3">
+                  <h5 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <FileText aria-hidden="true" className="size-3.5 shrink-0" />
+                    {tx("Заключения и документы", "Befunde und Dokumente")}
+                  </h5>
+                  {papers.length > 0 ? (
+                    <ul className="space-y-1.5 text-sm">
+                      {papers.map((paper) => (
+                        <li key={paper.id} className="min-w-0">
+                          <StaffLink to={`/documents?document=${encodeURIComponent(paper.id)}`} className="break-words font-medium hover:underline">
                             {documentName(paper)}
                           </StaffLink>
-                        </div>
-                        {canEdit && visits.length > 0 ? (
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="text-xs text-muted-foreground">{tx("Документы ещё не добавлены", "Noch keine Dokumente")}</p>}
+                  {canEdit && (
+                    <Button type="button" variant="outline" size="sm" className="gap-1.5"
+                      disabled={Boolean(busyKey)} onClick={() => startUpload(visit.id)}>
+                      {busyKey === `upload:${visit.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload aria-hidden="true" className="size-3.5" />}
+                      {tx("Загрузить", "Hochladen")}
+                    </Button>
+                  )}
+                </section>
+
+                <section className="min-w-0 space-y-2 p-3">
+                  <h5 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Languages aria-hidden="true" className="size-3.5 shrink-0" />
+                    {tx("Переводчик", "Dolmetscher")}
+                  </h5>
+                  {visit.interpreter_name && <p className="break-words text-sm font-medium">{visit.interpreter_name}</p>}
+                  <StatusBadge tone={interp.tone} className="h-auto max-w-full whitespace-normal text-left leading-4">{interp.text}</StatusBadge>
+                </section>
+
+                <section className="min-w-0 space-y-2 p-3">
+                  <h5 className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs font-medium text-muted-foreground">
+                    <Receipt aria-hidden="true" className="size-3.5 shrink-0" />
+                    {tx("Счета клиник", "Klinikrechnungen")}
+                    <span className="font-normal">· {tx("необязательно", "optional")}</span>
+                  </h5>
+                  {invoices.length > 0 ? (
+                    <ul className="space-y-2 text-sm">
+                      {invoices.map((invoice) => (
+                        <li key={invoice.id} className="space-y-0.5">
+                          <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+                            <span className="min-w-0 break-words font-medium">{invoice.external_invoice_number}</span>
+                            <span className="whitespace-nowrap font-medium tabular-nums">{formatMoneyAmount(invoice.amount_gross, invoice.currency)}</span>
+                          </div>
+                          {invoice.provider_name && <p className="break-words text-xs leading-5 text-muted-foreground">{invoice.provider_name}</p>}
+                          {invoice.appointment_ids.length > 1 && (
+                            <p className="text-xs text-muted-foreground">
+                              {tx(`На ${invoice.appointment_ids.length} приёма`, `Für ${invoice.appointment_ids.length} Termine`)}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="text-xs text-muted-foreground">{tx("Счёт не привязан", "Keine Rechnung zugeordnet")}</p>}
+                  {canEdit && addable.length > 0 && (
+                    <NativeComboboxSelect
+                      aria-label={tx("Привязать счёт", "Rechnung zuordnen")}
+                      value=""
+                      disabled={Boolean(busyKey)}
+                      onChange={(event) => {
+                        const invoice = addable.find((item) => item.id === event.target.value);
+                        if (invoice) linkInvoice(invoice, visit.id);
+                      }}
+                      className={appointmentSelectControlClassName}
+                    >
+                      <option value="">{tx("Привязать счёт…", "Rechnung zuordnen…")}</option>
+                      {addable.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoiceText(invoice)}</option>)}
+                    </NativeComboboxSelect>
+                  )}
+                </section>
+              </div>
+              {next && (
+                <footer className="flex flex-wrap items-center gap-2 border-t border-border/70 px-3 py-2 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5"><CalendarArrowUp aria-hidden="true" className="size-3.5" />{tx("Следующий приём", "Nächster Termin")}</span>
+                  <PortalDateChip>{plannedDayLabel(next.date, lang)}</PortalDateChip>
+                  <PortalDateChip icon={Clock3}>{plannedTimeLabel(next)}</PortalDateChip>
+                </footer>
+              )}
+            </article>
+          );
+        })}
+        {(looseDocuments.length > 0 || looseInvoices.length > 0) && (
+          <section data-testid="order-after-visits-unsorted" className="min-w-0 overflow-hidden rounded-lg border border-border">
+            <header className="border-b border-border/70 bg-muted/20 px-3 py-2.5">
+              <h4><SectionHeading icon={Inbox}>{tx("Без приёма", "Ohne Termin")}</SectionHeading></h4>
+            </header>
+            <div className="grid min-w-0 grid-cols-1 divide-y divide-border/70 @min-[720px]:grid-cols-2 @min-[720px]:divide-x @min-[720px]:divide-y-0">
+              {looseDocuments.length > 0 && (
+                <section className="min-w-0 space-y-2 p-3">
+                  <h5 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <FileText aria-hidden="true" className="size-3.5" />{tx("Заключения и документы", "Befunde und Dokumente")}
+                  </h5>
+                  <ul className="space-y-3 text-sm">
+                    {looseDocuments.map((paper) => (
+                      <li key={paper.id} className="min-w-0 space-y-1.5">
+                        <StaffLink to={`/documents?document=${encodeURIComponent(paper.id)}`} className="break-words font-medium hover:underline">
+                          {documentName(paper)}
+                        </StaffLink>
+                        {canEdit && visits.length > 0 && (
                           <NativeComboboxSelect
                             aria-label={`${tx("Привязать к приёму", "Termin zuordnen")}: ${documentName(paper)}`}
                             value=""
                             disabled={Boolean(busyKey)}
-                            onChange={(event) => {
-                              if (event.target.value) linkDocument(paper, event.target.value);
-                            }}
+                            onChange={(event) => { if (event.target.value) linkDocument(paper, event.target.value); }}
                             className={appointmentSelectControlClassName}
                           >
                             <option value="">{tx("Привязать к приёму…", "Termin zuordnen…")}</option>
                             {visitOptions}
                           </NativeComboboxSelect>
-                        ) : null}
+                        )}
                       </li>
                     ))}
                   </ul>
-                </td>
-                <td className="px-2 py-2" />
-                <td className="px-2 py-2">
-                  <ul className="space-y-1.5">
+                </section>
+              )}
+              {looseInvoices.length > 0 && (
+                <section className="min-w-0 space-y-2 p-3">
+                  <h5 className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Receipt aria-hidden="true" className="size-3.5" />{tx("Счета клиник", "Klinikrechnungen")}
+                    <span className="font-normal">· {tx("можно оставить без приёма", "kann ohne Termin bleiben")}</span>
+                  </h5>
+                  <ul className="space-y-3 text-sm">
                     {looseInvoices.map((invoice) => (
-                      <li key={invoice.id} className="space-y-1">
-                        <div className="flex items-center gap-1">
-                          <Receipt aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                          <span className="tabular-nums">{invoiceText(invoice)}</span>
-                        </div>
-                        {canEdit && visits.length > 0 ? (
+                      <li key={invoice.id} className="min-w-0 space-y-1.5">
+                        <p className="break-words">{invoiceText(invoice)}</p>
+                        {canEdit && visits.length > 0 && (
                           <NativeComboboxSelect
                             aria-label={`${tx("Привязать к приёму", "Termin zuordnen")}: ${invoice.external_invoice_number}`}
                             value=""
                             disabled={Boolean(busyKey)}
-                            onChange={(event) => {
-                              if (event.target.value) linkInvoice(invoice, event.target.value);
-                            }}
+                            onChange={(event) => { if (event.target.value) linkInvoice(invoice, event.target.value); }}
                             className={appointmentSelectControlClassName}
                           >
                             <option value="">{tx("Привязать к приёму…", "Termin zuordnen…")}</option>
                             {visitOptions}
                           </NativeComboboxSelect>
-                        ) : null}
+                        )}
                       </li>
                     ))}
                   </ul>
-                  {looseInvoices.length > 0 ? (
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {tx("можно оставить без приёма", "kann ohne Termin bleiben")}
-                    </div>
-                  ) : null}
-                </td>
-                <td className="px-2 py-2" />
-                <td className="px-2 py-2">
-                  <StatusBadge tone="neutral">{tx("необязательно", "optional")}</StatusBadge>
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+                </section>
+              )}
+            </div>
+          </section>
+        )}
       </div>
-    </div>
+    </section>
   );
 }

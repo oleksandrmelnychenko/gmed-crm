@@ -43,7 +43,7 @@ describe("a child's cabinet by who signs in (QA 2026-10-24)", () => {
     ]);
     expect(recipientOptions(leadRequestText("uk"), parentLogin).self).toBe("Я (як один із батьків / законний представник)");
     // An adult's representative and an own login are not touched.
-    expect(recipientOptions(leadRequestText("de"), { access_kind: "self", minor: false }, true).self).toBe("Ich");
+    expect(recipientOptions(leadRequestText("de"), { access_kind: "self", minor: false }, true).self).toBe("Auf meinen Namen");
   });
 
   it("names the child a guardian represents, not 'your child'", () => {
@@ -425,7 +425,7 @@ describe("lead cabinet languages", () => {
 
   it("names the invoice recipient by login: own, a minor's parent, an adult patient's representative", () => {
     const options = (lang: string, access_kind: string, minor: boolean) => recipientOptions(leadRequestText(lang), { access_kind, minor }).self;
-    expect(options("de", "self", false)).toBe("Ich");
+    expect(options("de", "self", false)).toBe("Auf meinen Namen");
     expect(options("de", "guardian", true)).toBe("Ich (als Elternteil / gesetzliche Vertretung)");
     expect(options("ru", "guardian", true)).toBe("Я (как родитель / законный представитель)");
     expect(["de", "ru", "uk", "en"].map((lang) => options(lang, "guardian", false))).toEqual([
@@ -552,7 +552,7 @@ describe("lead cabinet languages", () => {
     ]);
     const ru = leadRequestText("ru");
     expect(ru.recipient.question).toBe("Кто является получателем счёта?");
-    expect(ru.recipient.options).toEqual({ self: "Я", third_party: "Третье лицо или организация" });
+    expect(ru.recipient.options).toEqual({ self: "На моё имя", third_party: "Третье лицо или организация" });
     // Written like the payer's list (QA 2026-10-11 N-12).
     expect(ru.recipient.typeOptions).toEqual({ person: "Физическое лицо", organisation: "Организация" });
     expect(ru.recipient.payerOptions.person).toBe(ru.recipient.typeOptions.person);

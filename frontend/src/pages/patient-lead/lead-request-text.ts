@@ -460,6 +460,7 @@ export type LeadRequestText = {
   identityRenewIntro: string;
   /** Step "Ausweis": the copy only, GMED enters the data from it. */
   identityIntro: string;
+  identityDataOptional: string;
   /** «Read the data from the scan»: the proposal of the machine readable zone. */
   recognition: {
     run: string;
@@ -1426,7 +1427,7 @@ const de: LeadRequestText = {
     vormundSelf: "Vormund / Pfleger",
     selfVormund: "Ich (als gesetzliche Vertretung)",
     isPayerVormund: "Der Vormund / Pfleger zahlt auch",
-    options: { self: "Ich", third_party: "Eine andere Person oder Organisation" },
+    options: { self: "Auf meinen Namen", third_party: "Eine andere Person oder Organisation" },
     optionsGuardian: {
       self: "Ich (als Elternteil / gesetzliche Vertretung)",
       third_party: "Eine andere Person oder Organisation",
@@ -1555,23 +1556,24 @@ const de: LeadRequestText = {
   viaThirdPartyKindOptions: { person: "Über eine andere Person", psp: "Über einen Zahlungsdienstleister" },
   identityRenewIntro: "Bitte laden Sie ein aktuelles, gut lesbares Foto oder einen Scan Ihres Ausweisdokuments hoch.",
   identityIntro:
-    "Bitte laden Sie ein Foto oder einen Scan Ihres Ausweisdokuments hoch (bei einem Personalausweis Vorder- und Rückseite). Tragen Sie darunter die Angaben aus dem Dokument ein – so erscheinen sie in Ihren Unterlagen. Fehlt etwas, trägt GMED es aus der Kopie nach.",
+    "Ein Foto oder Scan des Ausweisdokuments genügt zunächst (beim Personalausweis beide Seiten). Sie können die Felder leer lassen und weitergehen. GMED ergänzt die Angaben anhand der Kopie.",
+  identityDataOptional: "Diese Angaben sind jetzt optional",
   recognition: {
     run: "Daten aus dem Scan lesen",
     again: "Erneut lesen",
-    hint: "Liest die maschinenlesbare Zone des Ausweises und schlägt die Werte vor. Nichts wird ohne Ihre Bestätigung übernommen.",
+    hint: "Schlägt Angaben aus dem hochgeladenen Dokument vor. Sie werden erst nach Ihrer Bestätigung übernommen.",
     running: "Die maschinenlesbare Zone wird gelesen…",
-    notFound: "Auf dem Scan wurde keine maschinenlesbare Zone gefunden. Bitte geben Sie die Daten manuell ein. Am besten lesbar ist ein gerader Scan der ganzen Datenseite ohne Reflexionen.",
-    failed: "Das Dokument konnte nicht gelesen werden. Bitte geben Sie die Daten manuell ein.",
+    notFound: "Auf dem Scan wurde keine maschinenlesbare Zone gefunden. Sie können weitergehen — GMED ergänzt die Angaben anhand der Kopie.",
+    failed: "Das Dokument konnte nicht gelesen werden. Sie können weitergehen — GMED ergänzt die Angaben anhand der Kopie.",
     title: "Aus dem Scan gelesen",
     verified: "Prüfziffern stimmen",
     unverified: "Der Scan wurde fehlerhaft gelesen (Prüfziffern stimmen nicht). Die Werte können falsch sein: Bitte vergleichen Sie jeden Wert mit dem Dokument, bevor Sie ihn übernehmen.",
     same: "stimmt überein",
     current: "im Formular",
-    authorityHint: "Ausstellende Behörde und Ausstellungsdatum stehen nicht in der maschinenlesbaren Zone – bitte selbst eintragen.",
+    authorityHint: "Ausstellende Behörde und Ausstellungsdatum werden nicht erkannt. Diese Felder können Sie vorerst leer lassen.",
     apply: "Angekreuztes übernehmen",
     dismiss: "Ausblenden",
-    applied: "Übernommen. Bitte prüfen Sie die Felder und ergänzen Sie die Behörde.",
+    applied: "Übernommen. Bitte prüfen Sie die übernommenen Angaben; leere Felder können Sie vorerst so lassen.",
     file: "Datei",
     choose: "Sie haben mehrere Dateien hochgeladen – bitte wählen Sie, aus welcher die Daten gelesen werden:",
     read: "Lesen",
@@ -1704,7 +1706,7 @@ const de: LeadRequestText = {
   representativeEmailStaff: "Diese Adresse hat GMED eingetragen; Änderungen nimmt GMED vor.",
   representativeIdDataStaff: "Diese Angaben hat GMED anhand der Kopie eingetragen; Änderungen nimmt GMED vor.",
   representativeIdDataIntro:
-    "Tragen Sie hier die Angaben aus dem Dokument ein – so erscheinen sie in den Unterlagen. Fehlt etwas, trägt GMED es aus der Kopie nach.",
+    "Die hochgeladene Kopie genügt zunächst. Sie können die Felder leer lassen und weitergehen. GMED ergänzt die Angaben anhand der Kopie.",
   representativeOtherParentInvite:
     "Der andere Elternteil erhält einen eigenen Zugang, sobald GMED ihn dazu einlädt. Bitte geben Sie dafür seine E-Mail-Adresse an.",
   serverChangedByParent: "Die Angaben hat der andere Elternteil geändert – bitte prüfen Sie das Feld.",
@@ -2107,7 +2109,7 @@ const ru: LeadRequestText = {
     vormundSelf: "Опекун / попечитель",
     selfVormund: "Я (как законный представитель)",
     isPayerVormund: "Опекун / попечитель также оплачивает",
-    options: { self: "Я", third_party: "Третье лицо или организация" },
+    options: { self: "На моё имя", third_party: "Третье лицо или организация" },
     optionsGuardian: {
       self: "Я (как родитель / законный представитель)",
       third_party: "Третье лицо или организация",
@@ -2230,23 +2232,24 @@ const ru: LeadRequestText = {
   viaThirdPartyKindOptions: { person: "Через другого человека", psp: "Через платёжный сервис" },
   identityRenewIntro: "Пожалуйста, загрузите актуальное, хорошо читаемое фото или скан вашего документа.",
   identityIntro:
-    "Пожалуйста, загрузите фото или скан документа, удостоверяющего личность (для ID-карты — обе стороны). Ниже впишите данные из документа — так они будут указаны в ваших документах. Если чего-то не хватит, GMED внесёт это по копии.",
+    "Сейчас достаточно загрузить фото или скан документа (для ID-карты — обе стороны). Можно оставить поля пустыми и перейти дальше. GMED заполнит данные по копии.",
+  identityDataOptional: "Заполнять эти данные сейчас необязательно",
   recognition: {
     run: "Распознать данные со скана",
     again: "Распознать ещё раз",
-    hint: "Читает машиночитаемую зону документа и предлагает значения. Ничего не подставляется без вашего подтверждения.",
+    hint: "Предложит данные из загруженного документа. Они появятся в полях только после вашего подтверждения.",
     running: "Читаем машиночитаемую зону документа…",
-    notFound: "Машиночитаемая зона на скане не найдена. Введите данные вручную. Лучше всего читается ровный скан страницы с фото целиком, без бликов.",
-    failed: "Не удалось распознать документ. Введите данные вручную.",
+    notFound: "Машиночитаемая зона на скане не найдена. Можно перейти дальше — GMED заполнит данные по копии.",
+    failed: "Не удалось распознать документ. Можно перейти дальше — GMED заполнит данные по копии.",
     title: "Распознано со скана",
     verified: "Контрольные цифры совпали",
     unverified: "Скан прочитан с ошибками (контрольные цифры не совпали). Значения могут быть неверными: сверьте каждое с документом, прежде чем подставлять.",
     same: "совпадает",
     current: "сейчас в форме",
-    authorityHint: "«Кем выдан» и даты выдачи в машиночитаемой зоне нет — внесите их сами.",
+    authorityHint: "Кем и когда выдан документ, не распознаётся. Эти поля пока можно оставить пустыми.",
     apply: "Подставить отмеченное",
     dismiss: "Скрыть",
-    applied: "Подставлено. Проверьте поля и укажите, кем выдан документ.",
+    applied: "Подставлено. Проверьте перенесённые данные; пустые поля пока можно не заполнять.",
     file: "Файл",
     choose: "Загружено несколько файлов — выберите, из какого прочитать данные:",
     read: "Прочитать",
@@ -2382,7 +2385,7 @@ const ru: LeadRequestText = {
   representativeEmailStaff: "Этот адрес внесла GMED; изменяет его GMED.",
   representativeIdDataStaff: "Эти данные GMED внесла по копии документа; изменяет их GMED.",
   representativeIdDataIntro:
-    "Впишите сюда данные из документа — так они будут указаны в документах. Если чего-то не хватит, GMED внесёт это по копии.",
+    "Сейчас достаточно загруженной копии. Можно оставить поля пустыми и перейти дальше. GMED заполнит данные по копии.",
   representativeOtherParentInvite:
     "Второй родитель получит собственный доступ, когда GMED пригласит его. Для этого укажите его адрес электронной почты.",
   serverChangedByParent: "Данные изменил другой родитель — проверьте поле.",
@@ -2785,7 +2788,7 @@ const uk: LeadRequestText = {
     vormundSelf: "Опікун / піклувальник",
     selfVormund: "Я (як законний представник)",
     isPayerVormund: "Опікун / піклувальник також сплачує",
-    options: { self: "Я", third_party: "Третя особа або організація" },
+    options: { self: "На моє ім’я", third_party: "Третя особа або організація" },
     optionsGuardian: {
       self: "Я (як один із батьків / законний представник)",
       third_party: "Третя особа або організація",
@@ -2908,23 +2911,24 @@ const uk: LeadRequestText = {
   viaThirdPartyKindOptions: { person: "Через іншу особу", psp: "Через платіжний сервіс" },
   identityRenewIntro: "Будь ласка, завантажте актуальне, добре читабельне фото або скан вашого документа.",
   identityIntro:
-    "Будь ласка, завантажте фото або скан документа, що посвідчує особу (для ID-картки — обидва боки). Нижче впишіть дані з документа — так вони будуть указані у ваших документах. Якщо чогось бракуватиме, GMED внесе це з копії.",
+    "Зараз достатньо завантажити фото або скан документа (для ID-картки — обидва боки). Можна залишити поля порожніми й перейти далі. GMED заповнить дані з копії.",
+  identityDataOptional: "Заповнювати ці дані зараз необов’язково",
   recognition: {
     run: "Розпізнати дані зі скану",
     again: "Розпізнати ще раз",
-    hint: "Читає машинозчитувану зону документа і пропонує значення. Нічого не підставляється без вашого підтвердження.",
+    hint: "Запропонує дані із завантаженого документа. Вони з’являться в полях лише після вашого підтвердження.",
     running: "Читаємо машинозчитувану зону документа…",
-    notFound: "Машинозчитувану зону на скані не знайдено. Введіть дані вручну. Найкраще читається рівний скан сторінки з фото повністю, без відблисків.",
-    failed: "Не вдалося розпізнати документ. Введіть дані вручну.",
+    notFound: "Машинозчитувану зону на скані не знайдено. Можна перейти далі — GMED заповнить дані з копії.",
+    failed: "Не вдалося розпізнати документ. Можна перейти далі — GMED заповнить дані з копії.",
     title: "Розпізнано зі скану",
     verified: "Контрольні цифри зійшлися",
     unverified: "Скан прочитано з помилками (контрольні цифри не зійшлися). Значення можуть бути хибними: звірте кожне з документом, перш ніж підставляти.",
     same: "те саме значення",
     current: "зараз у формі",
-    authorityHint: "«Ким видано» і дати видачі в машинозчитуваній зоні немає — внесіть їх самостійно.",
+    authorityHint: "Ким і коли видано документ, не розпізнається. Ці поля поки можна залишити порожніми.",
     apply: "Підставити позначене",
     dismiss: "Сховати",
-    applied: "Підставлено. Перевірте поля і додайте, ким видано документ.",
+    applied: "Підставлено. Перевірте перенесені дані; порожні поля поки можна не заповнювати.",
     file: "Файл",
     choose: "Завантажено кілька файлів — оберіть, з якого прочитати дані:",
     read: "Прочитати",
@@ -3060,7 +3064,7 @@ const uk: LeadRequestText = {
   representativeEmailStaff: "Цю адресу внесла GMED; змінює її GMED.",
   representativeIdDataStaff: "Ці дані GMED внесла з копії документа; змінює їх GMED.",
   representativeIdDataIntro:
-    "Впишіть сюди дані з документа — так вони будуть указані в документах. Якщо чогось бракуватиме, GMED внесе це з копії.",
+    "Зараз достатньо завантаженої копії. Можна залишити поля порожніми й перейти далі. GMED заповнить дані з копії.",
   representativeOtherParentInvite:
     "Другий з батьків отримає власний доступ, коли GMED запросить його. Для цього вкажіть його адресу електронної пошти.",
   serverChangedByParent: "Дані змінив другий з батьків — перевірте поле.",
@@ -3463,7 +3467,7 @@ const en: LeadRequestText = {
     vormundSelf: "Guardian",
     selfVormund: "Me (as the legal representative)",
     isPayerVormund: "The guardian also pays",
-    options: { self: "Me", third_party: "Another person or an organisation" },
+    options: { self: "In my name", third_party: "Another person or an organisation" },
     optionsGuardian: {
       self: "Me (as a parent / legal representative)",
       third_party: "Another person or an organisation",
@@ -3586,23 +3590,24 @@ const en: LeadRequestText = {
   viaThirdPartyKindOptions: { person: "Through another person", psp: "Through a payment service provider" },
   identityRenewIntro: "Please upload a current, clearly readable photo or scan of your identity document.",
   identityIntro:
-    "Please upload a photo or scan of your identity document (for an ID card both sides). Enter the details of the document below — this is how they appear in your documents. Anything missing GMED adds from the copy.",
+    "For now, just upload a photo or scan of your identity document (both sides for an ID card). You can leave the fields empty and continue. GMED will fill in the details from the copy.",
+  identityDataOptional: "These details are optional for now",
   recognition: {
     run: "Read the data from the scan",
     again: "Read again",
-    hint: "Reads the machine-readable zone of the document and proposes the values. Nothing is taken over without your confirmation.",
+    hint: "Suggests details from your uploaded document. They are only filled in after your confirmation.",
     running: "Reading the machine-readable zone…",
-    notFound: "No machine-readable zone was found on the scan. Please enter the data by hand. A straight scan of the whole data page without glare reads best.",
-    failed: "The document could not be read. Please enter the data by hand.",
+    notFound: "No machine-readable zone was found on the scan. You can continue — GMED will fill in the details from the copy.",
+    failed: "The document could not be read. You can continue — GMED will fill in the details from the copy.",
     title: "Read from the scan",
     verified: "Check digits match",
     unverified: "The scan was read with errors (check digits do not match). The values may be wrong: please compare each one with the document before you take it over.",
     same: "matches",
     current: "in the form",
-    authorityHint: "The issuing authority and the date of issue are not in the machine-readable zone – please enter them yourself.",
+    authorityHint: "The issuing authority and date of issue cannot be read automatically. You can leave these fields empty for now.",
     apply: "Take over the ticked values",
     dismiss: "Hide",
-    applied: "Taken over. Please check the fields and add the issuing authority.",
+    applied: "Applied. Please check the transferred details; you can leave empty fields as they are for now.",
     file: "File",
     choose: "You uploaded several files – please choose which one to read the data from:",
     read: "Read",
@@ -3731,7 +3736,7 @@ const en: LeadRequestText = {
   representativeEmailStaff: "GMED entered this address; GMED changes it.",
   representativeIdDataStaff: "GMED entered these details from the copy; GMED changes them.",
   representativeIdDataIntro:
-    "Enter the details of the document here — this is how they appear in the documents. Anything missing GMED adds from the copy.",
+    "The uploaded copy is enough for now. You can leave the fields empty and continue. GMED will fill in the details from the copy.",
   representativeOtherParentInvite:
     "The other parent gets their own access once GMED invites them. Please enter their e-mail address for this.",
   serverChangedByParent: "The other parent changed this entry – please check the field.",

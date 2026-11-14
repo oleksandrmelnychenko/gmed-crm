@@ -458,7 +458,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     expect(order).toEqual(["Versicherung", "Zahler", "Rechnungsempfänger", "Zahlungsweg"]);
     // Nobody else pays: the invoice goes to the patient or to another address.
     await expect(billing.getByRole("radio")).toHaveCount(2);
-    await expect(billing.getByRole("radio", { name: "Ich", exact: true })).not.toBeChecked();
+    await expect(billing.getByRole("radio", { name: "Auf meinen Namen", exact: true })).not.toBeChecked();
     await expect(billing.getByRole("radio", { name: "Eine andere Person (andere Anschrift)" })).toBeVisible();
     await expect(billing.getByRole("textbox", { name: /E-Mail für Rechnungen/ })).toHaveCount(0);
     await expect(billing).not.toContainText("USt-IdNr. oder Steuernummer trägt GMED bei Bedarf ein.");
@@ -479,7 +479,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
 
     // "To me" asks for an e-mail for invoices, which is optional.
     await step(page, "billing");
-    await billing.getByRole("radio", { name: "Ich", exact: true }).check();
+    await billing.getByRole("radio", { name: "Auf meinen Namen", exact: true }).check();
     await expect.poll(() => calls.billing).toEqual([{ invoice_to: "self" }]);
     const email = billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" });
     await expect(email).toBeVisible();
@@ -808,7 +808,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     expect(calls.billing).toEqual([{ payment_method: "bank_transfer", account_holder: "Anna Muster" }]);
     // The fresh request names the payer: "to the payer" is offered now, and the sections stay usable.
     await expect(billing.getByRole("radio", { name: "Die zahlende Person / Organisation" })).toBeVisible();
-    await expect(billing.getByRole("radio", { name: "Ich", exact: true })).toBeChecked();
+    await expect(billing.getByRole("radio", { name: "Auf meinen Namen", exact: true })).toBeChecked();
     await billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" }).fill("rechnung@example.com");
     await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_email: "rechnung@example.com" });
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");

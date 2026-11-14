@@ -745,18 +745,19 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect(stepBox).not.toContainText("Wie werden Sie bezahlen");
   });
 
-  test("an adult receives and pays the invoice: the box is ticked and the patient is the payer at once", async ({ page }) => {
+  test("an adult receives and pays the invoice: the box is ticked and the patient is the payer at once", async ({ page }, testInfo) => {
     const { calls, request } = await setup(page);
     await page.goto("/");
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
-    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich", exact: true }));
+    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Auf meinen Namen", exact: true }));
     // "The recipient is also the payer" is ticked by default and saved as an answer.
     await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
     await expect.poll(() => calls.billing).toEqual([{ invoice_recipient: "self", invoice_recipient_is_payer: true }]);
     // The server names the patient as payer with that answer (owner decision 2026-10-23).
     await expect.poll(() => request.payer?.payer_kind).toBe("self");
     expect(calls.payer).toEqual([]);
+    await stepBox.getByRole("radiogroup", { name: RECIPIENT }).screenshot({ path: testInfo.outputPath("recipient-desktop.png") });
     // The e-mail for invoices is optional.
     await expect(stepBox.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" })).toBeVisible();
     // Nobody else is asked about; the bare payment method follows.
@@ -1070,7 +1071,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect(page.locator("#lead-request-account_holder")).toHaveValue("Anna Maria Muster");
   });
 
-  test("the step fits a phone", async ({ page }) => {
+  test("the step fits a phone", async ({ page }, testInfo) => {
     await setup(page, {
       prepare: (request) => {
         request.billing.invoice_recipient = "third_party";
@@ -1091,6 +1092,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await step(page, "billing");
     await expect(page.getByTestId("lead-request-recipient-party")).toBeVisible();
     expect(await overflow(page)).toBeLessThanOrEqual(1);
+    await page.getByRole("radiogroup", { name: RECIPIENT }).screenshot({ path: testInfo.outputPath("recipient-mobile.png") });
   });
 
   for (const recipientPays of [true, false]) {
@@ -1185,7 +1187,7 @@ test("'Ich' keeps the third-party payer on file; 'Ich zahle selbst' replaces it 
   await page.goto("/");
   await step(page, "billing");
   const box = page.getByTestId("lead-request-step-billing");
-  await checkLabelledRadio(box.getByRole("radio", { name: "Ich" }));
+  await checkLabelledRadio(box.getByRole("radio", { name: "Auf meinen Namen", exact: true }));
   await expect.poll(() => request.billing.invoice_recipient).toBe("self");
   // The recipient is named; "I pay myself" is not ticked and the payer stays with its consents.
   expect(calls.billing.at(-1)).toMatchObject({ invoice_recipient: "self", invoice_recipient_is_payer: false });
@@ -1244,7 +1246,7 @@ test("an unanswered recipient says so at the question after Next (QA 2026-10-22)
   await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "billing");
   await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveText("Pflichtfeld");
-  await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich", exact: true }));
+  await checkLabelledRadio(stepBox.getByRole("radio", { name: "Auf meinen Namen", exact: true }));
   await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveCount(0);
 });
 

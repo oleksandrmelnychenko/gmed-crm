@@ -769,7 +769,7 @@ test("a lead's order keeps the grid as a draft until the patient exists (plan st
   await page.keyboard.press("Escape");
 });
 
-test("after the visits papers, interpreter hours and clinic invoices sit at their visit (plan stage 7)", async ({page}) => {
+test("after the visits papers, interpreter hours and clinic invoices sit at their visit (plan stage 7)", async ({page}, testInfo) => {
   await page.clock.setFixedTime(new Date("2026-11-13T09:00:00+01:00"));
   await prepare(page);
   const posts: Array<{path: string; body: string}> = [];
@@ -839,6 +839,13 @@ test("after the visits papers, interpreter hours and clinic invoices sit at thei
   const upload = posts.find(post => post.path.endsWith("/documents/upload"))!.body;
   expect(upload).toMatch(/name="appointment_id"\s+v2/);
   expect(upload).toMatch(new RegExp(`name="order_id"\\s+${orderId}`));
+  await page.setViewportSize({width: 1440, height: 1000});
+  await block.screenshot({path: testInfo.outputPath("after-visits-desktop.png")});
+  await page.setViewportSize({width: 390, height: 844});
+  await block.getByRole("heading", {name: "После приёмов", exact: true}).scrollIntoViewIfNeeded();
+  expect(await block.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(rows.nth(1).getByRole("button", {name: "Загрузить"})).toBeVisible();
+  await page.screenshot({path: testInfo.outputPath("after-visits-mobile.png")});
 });
 
 test("planning shows the hidden plan to the patient in one step (plan stage 4)", async ({page}) => {

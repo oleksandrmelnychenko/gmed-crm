@@ -1,4 +1,4 @@
-import { ContactRound, Wallet, ListPlus } from "lucide-react";
+import { Circle, CircleCheck, ContactRound, Wallet, ListPlus, UserRound, UsersRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -430,13 +430,15 @@ export function InvoiceRecipientSection({
               {text.recipient.question}
               <RequiredMark />
             </p>
-            <div className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
+            <div className="grid max-w-2xl gap-2 sm:grid-cols-2">
               {RECIPIENT_ANSWERS.map((answer) => {
                 const checked = draft.recipient === answer;
+                const Icon = answer === "self" ? UserRound : UsersRound;
+                const SelectionIcon = checked ? CircleCheck : Circle;
                 return (
                   <label
                     key={answer}
-                    className={cn("relative min-w-0 max-w-full", locked ? "cursor-default" : "cursor-pointer")}
+                    className={cn("relative min-w-0", locked ? "cursor-default" : "cursor-pointer")}
                   >
                     <input
                       type="radio"
@@ -458,12 +460,14 @@ export function InvoiceRecipientSection({
                       }}
                     />
                     <span className={cn(
-                      "flex min-h-7 items-center rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30",
+                      "flex h-full min-h-12 items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm leading-5 transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30",
                       checked
-                        ? "border-primary bg-primary font-semibold text-primary-foreground"
-                        : "border-transparent bg-card text-muted-foreground peer-enabled:hover:border-border peer-enabled:hover:bg-muted/70 peer-enabled:hover:text-foreground",
+                        ? "border-foreground/30 bg-muted/60 font-semibold text-foreground"
+                        : "border-border bg-card text-foreground peer-enabled:hover:border-foreground/25 peer-enabled:hover:bg-muted/30",
                     )}>
-                      {options[answer]}
+                      <Icon aria-hidden="true" className="size-4 shrink-0" />
+                      <span className="min-w-0 flex-1">{options[answer]}</span>
+                      <SelectionIcon aria-hidden="true" className={cn("size-4 shrink-0", !checked && "text-muted-foreground/60")} />
                     </span>
                   </label>
                 );

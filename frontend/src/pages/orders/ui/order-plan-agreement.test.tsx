@@ -36,7 +36,8 @@ describe("plan agreement controls", () => {
         onChanged={() => {}}
       />,
     );
-    expect(html).toContain("Статус установил Petra Planer 02.11.2026 14:49");
+    expect(html).toContain("Статус установил Petra Planer");
+    expect(html).toContain("02.11.2026 14:49");
     expect(html).toContain("После статуса «Финализировано» в план добавлены приёмы");
     // Without a PDF there is nothing stale to refresh.
     expect(html).not.toContain("обновите PDF");

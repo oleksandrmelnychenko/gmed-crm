@@ -181,14 +181,12 @@ export function LeadRequestIdentityRecognition({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
-            size="sm"
-            variant="outline"
-            className="h-auto min-h-8 whitespace-normal py-1.5 text-left"
+            className="h-auto min-h-10 w-full gap-2 whitespace-normal px-4 py-2 text-left sm:w-auto"
             disabled={disabled || running}
             onClick={() => void run(newestFirst[0].id)}
             data-testid={`${testId}-run`}
           >
-            {running ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
+            {running ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <ScanText aria-hidden="true" className="size-4" />}
             {state.kind === "idle" ? words.run : words.again}
           </Button>
           <span className="min-w-0 text-xs leading-5 text-muted-foreground" data-testid={`${testId}-file`}>
@@ -205,15 +203,13 @@ export function LeadRequestIdentityRecognition({
                 <li key={document.id} className="flex flex-wrap items-center gap-2" data-active={active ? "true" : undefined}>
                   <Button
                     type="button"
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
+                    className="h-auto min-h-10 max-w-full gap-2 whitespace-normal px-4 py-2 text-left"
                     disabled={disabled || running}
                     onClick={() => void run(document.id)}
                     aria-label={`${words.read}: ${fileName(document.id)}`}
                     data-testid={`${testId}-run-${document.id}`}
                   >
-                    {running && active ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
+                    {running && active ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <ScanText aria-hidden="true" className="size-4" />}
                     {active && !running ? words.again : words.read}
                   </Button>
                   <span className={cn("min-w-0 text-xs [overflow-wrap:anywhere]", active ? "font-semibold text-foreground" : "text-muted-foreground")}>

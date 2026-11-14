@@ -49,6 +49,7 @@ import {
 } from "./lead-request-model";
 import {
   CabinetSection as Section,
+  CabinetHint,
   ConsentNeededNote,
   ConsentNoteAboveContext,
   LabeledField,
@@ -382,7 +383,10 @@ export function IdentityDocumentDataFields({
     ?? (field === "id_issued_on" && form.errorFor(field) ? dateRangeMessage(lang, form.draft.id_issued_on, issuedBounds) : undefined);
   return (
     <div className="space-y-3" data-testid="lead-request-identity-data">
-      <p className="text-sm leading-6 text-muted-foreground">{text.identityIntro}</p>
+      <CabinetHint className="text-sm leading-6">
+        <p className="font-semibold text-foreground">{text.identityDataOptional}</p>
+        <p>{text.identityIntro}</p>
+      </CabinetHint>
       <div className="grid gap-3 sm:grid-cols-2">
         <IdentificationFormField form={form} field="id_document_type" text={text}>
           <IdentificationChoiceSelect form={form} field="id_document_type" options={text.idDocumentTypeOptions} text={text} />

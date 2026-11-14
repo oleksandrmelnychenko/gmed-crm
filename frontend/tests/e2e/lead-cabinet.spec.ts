@@ -1075,7 +1075,7 @@ test.describe("lead cabinet", () => {
     await expect(payer.getByRole("combobox", { name: "Handeln Sie im eigenen wirtschaftlichen Interesse?" })).toHaveCount(0);
 
     // The invoice goes to the patient; the payment route is no question of the base form any more.
-    await page.getByTestId("lead-request-billing").getByRole("radio", { name: "Ich", exact: true }).check();
+    await page.getByTestId("lead-request-billing").getByRole("radio", { name: "Auf meinen Namen", exact: true }).check();
     await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_to: "self" });
     await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
 
@@ -1952,7 +1952,7 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-summary-payer")).not.toContainText("Privatperson");
   });
 
-  test("the identity document is uploaded only after the request consent, and only as a copy", async ({ page }) => {
+  test("the identity document is uploaded only after the request consent, and only as a copy", async ({ page }, testInfo) => {
     const { calls } = await setup(page, "lead");
     await page.goto("/");
     await step(page, "identity");
@@ -1961,7 +1961,7 @@ test.describe("lead cabinet", () => {
     const list = page.getByTestId("lead-request-identity-list");
 
     // The lead may type the data of the own document under the copy (owner 2026-11-10).
-    await expect(page.getByTestId("lead-request-identity-data")).toContainText("Tragen Sie darunter die Angaben aus dem Dokument ein");
+    await expect(page.getByTestId("lead-request-identity-data")).toContainText("Diese Angaben sind jetzt optional");
     await expect(page.locator("#lead-request-id_document_type")).toHaveCount(1);
     await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(1);
     // Like the health consent before the medical documents: no consent, no upload.
@@ -1989,6 +1989,19 @@ test.describe("lead cabinet", () => {
     // A copy of the identity document is not a medical document.
     expect(calls.identityUploads).toBe(1);
     expect(calls.uploads).toBe(0);
+    // Uploading alone is enough: no manual data or recognition is needed to continue.
+    await expect(page.locator("#lead-request-id_document_number")).toHaveValue("");
+    expect(calls.recognitions).toHaveLength(0);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByTestId("lead-request-identity").screenshot({ path: testInfo.outputPath("identity-optional-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const recognition = page.getByTestId("lead-request-recognition-run");
+    await recognition.scrollIntoViewIfNeeded();
+    await expect(recognition).toBeVisible();
+    await expect(page.getByTestId("lead-request-identity-data").getByRole("note")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("identity-optional-mobile.png") });
+    await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(page.getByTestId("lead-request-step-billing")).toBeVisible();
     await step(page, "documents");
     await expect(page.getByTestId("lead-request-document-list")).toHaveText("");
     await step(page, "send");

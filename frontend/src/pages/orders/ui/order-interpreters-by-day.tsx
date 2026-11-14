@@ -1,8 +1,9 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle, Languages } from "lucide-react";
+import { Clock3, LoaderCircle, Languages, UserRoundPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Banner, StatusBadge } from "@/components/ui-shell";
@@ -313,9 +314,9 @@ export function OrderInterpretersByDay({
     suggestions && suggestionTarget && suggestions.key === suggestionTarget.id ? suggestions : null;
 
   return (
-    <div data-testid="order-interpreters-by-day" className="rounded-lg border border-border bg-card p-3">
-      <h3><SectionHeading icon={Languages}>{tx("Переводчики по дням", "Dolmetscher nach Tagen")}</SectionHeading></h3>
-      <div className="mt-2 space-y-2">
+    <div data-testid="order-interpreters-by-day" className="overflow-hidden rounded-xl border border-border bg-card">
+      <h3 className="border-b border-border px-3 py-2.5"><SectionHeading icon={Languages}>{tx("Переводчики по дням", "Dolmetscher nach Tagen")}</SectionHeading></h3>
+      <div className="@container space-y-3 p-3">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {!error && !appointments ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -491,32 +492,33 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
   return (
     <>
       {days.map((day) => (
-        <section key={day.key} data-testid="order-interpreter-day" data-date={day.date ?? ""}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="flex flex-wrap items-baseline gap-x-2 text-xs font-semibold text-foreground">
-              {day.date ? plannedDayLabel(day.date, lang) : null}
+        <section key={day.key} data-testid="order-interpreter-day" data-date={day.date ?? ""} className="overflow-hidden rounded-lg border border-border/70">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-muted/20 px-3 py-2">
+            <h4 className="flex flex-wrap items-center gap-2 text-xs font-semibold text-foreground">
+              {day.date ? <PortalDateChip>{plannedDayLabel(day.date, lang)}</PortalDateChip> : null}
               {day.missingCount > 0 ? (
-                <span className="font-normal text-amber-700">
+                <StatusBadge tone="warning" className="h-auto whitespace-normal">
                   {tx(
                     `Без переводчика: ${day.missingCount}`,
                     `Ohne Dolmetscher: ${day.missingCount}`,
                   )}
-                </span>
+                </StatusBadge>
               ) : null}
-            </h3>
+            </h4>
             {!locked && day.assignableIds.length > 0 ? (
               <Button
                 type="button"
                 size="sm"
-                variant="default"
-                className="h-7 rounded-lg px-2.5 text-xs"
+                variant="outline"
+                className="h-auto min-h-7 max-w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1 text-xs"
                 onClick={() => onAssignDay(day)}
               >
+                <UserRoundPlus aria-hidden="true" className="size-3.5" />
                 {tx("Назначить переводчика на день", "Dolmetscher für den Tag")}
               </Button>
             ) : null}
           </div>
-          <ul className="mt-1 divide-y divide-border/60 rounded-md border border-border/60">
+          <ul className="divide-y divide-border/60">
             {day.appointments.map((appointment) => {
               const response = appointment.interpreter_response
                 ? RESPONSE_LABELS[appointment.interpreter_response]
@@ -526,14 +528,15 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
                 <li
                   key={appointment.id}
                   data-testid="order-interpreter-row"
-                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 text-sm"
+                  className="grid min-w-0 grid-cols-1 items-start gap-2 px-3 py-2.5 text-sm @min-[600px]:grid-cols-[minmax(0,1fr)_minmax(0,18rem)]"
                 >
-                  <div className="min-w-0 break-words">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 break-words">
+                    <PortalDateChip icon={Clock3}>{plannedTimeLabel(appointment)}</PortalDateChip>
                     <span className="font-medium text-foreground">
-                      {[plannedTimeLabel(appointment), appointment.title].filter(Boolean).join(" · ")}
+                      {appointment.title}
                     </span>
-                    {appointment.doctor_name ? (
-                      <span className="ml-2 text-xs text-muted-foreground">{appointment.doctor_name}</span>
+                    {appointment.doctor_name && appointment.doctor_name.trim() !== appointment.title.trim() ? (
+                      <span className="text-xs text-muted-foreground">{appointment.doctor_name}</span>
                     ) : null}
                   </div>
                   {/* Wraps on a phone, so the answer badge stays inside the card. */}

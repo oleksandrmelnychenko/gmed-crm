@@ -214,7 +214,10 @@ export function RepresentativeIdentityData({
           {staffMode ? cabinetStaffText(lang).idDataByStaff : text.representativeIdDataStaff}
         </CabinetHint>
       ) : (
-        <p className="text-sm leading-6 text-muted-foreground">{text.representativeIdDataIntro}</p>
+        <CabinetHint className="text-sm leading-6">
+          <p className="font-semibold text-foreground">{text.identityDataOptional}</p>
+          <p>{text.representativeIdDataIntro}</p>
+        </CabinetHint>
       )}
       {/* Whoever may edit the fields has the copy read (owner 2026-11-13: OCR wherever ID data
           are typed) — staff in the client's form too, also after staff entered the data. */}
