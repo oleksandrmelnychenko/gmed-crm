@@ -34,7 +34,154 @@ export type BusySlot = {
   interpreter_id: string | null;
   title: string | null;
   same_order: boolean;
+  /** The patient's own visit only: who it is with (older servers leave them out). */
+  doctor_name?: string | null;
+  provider_name?: string | null;
 };
+
+/** Start and end in minutes; a visit without times blocks the whole day. */
+export function busyRange(slot: BusySlot): [number, number] {
+  return [timeToMinutes(slot.time_start) ?? 0, timeToMinutes(slot.time_end) ?? 24 * 60];
+}
+
+/** «08:00 Check up-Kardiologie (Hölzenbein)»: the patient's existing visit, named. */
+export function existingVisitLabel(slot: BusySlot) {
+  const who = slot.doctor_name || slot.provider_name;
+  return [slot.time_start ?? "", slot.title ?? "", who ? `(${who})` : ""].filter(Boolean).join(" ");
+}
+
+export type ConflictDetail =
+  | { kind: "existing"; slot: BusySlot }
+  | { kind: "doctor_busy"; slot: BusySlot }
+  | { kind: "interpreter_busy"; slot: BusySlot }
+  | { kind: "plan"; other: DraftVisit; scopes: Array<"patient" | "doctor" | "interpreter"> };
+
+/**
+ * What each planned visit clashes with, named: the patient's existing visit,
+ * a doctor's or interpreter's other booking, or another visit of the plan.
+ */
+export function draftConflictDetails(
+  drafts: readonly DraftVisit[],
+  busy: readonly BusySlot[],
+): Map<string, ConflictDetail[]> {
+  const result = new Map<string, ConflictDetail[]>();
+  const push = (key: string, detail: ConflictDetail) => {
+    result.set(key, [...(result.get(key) ?? []), detail]);
+  };
+  for (const draft of drafts) {
+    const end = draft.start + draft.duration;
+    for (const slot of busy) {
+      if (slot.date !== draft.date) continue;
+      const [start, stop] = busyRange(slot);
+      if (!(draft.start < stop && start < end)) continue;
+      if (slot.scopes.includes("patient")) push(draft.key, { kind: "existing", slot });
+      else if (slot.scopes.includes("doctor") && slot.doctor_id && slot.doctor_id === draft.doctor.doctorId) {
+        push(draft.key, { kind: "doctor_busy", slot });
+      } else if (
+        slot.scopes.includes("interpreter") &&
+        draft.interpreterId &&
+        slot.interpreter_id === draft.interpreterId
+      ) {
+        push(draft.key, { kind: "interpreter_busy", slot });
+      }
+    }
+    for (const other of drafts) {
+      if (other.key === draft.key || other.date !== draft.date) continue;
+      if (!(draft.start < other.start + other.duration && other.start < end)) continue;
+      const scopes: Array<"patient" | "doctor" | "interpreter"> = ["patient"];
+      if (draft.doctor.doctorId && draft.doctor.doctorId === other.doctor.doctorId) scopes.push("doctor");
+      if (draft.interpreterId && draft.interpreterId === other.interpreterId) scopes.push("interpreter");
+      push(draft.key, { kind: "plan", other, scopes });
+    }
+  }
+  return result;
+}
+
+/** One line per clash, in the planner's words. */
+export function conflictDetailText(detail: ConflictDetail, lang: string): string {
+  const de = lang === "de";
+  const range = (slot: BusySlot) => `${slot.time_start ?? ""}–${slot.time_end ?? ""}`;
+  switch (detail.kind) {
+    case "existing":
+      return de
+        ? `Patient hat schon um ${existingVisitLabel(detail.slot)}`
+        : `пациент уже записан на ${existingVisitLabel(detail.slot)}`;
+    case "doctor_busy":
+      return de ? `Arzt belegt ${range(detail.slot)}` : `врач занят ${range(detail.slot)}`;
+    case "interpreter_busy":
+      return de ? `Dolmetscher belegt ${range(detail.slot)}` : `переводчик занят ${range(detail.slot)}`;
+    default: {
+      const who = detail.other.doctor.doctorName ?? detail.other.doctor.providerName;
+      return de
+        ? `überschneidet sich mit ${minutesToTime(detail.other.start)} ${who} im Plan`
+        : `пересекается с ${minutesToTime(detail.other.start)} ${who} в плане`;
+    }
+  }
+}
+
+/**
+ * The patient's existing visit a new visit at this time would overlap, if
+ * any: the doctor picker names it before anything is placed.
+ */
+export function existingVisitAt(
+  date: string,
+  start: number,
+  duration: number,
+  busy: readonly BusySlot[],
+): BusySlot | null {
+  return (
+    busy.find((slot) => {
+      if (slot.date !== date || !slot.scopes.includes("patient")) return false;
+      const [from, to] = busyRange(slot);
+      return start < to && from < start + duration;
+    }) ?? null
+  );
+}
+
+/** Half-hour slots the patient's own visits take: no new visit is offered there. */
+export function patientTakenSlotStarts(date: string, busy: readonly BusySlot[]): Set<number> {
+  return coveredSlotStarts(
+    date,
+    busy.filter((slot) => slot.scopes.includes("patient")),
+    [],
+  );
+}
+
+/**
+ * Side-by-side lanes for cards that overlap in one day column, so a new
+ * visit never hides an existing one: each card gets its lane and the number
+ * of lanes of its overlapping group.
+ */
+export function layoutLanes(
+  items: ReadonlyArray<{ id: string; start: number; end: number }>,
+): Map<string, { lane: number; lanes: number }> {
+  // Stable by start: earlier-listed cards (existing visits) keep the left lanes.
+  const sorted = [...items].sort((a, b) => a.start - b.start);
+  const result = new Map<string, { lane: number; lanes: number }>();
+  let group: Array<{ id: string; lane: number }> = [];
+  let groupEnd = -1;
+  let laneEnds: number[] = [];
+  const close = () => {
+    const lanes = Math.max(1, laneEnds.length);
+    for (const item of group) result.set(item.id, { lane: item.lane, lanes });
+    group = [];
+    laneEnds = [];
+  };
+  for (const item of sorted) {
+    if (item.start >= groupEnd && group.length > 0) close();
+    let lane = laneEnds.findIndex((end) => end <= item.start);
+    if (lane < 0) {
+      lane = laneEnds.length;
+      laneEnds.push(item.end);
+    } else {
+      laneEnds[lane] = item.end;
+    }
+    group.push({ id: item.id, lane });
+    groupEnd = Math.max(groupEnd, item.end);
+  }
+  close();
+  return result;
+}
 
 /** One refusal of `POST /orders/{id}/appointments/batch`, by item index. */
 export type BatchFailure = {

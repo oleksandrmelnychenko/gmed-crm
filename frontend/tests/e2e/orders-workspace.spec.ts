@@ -580,9 +580,12 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
   await expect(planner).toBeVisible();
   // The grid opens on the order's next planned day and shows taken time without other patients' names.
   await expect(planner).toContainText("Пн, 16.11.2026");
-  await expect(planner.getByTestId("order-visit-planner-busy")).toHaveCount(2);
-  await expect(planner.getByTestId("order-visit-planner-busy").first()).toContainText("Kardiologie");
-  await expect(planner.getByTestId("order-visit-planner-busy").nth(1)).toContainText("Занято: врач");
+  // The patient's own visit is a readable card marked «уже записан»; another patient's booking is taken time only.
+  await expect(planner.getByTestId("order-visit-planner-existing")).toHaveCount(1);
+  await expect(planner.getByTestId("order-visit-planner-existing")).toContainText("Kardiologie");
+  await expect(planner.getByTestId("order-visit-planner-existing")).toContainText("уже записан");
+  await expect(planner.getByTestId("order-visit-planner-busy")).toHaveCount(1);
+  await expect(planner.getByTestId("order-visit-planner-busy")).toContainText("Занято: врач");
   expect(busyQuery).toContain("from=2026-11-16");
   expect(busyQuery).toContain("to=2026-11-20");
   const slot = (date: string, time: string) =>
@@ -593,6 +596,12 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
   await expect(slot("2026-11-16", "08:30").getByText("+ приём")).toHaveCount(0);
   await expect(slot("2026-11-16", "09:00").getByText("+ приём")).toHaveCount(0);
   await expect(slot("2026-11-16", "09:30").getByText("+ приём")).toHaveCount(1);
+  // A slot the patient already has a visit in offers nothing; one just before warns about it.
+  await slot("2026-11-16", "08:30").click({force: true});
+  await expect(planner.getByTestId("order-visit-planner-choose")).toHaveCount(0);
+  await slot("2026-11-16", "08:00").click();
+  await expect(planner.getByTestId("order-visit-planner-choose-warning")).toContainText("Kardiologie");
+  await planner.getByTestId("order-visit-planner-choose").getByRole("button", {name: "Отмена"}).click();
 
   const choose = planner.getByTestId("order-visit-planner-choose");
   const editor = planner.getByTestId("order-visit-planner-editor");
@@ -604,7 +613,7 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
   await slot("2026-11-17", "10:00").click();
   await expect(planner.getByTestId("order-visit-planner-steps").locator('[aria-current="step"]')).toContainText("Выберите врача");
   await pick("Dr. Klein");
-  await expect(planner.getByTestId("order-visit-planner-plan-row")).toContainText("накладка: врач");
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toContainText("врач занят 10:00–11:00");
   await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Накладки: 1");
   await expect(create).toBeDisabled();
   await editor.getByRole("button", {name: "Убрать"}).click();

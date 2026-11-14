@@ -653,8 +653,11 @@ pub(super) async fn list_order_busy_time(
 
     let rows = match sqlx::query(
         r#"SELECT a.id, a.date, a.time_start, a.time_end, a.patient_id, a.doctor_id,
-                  a.interpreter_id, a.interpreter_response, a.title, a.order_id
+                  a.interpreter_id, a.interpreter_response, a.title, a.order_id,
+                  doctor.name AS doctor_name, provider.name AS provider_name
            FROM appointments a
+           LEFT JOIN provider_doctors doctor ON doctor.id = a.doctor_id
+           LEFT JOIN providers provider ON provider.id = a.provider_id
            WHERE a.date BETWEEN $1 AND $2
              AND a.status <> 'cancelled'
              AND (
@@ -715,8 +718,12 @@ pub(super) async fn list_order_busy_time(
                 "scopes": scopes,
                 "doctor_id": if scopes.contains(&"doctor") { doctor_id } else { None },
                 "interpreter_id": if scopes.contains(&"interpreter") { interpreter_id } else { None },
-                // Another patient's booking shows as taken time only.
+                // Another patient's booking shows as taken time only; the
+                // patient's own visit is named so the planner sees what a
+                // new visit would clash with.
                 "title": if own { row.try_get::<String, _>("title").ok() } else { None },
+                "doctor_name": if own { row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default() } else { None },
+                "provider_name": if own { row.try_get::<Option<String>, _>("provider_name").unwrap_or_default() } else { None },
                 "same_order": own
                     && row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default() == Some(order_id),
             })

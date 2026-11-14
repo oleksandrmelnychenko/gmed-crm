@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   batchFailureText,
+  conflictDetailText,
+  draftConflictDetails,
+  existingVisitAt,
+  layoutLanes,
+  patientTakenSlotStarts,
   coveredSlotStarts,
   batchPayload,
   draftConflicts,
@@ -159,5 +164,46 @@ describe("grid drafts of a lead's order", () => {
         interpreter_needed: true, interpreter_id: null,
       }],
     });
+  });
+});
+
+describe("named conflicts and side-by-side cards (owner remarks 2026-11-14)", () => {
+  const checkUp = busy({
+    id: "v1", date: "2026-11-17", time_start: "08:00", time_end: "09:00", scopes: ["patient"],
+    title: "Check up-Kardiologie", doctor_name: "Herr Ulrich Hölzenbein", provider_name: "Privatpraxis",
+  });
+  it("names the patient's existing visit, a busy doctor and a clashing plan visit", () => {
+    const a = newDraft("a", { ...mueller, doctorId: "d1" }, "2026-11-17", 8 * 60 + 30);
+    const b = newDraft("b", schmidt, "2026-11-17", 9 * 60);
+    const doctorBusy = busy({ date: "2026-11-17", time_start: "09:30", time_end: "10:00", scopes: ["doctor"], doctor_id: "d2" });
+    const details = draftConflictDetails([a, b], [checkUp, doctorBusy]);
+    expect(details.get("a")!.map((d) => conflictDetailText(d, "ru"))).toEqual([
+      "пациент уже записан на 08:00 Check up-Kardiologie (Herr Ulrich Hölzenbein)",
+      "пересекается с 09:00 Dr. Schmidt в плане",
+    ]);
+    expect(details.get("b")!.map((d) => conflictDetailText(d, "de"))).toEqual([
+      "Arzt belegt 09:30–10:00",
+      "überschneidet sich mit 08:30 Dr. Müller im Plan",
+    ]);
+  });
+
+  it("the picker learns the existing visit before anything is placed; its slots are not offered", () => {
+    expect(existingVisitAt("2026-11-17", 7 * 60 + 30, 60, [checkUp])?.title).toBe("Check up-Kardiologie");
+    expect(existingVisitAt("2026-11-17", 9 * 60, 60, [checkUp])).toBeNull();
+    expect([...patientTakenSlotStarts("2026-11-17", [checkUp, busy({ date: "2026-11-17", scopes: ["doctor"] })])].map(minutesToTime))
+      .toEqual(["08:00", "08:30"]);
+  });
+
+  it("overlapping cards get lanes side by side; separate ones keep the full width", () => {
+    const lanes = layoutLanes([
+      { id: "existing", start: 600, end: 660 },
+      { id: "new", start: 600, end: 690 },
+      { id: "later", start: 690, end: 720 },
+      { id: "alone", start: 800, end: 830 },
+    ]);
+    expect(lanes.get("existing")).toEqual({ lane: 0, lanes: 2 });
+    expect(lanes.get("new")).toEqual({ lane: 1, lanes: 2 });
+    expect(lanes.get("later")).toEqual({ lane: 0, lanes: 1 });
+    expect(lanes.get("alone")).toEqual({ lane: 0, lanes: 1 });
   });
 });

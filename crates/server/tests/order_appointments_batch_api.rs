@@ -392,6 +392,24 @@ async fn busy_time_hides_other_patients_and_only_planners_may_batch() {
     assert_eq!(items[0]["scopes"], json!(["patient"]));
     assert_eq!(items[0]["title"], "Visit 08:00");
     assert_eq!(items[0]["same_order"], true);
+    assert!(
+        items[0]["doctor_name"]
+            .as_str()
+            .unwrap()
+            .starts_with("Doctor"),
+        "{body}"
+    );
+    assert!(
+        items[0]["provider_name"]
+            .as_str()
+            .unwrap()
+            .starts_with("Clinic"),
+        "{body}"
+    );
+    assert!(
+        items[1]["doctor_name"].is_null() && items[1]["provider_name"].is_null(),
+        "{body}"
+    );
     assert_eq!(items[1]["scopes"], json!(["doctor"]));
     assert!(items[1]["title"].is_null(), "{body}");
     assert!(items[1]["id"].is_null(), "{body}");

@@ -22,6 +22,8 @@ import {
   GRID_START_MINUTES,
   GRID_STEP_MINUTES,
   VISIT_DURATIONS,
+  DEFAULT_VISIT_MINUTES,
+  existingVisitLabel,
   batchFailureText,
   batchPayload,
   doctorKeyOf,
@@ -31,6 +33,12 @@ import {
   gridDays,
   gridRangeLabel,
   gridSlots,
+  busyRange,
+  conflictDetailText,
+  draftConflictDetails,
+  existingVisitAt,
+  layoutLanes,
+  patientTakenSlotStarts,
   coveredSlotStarts,
   minutesToTime,
   newDraft,
@@ -362,7 +370,13 @@ export function OrderVisitPlanner({
       });
   };
 
+  const conflictDetails = useMemo(() => draftConflictDetails(drafts, busy), [drafts, busy]);
+  // Names what the visit clashes with: «пациент уже записан на 08:00 Check up (Hölzenbein)».
   const conflictText = (draft: DraftVisit): { text: string; title?: string } | null => {
+    const details = conflictDetails.get(draft.key);
+    if (details?.length) {
+      return { text: details.map((detail) => conflictDetailText(detail, lang)).join("; ") };
+    }
     const local = localConflicts.get(draft.key);
     if (local) return { text: `${tx("накладка", "Überschneidung")}: ${scopesLabel(local, lang)}` };
     const failure = failureByKey.get(draft.key);
@@ -414,6 +428,20 @@ export function OrderVisitPlanner({
               {plannedDayLabel(day, lang)}, {minutesToTime(popover.start)}
             </span>
           </div>
+          {(() => {
+            const existing = existingVisitAt(popover.date, popover.start, DEFAULT_VISIT_MINUTES, busy);
+            return existing ? (
+              <p
+                data-testid="order-visit-planner-choose-warning"
+                className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+              >
+                {tx(
+                  `Пересечётся с приёмом пациента ${existingVisitLabel(existing)}. После выбора сократите длительность или возьмите другое время.`,
+                  `Überschneidet sich mit dem Termin des Patienten ${existingVisitLabel(existing)}. Danach Dauer kürzen oder andere Zeit wählen.`,
+                )}
+              </p>
+            ) : null;
+          })()}
           {doctors.length > 0 ? (
             <div className="space-y-1">
               {doctors.map((doctor) => (
@@ -575,16 +603,19 @@ export function OrderVisitPlanner({
         </ol>
         <span
           data-testid="order-visit-planner-legend"
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+          className="inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
         >
-          <span
-            aria-hidden="true"
-            className="inline-block h-3 w-4 rounded-sm border border-border bg-card bg-[repeating-linear-gradient(135deg,var(--color-muted)_0_3px,transparent_3px_6px)]"
-          />
-          {tx(
-            "занято: другой приём пациента, врача или переводчика",
-            "belegt: anderer Termin des Patienten, Arztes oder Dolmetschers",
-          )}
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className="inline-block h-3 w-4 rounded-sm border-l-4 border-slate-500 bg-slate-100 dark:bg-slate-800" />
+            {tx("уже записан (приём пациента)", "schon gebucht (Termin des Patienten)")}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="inline-block h-3 w-4 rounded-sm border border-border bg-card bg-[repeating-linear-gradient(135deg,var(--color-muted)_0_3px,transparent_3px_6px)]"
+            />
+            {tx("занято у врача или переводчика", "Arzt oder Dolmetscher belegt")}
+          </span>
         </span>
         <div className="flex items-center gap-1.5">
           <Button
@@ -642,6 +673,29 @@ export function OrderVisitPlanner({
           </div>
           {days.map((day, dayIndex) => {
             const covered = coveredSlotStarts(day, busy, drafts);
+            const taken = patientTakenSlotStarts(day, busy);
+            const dayBusy = busy.filter((slot) => slot.date === day);
+            // The patient's existing visits and the new ones share the column side by side.
+            const lanes = layoutLanes([
+              ...dayBusy
+                .map((slot, index) => ({ slot, index }))
+                .filter(({ slot }) => slot.scopes.includes("patient"))
+                .map(({ slot, index }) => {
+                  const [start, end] = busyRange(slot);
+                  return { id: `busy-${index}`, start, end };
+                }),
+              ...drafts
+                .filter((draft) => draft.date === day)
+                .map((draft) => ({ id: draft.key, start: draft.start, end: draft.start + draft.duration })),
+            ]);
+            const laneStyle = (id: string) => {
+              const place = lanes.get(id);
+              if (!place || place.lanes === 1) return { left: 2, right: 2 };
+              return {
+                left: `calc(${(place.lane * 100) / place.lanes}% + 2px)`,
+                width: `calc(${100 / place.lanes}% - 4px)`,
+              };
+            };
             return (
             <div
               key={day}
@@ -655,14 +709,23 @@ export function OrderVisitPlanner({
                   key={minutes}
                   type="button"
                   data-slot-time={minutesToTime(minutes)}
-                  aria-label={`${plannedDayLabel(day, lang)} ${minutesToTime(minutes)} — ${tx("добавить приём", "Termin hinzufügen")}`}
+                  aria-label={`${plannedDayLabel(day, lang)} ${minutesToTime(minutes)} — ${
+                    taken.has(minutes)
+                      ? tx("пациент уже записан", "Patient schon gebucht")
+                      : tx("добавить приём", "Termin hinzufügen")
+                  }`}
+                  aria-disabled={taken.has(minutes) || undefined}
                   onClick={() => {
-                    if (!saving) setPopover({ kind: "slot", date: day, start: minutes });
+                    // The patient cannot be at two visits: a taken slot offers nothing.
+                    if (!saving && !taken.has(minutes)) setPopover({ kind: "slot", date: day, start: minutes });
                   }}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => onDrop(event, day, minutes)}
                   className={cn(
-                    "group block w-full border-b border-border/40 text-left hover:bg-orange-50 focus-visible:bg-orange-50 focus-visible:outline-none dark:hover:bg-orange-950/30",
+                    "group block w-full border-b border-border/40 text-left focus-visible:outline-none",
+                    taken.has(minutes)
+                      ? "cursor-not-allowed"
+                      : "hover:bg-orange-50 focus-visible:bg-orange-50 dark:hover:bg-orange-950/30",
                     minutes % 60 === 30 && "border-dashed",
                     popover?.kind === "slot" &&
                       popover.date === day &&
@@ -678,16 +741,38 @@ export function OrderVisitPlanner({
                   )}
                 </button>
               ))}
-              {busy
-                .filter((slot) => slot.date === day)
+              {dayBusy
                 .map((slot, index) => {
                   const start = Math.max(timeToMinutes(slot.time_start) ?? GRID_START_MINUTES, GRID_START_MINUTES);
                   const end = Math.min(timeToMinutes(slot.time_end) ?? GRID_END_MINUTES, GRID_END_MINUTES);
                   if (end <= start) return null;
                   const own = slot.scopes.includes("patient");
-                  const text = own
-                    ? slot.title ?? tx("Приём пациента", "Termin des Patienten")
-                    : `${tx("Занято", "Belegt")}: ${scopesLabel(slot.scopes, lang)}`;
+                  if (own) {
+                    const who = [slot.doctor_name, slot.provider_name].filter(Boolean).join(" · ");
+                    return (
+                      <div
+                        key={`busy-${index}`}
+                        data-testid="order-visit-planner-existing"
+                        title={`${tx("Уже записан", "Schon gebucht")}: ${slot.time_start ?? ""}–${slot.time_end ?? ""} ${slot.title ?? ""} ${who}`}
+                        className="pointer-events-none absolute z-[2] overflow-hidden rounded border border-l-4 border-slate-300 border-l-slate-500 bg-slate-100 px-1 text-[11px] leading-4 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                        style={{
+                          top: topOf(start) + 1,
+                          height: ((end - start) / GRID_STEP_MINUTES) * ROW_PX - 2,
+                          ...laneStyle(`busy-${index}`),
+                        }}
+                      >
+                        <span className="font-semibold tabular-nums">
+                          {slot.time_start ?? ""}–{slot.time_end ?? ""}
+                        </span>{" "}
+                        {slot.title ?? tx("Приём пациента", "Termin des Patienten")}
+                        {who ? <span className="block truncate text-slate-600 dark:text-slate-300">{who}</span> : null}
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                          {tx("уже записан", "schon gebucht")}
+                        </span>
+                      </div>
+                    );
+                  }
+                  const text = `${tx("Занято", "Belegt")}: ${scopesLabel(slot.scopes, lang)}`;
                   return (
                     <div
                       key={`busy-${index}`}
@@ -713,12 +798,16 @@ export function OrderVisitPlanner({
                     }}
                     onClick={() => setPopover({ kind: "draft", key: draft.key })}
                     className={cn(
-                      "absolute inset-x-0.5 z-[5] overflow-hidden rounded border px-1 text-left text-[11px] leading-4 text-foreground",
+                      "absolute z-[5] overflow-hidden rounded border px-1 text-left text-[11px] leading-4 text-foreground",
                       toneOf(draft.doctor),
                       conflictText(draft) && "ring-2 ring-rose-500",
                       popover?.kind === "draft" && popover.key === draft.key && "ring-2 ring-orange-500",
                     )}
-                    style={{ top: topOf(draft.start) + 1, height: (draft.duration / GRID_STEP_MINUTES) * ROW_PX - 2 }}
+                    style={{
+                      top: topOf(draft.start) + 1,
+                      height: (draft.duration / GRID_STEP_MINUTES) * ROW_PX - 2,
+                      ...laneStyle(draft.key),
+                    }}
                   >
                     <span className="font-semibold tabular-nums">{minutesToTime(draft.start)}</span>{" "}
                     {doctorName(draft.doctor)}
