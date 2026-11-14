@@ -123,6 +123,7 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
   const direct = directFieldElement(scope, key);
   if (direct) return direct;
   if (key === "inquiry_consent") return byTestId(scope, "lead-request-inquiry-consent");
+  if (key === "health_consent") return byTestId(scope, "lead-request-health-consent");
   if (key === "id_document_upload" || key.startsWith("id_")) return byTestId(scope, "lead-request-identity-upload");
   if (key === "request_reason") return byTestId(scope, "lead-request-reason");
   // The proof of the source of funds (extra step): its upload, not only its block.

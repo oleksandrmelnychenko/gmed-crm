@@ -147,6 +147,12 @@ pub(super) async fn update(
     {
         return refusal;
     }
+    // The step after "documents" waits for the health consent of the login (owner
+    // 2026-11-14): never given or withdrawn, nothing is stored. Staff filling in the
+    // client's form go through the steps with what they have (owner 2026-10-29).
+    if let Some(refusal) = super::health_consent_refusal(&mut tx, lead_id, &auth, kind).await {
+        return refusal;
+    }
     let row = match sqlx::query(
         "SELECT services, needs_interpreter, notes, wizard_state FROM leads WHERE id = $1",
     )

@@ -45,7 +45,7 @@ import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpSho
 import { canSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { CabinetSection as Section, MissingItemLink, RequiredMark, SentLockHint, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
 import { missingListKeys, recipientIsPayer, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
-import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
+import { hasBaseFormInput, healthConsentMissing, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { extraWorkSubject, followUpFieldLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
@@ -105,9 +105,11 @@ export function SendStep({
   const previewMissing = followUpBeforeSubmit(request) ? followUpMissingAll(request) : [];
   const missingCount = shownKeys.size + otherMissing.length + previewMissing.length;
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
+  // The health consent holds the sending of the client (owner 2026-11-14): never given or withdrawn.
+  const healthConsent = !healthConsentMissing(request);
   // After sending, GMED may ask for more: the neutral pointer to the step (never why).
   const followUpOpen = Boolean(request.submitted_at) && followUpShown(request) && !followUpAnswered(request);
-  const ready = canSubmit(request, INQUIRY_CONSENT);
+  const ready = canSubmit(request, INQUIRY_CONSENT) && (healthConsent || staffMode);
   const sent = Boolean(request.submitted_at);
   // The request is sent once (owner 2026-10-26): afterwards it is read-only, documents are
   // added on their step, and what GMED asks later goes with the follow-up's own send.
@@ -222,7 +224,7 @@ export function SendStep({
       ) : null}
       <Section icon={ClipboardCheck} title={sendable ? text.sendTitle : text.sentSummaryTitle}>
         <RequestSummary groups={requestSummary(request, text, lang)} />
-        {missingCount > 0 || !inquiryConsent ? (
+        {missingCount > 0 || !inquiryConsent || !healthConsent ? (
           <div
             className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
             data-testid="lead-request-missing"
@@ -234,6 +236,15 @@ export function SendStep({
                 <li>
                   <MissingItemLink field="inquiry_consent" onClick={() => onEdit("person", { field: "inquiry_consent" })}>
                     {text.inquiryConsentMissing}
+                  </MissingItemLink>
+                </li>
+              </ul>
+            ) : null}
+            {!healthConsent ? (
+              <ul className="list-disc space-y-0.5 pl-5" data-testid="lead-request-missing-health-consent">
+                <li>
+                  <MissingItemLink field="health_consent" onClick={() => onEdit("documents", { field: "health_consent" })}>
+                    {text.healthConsentMissing}
                   </MissingItemLink>
                 </li>
               </ul>
@@ -280,6 +291,7 @@ export function SendStep({
               // To the first field that is still missing, in whichever step it is.
               onClick={() => {
                 if (!inquiryConsent) onEdit("person", { field: "inquiry_consent" });
+                else if (!healthConsent) onEdit("documents", { field: "health_consent" });
                 else if (missingSteps[0]) onEdit(missingSteps[0], { field: byStep[missingSteps[0]][0] });
                 else if (previewMissing[0]) onEdit("follow_up", { field: `${previewMissing[0].block}:${previewMissing[0].key}` });
                 else onEdit("person");

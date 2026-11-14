@@ -174,7 +174,8 @@ function leadRequest(minor: boolean) {
         type: "health_data_processing",
         version: "2026-10-03",
         texts: { de: "Ich willige ein …" },
-        given_at: null as string | null,
+        // Given by default: without it nothing after step «documents» opens (owner 2026-11-14).
+        given_at: "2026-10-03T09:10:00Z" as string | null,
       },
       lead_inquiry_processing: {
         type: "lead_inquiry_processing",

@@ -217,8 +217,29 @@ export function inquiryConsentMissing(request: Pick<LeadRequest, "consents"> & P
 }
 
 /**
- * The count on a step's badge: its missing keys, and in the first step the
- * consent while the request was never sent (`inquiryConsentMissing`).
+ * The consent to process the health data (step "documents") holds the request while it was
+ * never sent: without it, or after it was withdrawn, nothing after that step opens and the
+ * request is not sent (owner 2026-11-14). Once sent, the request is read-only and holds nobody.
+ */
+export function healthConsentMissing(request: Pick<LeadRequest, "consents"> & Partial<Pick<LeadRequest, "submitted_at">>): boolean {
+  return !request.submitted_at && !consentGiven(request, HEALTH_CONSENT);
+}
+
+/** Whether the missing health consent closes a step: every step after "documents" (`healthConsentMissing`). */
+export function closedByHealthConsent(
+  request: Pick<LeadRequest, "consents" | "follow_up" | "submitted_at" | "service_preferences">,
+  step: StepId,
+): boolean {
+  if (!healthConsentMissing(request)) return false;
+  const order = visibleSteps(request);
+  const documents = order.indexOf("documents");
+  return documents >= 0 && order.indexOf(step) > documents;
+}
+
+/**
+ * The count on a step's badge: its missing keys, in the first step the
+ * consent while the request was never sent (`inquiryConsentMissing`), in
+ * step "documents" the health consent (`healthConsentMissing`).
  */
 export function stepMissingCount(
   request: Pick<LeadRequest, "progress" | "follow_up" | "consents"> & Partial<Pick<LeadRequest, "submitted_at">>,
@@ -226,7 +247,8 @@ export function stepMissingCount(
   missing: Record<StepId, string[]> = missingByStep(request),
 ): number {
   const consent = step === "person" && inquiryConsentMissing(request) ? 1 : 0;
-  return missing[step].length + consent;
+  const health = step === "documents" && healthConsentMissing(request) ? 1 : 0;
+  return missing[step].length + consent + health;
 }
 
 /**
@@ -239,7 +261,10 @@ export function stepMissingKeys(
   step: StepId,
   missing: Record<StepId, string[]> = missingByStep(request),
 ): string[] {
-  return step === "person" && inquiryConsentMissing(request) ? [...missing[step], "inquiry_consent"] : [...missing[step]];
+  if (step === "person" && inquiryConsentMissing(request)) return [...missing[step], "inquiry_consent"];
+  // The health consent stands above the reason and the uploads: it comes first (owner 2026-11-14).
+  if (step === "documents" && healthConsentMissing(request)) return ["health_consent", ...missing[step]];
+  return [...missing[step]];
 }
 
 /**
@@ -279,7 +304,7 @@ export function nextHoldKeys(
   missing: Record<StepId, string[]> = missingByStep(request),
 ): string[] {
   return stepMissingKeys(request, step, missing).filter(
-    (key) => step === "follow_up" || key === "inquiry_consent" || hasBaseFormInput(key),
+    (key) => step === "follow_up" || key === "inquiry_consent" || key === "health_consent" || hasBaseFormInput(key),
   );
 }
 

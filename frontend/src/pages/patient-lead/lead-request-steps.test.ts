@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { LeadRequest, LeadRequestFollowUp } from "./lead-request-api";
 import {
   STEP_IDS,
+  closedByHealthConsent,
   documentsTouched,
   firstIncompleteStep,
   hasBaseFormInput,
+  healthConsentMissing,
   initialStep,
   missingByStep,
   nextHeldByMissing,
@@ -31,6 +33,8 @@ function request(overrides: Partial<StepRequest> = {}): StepRequest {
     follow_up: { required: false, blocks: [], missing: {}, answered_at: null },
     consents: {
       lead_inquiry_processing: { type: "lead_inquiry_processing", version: "1", texts: {}, given_at: "2026-10-07T08:00:00Z" },
+      // The health consent of step "documents" holds everything after it (owner 2026-11-14).
+      health_data_processing: { type: "health_data_processing", version: "1", texts: {}, given_at: "2026-10-07T08:00:00Z" },
     },
     submitted_at: null,
     changed_since_submit: false,
@@ -60,18 +64,33 @@ describe("lead cabinet steps", () => {
     expect(stepDone({ ...current, disclosure: { ...current.disclosure!, allow_disclosure: true } }, "disclosure")).toBe(false);
   });
 
-  it("marks the documents step complete only once the person gave the consent, a reason or a file", () => {
-    const untouched = request();
+  it("marks the documents step complete only once the person gave the health consent (owner 2026-11-14)", () => {
+    const consented = request();
+    const untouched = request({ consents: { lead_inquiry_processing: consented.consents.lead_inquiry_processing } });
     expect(stepDone(untouched, "documents")).toBe(false);
     expect(documentsTouched(untouched)).toBe(false);
-    // The server requires nothing there: the step never holds the sending back.
-    expect(stepMissingCount(untouched, "documents")).toBe(0);
-    expect(firstIncompleteStep(untouched)).toBeNull();
-    const consented = request({ consents: { ...untouched.consents, health_data_processing: { type: "health_data_processing", version: "1", texts: {}, given_at: "2026-10-07T08:00:00Z" } } });
+    // Without the health consent the step holds: the consent counts as missing there.
+    expect(healthConsentMissing(untouched)).toBe(true);
+    expect(stepMissingCount(untouched, "documents")).toBe(1);
+    expect(stepMissingKeys(untouched, "documents")).toEqual(["health_consent"]);
+    expect(nextHoldKeys(untouched, "documents")).toEqual(["health_consent"]);
+    expect(firstIncompleteStep(untouched)).toBe("documents");
+    // A reason or a file without the consent do not complete it.
+    expect(stepDone({ ...untouched, identification: { request_reason: "Zweitmeinung" } } as unknown as LeadRequest, "documents")).toBe(false);
+    expect(stepDone(request({ ...untouched, documents: [{ id: "d1", file_name: "befund.pdf" } as unknown as LeadRequest["documents"][number]] }), "documents")).toBe(false);
     expect(stepDone(consented, "documents")).toBe(true);
-    expect(stepDone({ ...untouched, identification: { request_reason: "Zweitmeinung" } } as unknown as LeadRequest, "documents")).toBe(true);
-    expect(stepDone({ ...untouched, identification: { request_reason: "  " } } as unknown as LeadRequest, "documents")).toBe(false);
-    expect(stepDone(request({ documents: [{ id: "d1", file_name: "befund.pdf" } as unknown as LeadRequest["documents"][number]] }), "documents")).toBe(true);
+    expect(firstIncompleteStep(consented)).toBeNull();
+    // A withdrawn consent holds again; a sent request is read-only and holds nobody.
+    const withdrawn = request({ consents: { ...consented.consents, health_data_processing: { ...consented.consents.health_data_processing, given_at: null, withdrawn_at: "2026-11-14T16:24:00Z" } } });
+    expect(stepMissingKeys(withdrawn, "documents")).toEqual(["health_consent"]);
+    expect(healthConsentMissing({ ...withdrawn, submitted_at: "2026-11-14T10:00:00Z" })).toBe(false);
+    // Every step after "documents" stays closed while it is missing, the ones before stay open.
+    const services = { ...withdrawn, service_preferences: { services: [], service_comments: {}, notes: "", program_date_from: "" } } as unknown as LeadRequest;
+    expect(closedByHealthConsent(services, "services")).toBe(true);
+    expect(closedByHealthConsent(services, "send")).toBe(true);
+    expect(closedByHealthConsent(services, "documents")).toBe(false);
+    expect(closedByHealthConsent(services, "person")).toBe(false);
+    expect(closedByHealthConsent({ ...services, consents: consented.consents }, "send")).toBe(false);
     // Something the server still misses there keeps it incomplete.
     expect(stepDone(request({ ...consented, progress: { filled: 0, total: 1, missing_for_submit: ["request_reason"] } }), "documents")).toBe(false);
   });
@@ -226,7 +245,7 @@ describe("lead cabinet steps", () => {
     expect(stepMissingKeys(open, "person")).toEqual(["legal_sex", "city", "inquiry_consent"]);
     expect(stepMissingKeys(open, "identity")).toEqual(["id_document_upload"]);
     expect(stepMissingKeys(open, "billing")).toEqual(["payer_kind"]);
-    expect(stepMissingKeys(open, "documents")).toEqual([]);
+    expect(stepMissingKeys(open, "documents")).toEqual(["health_consent"]);
     // Like the badge: the consent only while the request was never sent.
     expect(stepMissingKeys({ ...open, submitted_at: "2026-10-07T09:00:00Z" }, "person")).toEqual(["legal_sex", "city"]);
     expect(stepMissingKeys(open, "person")).toHaveLength(stepMissingCount(open, "person"));
@@ -250,8 +269,9 @@ describe("lead cabinet steps", () => {
     expect(nextHoldKeys(open, "person")).toEqual(["legal_sex", "city", "rep1_last_name", "inquiry_consent"]);
     expect(nextHoldKeys(open, "identity")).toEqual(["id_document_upload"]);
     expect(nextHoldKeys(open, "billing")).toEqual(["payer_kind"]);
-    // Nothing is required on the optional steps: they never hold.
-    for (const step of ["documents", "disclosure", "services", "send"] as const) expect(nextHoldKeys(open, step)).toEqual([]);
+    // The health consent holds step "documents" (owner 2026-11-14); the optional steps never hold.
+    expect(nextHoldKeys(open, "documents")).toEqual(["health_consent"]);
+    for (const step of ["disclosure", "services", "send"] as const) expect(nextHoldKeys(open, step)).toEqual([]);
     // Complete: nothing holds.
     expect(nextHoldKeys(request(), "person")).toEqual([]);
     // A sent request: its steps are read-only, but for the follow-up and a refused identity copy.

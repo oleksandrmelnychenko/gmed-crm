@@ -74,6 +74,7 @@ import {
 } from "./lead-request-step-forms";
 import {
   initialStep,
+  closedByHealthConsent,
   inquiryConsentMissing,
   missingByStep,
   nextHeldByMissing,
@@ -676,8 +677,12 @@ function LeadRequestView({
   }, [onAccessLost]);
   const deadline = request.retention_deadline_at ? formatAppDate(request.retention_deadline_at) : "";
   const steps = visibleSteps(request);
+  const staffMode = useCabinetStaffMode();
   // "Ergänzende Angaben" exists only while the server opened blocks.
-  const step: StepId = steps.includes(chosenStep) ? chosenStep : "send";
+  const openStep: StepId = steps.includes(chosenStep) ? chosenStep : "send";
+  // Without the health consent (never given or withdrawn) no step after "documents" opens for the
+  // client, also not from the address or a tab (owner 2026-11-14). Staff go through the steps.
+  const step: StepId = !staffMode && closedByHealthConsent(request, openStep) ? "documents" : openStep;
   const missing = cabinetMissing(request);
   const position = steps.indexOf(step);
   const topRef = useRef<HTMLElement | null>(null);
@@ -763,7 +768,6 @@ function LeadRequestView({
   // What the last held press of "Next" listed as missing, for the step on screen (see `nextHeldByMissing`).
   const warned = useRef<{ step: StepId; keys: ReadonlySet<string> } | null>(null);
 
-  const staffMode = useCabinetStaffMode();
   // What holds "Next" (and the browser's Forward) on a step for good: the required fields of the
   // step that are still empty and that the step shows. Not for staff, who take the client's
   // answers in several calls (owner 2026-10-29), and not once the request is sent (it is
@@ -826,6 +830,14 @@ function LeadRequestView({
           setPendingTarget({ field: consent });
           return;
         }
+      }
+      // A step after "documents" while the health consent is missing or withdrawn: the consent box
+      // is shown instead, as "Next" shows a missing field (owner 2026-11-14). Not for staff.
+      if (!staffMode && closedByHealthConsent(latestRequest.current, next)) {
+        next = "documents";
+        target = { field: "health_consent" };
+        setNextPressed(true);
+        showMissingOf("documents");
       }
       // The step is left: opened again, its first "Next" shows what is missing again.
       if (next !== step) warned.current = null;
@@ -903,6 +915,20 @@ function LeadRequestView({
         }, { replace: true });
         return;
       }
+      // Forward into a step the missing health consent closes: its box, the address names "documents".
+      if (!staffMode && closedByHealthConsent(latestRequest.current, target)) {
+        setNextPressed(true);
+        showMissingOf("documents");
+        setChosenStep("documents");
+        setPendingTarget({ field: "health_consent" });
+        setSearchParams((params) => {
+          const next = new URLSearchParams(params);
+          next.set("lead", current.lead_id);
+          next.set("step", "documents");
+          return next;
+        }, { replace: true });
+        return;
+      }
       warned.current = null;
       setChosenStep(target);
       setSentRefused((notice) => (notice === "fresh" ? "seen" : null));
@@ -917,7 +943,7 @@ function LeadRequestView({
         return next;
       }, { replace: true });
     });
-  }, [addressStep, popCount, setSearchParams, showMissingOf, startStep, switchAfterSave, syncAddress]);
+  }, [addressStep, popCount, setSearchParams, showMissingOf, startStep, switchAfterSave, syncAddress, staffMode]);
 
   const nav: StepNav = {
     index: position + 1,

@@ -22,7 +22,9 @@ async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: 
     consents: { lead_inquiry_processing: {
       type: "lead_inquiry_processing", version: "2026-10-03", texts: { de: "Synthetic consent" },
       given_at: "2026-10-12T08:00:00Z",
-    } },
+    },
+    // Given: without it nothing after step «documents» opens (owner 2026-11-14).
+    health_data_processing: { type: "health_data_processing", version: "2026-11-02", texts: { de: "Synthetic consent" }, given_at: "2026-10-12T08:00:00Z" } },
     representation: {
       has_representative: scenario === "representative", under_guardianship: false, custody: null, custody_stated: false,
       representatives: scenario === "representative" ? [{

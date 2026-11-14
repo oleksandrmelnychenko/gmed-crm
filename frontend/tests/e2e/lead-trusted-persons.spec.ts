@@ -7,7 +7,7 @@ function request(id = "child-a", firstName = "Anna") {
   return {
     lead_id: id, access_kind: "guardian", minor: true,
     created_at: "2026-10-14T08:00:00Z", submitted_at: null as string | null, changed_since_submit: false,
-    progress: { filled: 0, total: 12, missing_for_submit: [] }, consents: {}, documents: [], identity_documents: [],
+    progress: { filled: 0, total: 12, missing_for_submit: [] }, consents: { health_data_processing: { type: "health_data_processing", version: "2026-11-02", texts: { de: "Synthetic consent" }, given_at: "2026-10-14T08:00:00Z" } }, documents: [], identity_documents: [],
     personal_data: { first_name: firstName, last_name: "Muster", primary_language: "en" },
     trusted_persons: [] as Person[], disclosure: null as LeadDisclosure | null, disclosure_company_name: "Example Care GmbH",
     consent_form: { version: "v1", choices: { ...core }, chosen_at: "2026-10-14T08:00:00Z", chosen_by_me: true, recipients: [] as Person[] },

@@ -3051,6 +3051,38 @@ async fn retention_deadline(state: &AppState, lead_id: Uuid) -> Option<DateTime<
     crate::routes::leads::unqualified_lead_deletion_at(&state.db, lead_id).await
 }
 
+/// The refusal of a write after step "documents" — the services and the
+/// sending — while the login's consent to process health data is missing or
+/// withdrawn (owner 2026-11-14: nothing goes further without it). Staff filling
+/// in the client's form are not held (owner 2026-10-29).
+pub(crate) async fn health_consent_refusal(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    auth: &AuthUser,
+    kind: AccessKind,
+) -> Option<axum::response::Response> {
+    if kind == AccessKind::Staff {
+        return None;
+    }
+    match active_consent(
+        &mut *conn,
+        lead_id,
+        auth.user_id,
+        ConsentPurpose::HealthData,
+    )
+    .await
+    {
+        Ok(Some(_)) => None,
+        Ok(None) => Some(coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "health_consent_required",
+            "Give consent to health data processing before going further",
+            json!({ "field": "health_consent", "version": HEALTH_CONSENT_VERSION }),
+        )),
+        Err(error) => Some(internal(error, "load health consent")),
+    }
+}
+
 /// The caller's consent of the current version for this lead, if given.
 pub(crate) async fn active_consent<'e, E>(
     executor: E,
@@ -7815,6 +7847,11 @@ async fn submit_my_lead_request(
             json!({ "purpose": ConsentPurpose::InquiryProcessing.consent_type() }),
         );
     };
+    // Without the health consent (never given or withdrawn) the client does not
+    // send (owner 2026-11-14).
+    if let Some(refusal) = health_consent_refusal(&mut tx, lead_id, &auth, kind).await {
+        return refusal;
+    }
     // Medical documents, copies of the identity document and the files of the
     // representatives, counted apart: "documents" has always meant the
     // medical ones.

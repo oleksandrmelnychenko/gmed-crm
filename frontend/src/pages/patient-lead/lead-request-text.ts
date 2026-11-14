@@ -146,6 +146,8 @@ export type LeadRequestText = {
   sendTitle: string;
   missingTitle: string;
   inquiryConsentMissing: string;
+  /** In the summary of step "send" while the health consent is missing or withdrawn (owner 2026-11-14). */
+  healthConsentMissing: string;
   /** Under the consent checkbox when Next is pressed without it (owner 2026-10-29). */
   inquiryConsentRequired: string;
   sendButton: string;
@@ -1280,6 +1282,7 @@ const de: LeadRequestText = {
   sendTitle: "An Ihre Ansprechperson senden",
   missingTitle: "Bitte noch ergänzen:",
   inquiryConsentMissing: "Bitte stimmen Sie unter „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zu.",
+  healthConsentMissing: "Bitte stimmen Sie unter „Anliegen & Unterlagen“ der Verarbeitung der Gesundheitsdaten zu.",
   inquiryConsentRequired: "Ohne Ihre Einwilligung in die Verarbeitung Ihrer Angaben geht es nicht weiter.",
   sendButton: "Anfrage senden",
   sending: "Wird gesendet…",
@@ -1965,6 +1968,7 @@ const ru: LeadRequestText = {
   sendTitle: "Отправить вашему контакту в GMED",
   missingTitle: "Пожалуйста, дополните:",
   inquiryConsentMissing: "Пожалуйста, дайте согласие на обработку данных на шаге «Согласие и личные данные».",
+  healthConsentMissing: "Пожалуйста, дайте согласие на обработку данных о здоровье на шаге «Обращение и документы».",
   inquiryConsentRequired: "Без согласия на обработку данных продолжить нельзя.",
   sendButton: "Отправить заявку",
   sending: "Отправляется…",
@@ -2644,6 +2648,7 @@ const uk: LeadRequestText = {
   sendTitle: "Надіслати вашому контакту у GMED",
   missingTitle: "Будь ласка, доповніть:",
   inquiryConsentMissing: "Будь ласка, надайте згоду на обробку даних на кроці «Згода й особисті дані».",
+  healthConsentMissing: "Будь ласка, надайте згоду на обробку даних про здоров’я на кроці «Звернення й документи».",
   inquiryConsentRequired: "Без згоди на обробку даних продовжити не можна.",
   sendButton: "Надіслати заявку",
   sending: "Надсилається…",
@@ -3323,6 +3328,7 @@ const en: LeadRequestText = {
   sendTitle: "Send to your contact person",
   missingTitle: "Please add:",
   inquiryConsentMissing: "Please agree to the processing of your details in the step “Consent & person”.",
+  healthConsentMissing: "Please consent to the processing of your health data in the step “Request & documents”.",
   inquiryConsentRequired: "Without your consent to the processing of your details you cannot continue.",
   sendButton: "Send request",
   sending: "Sending…",

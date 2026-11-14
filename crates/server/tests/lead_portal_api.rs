@@ -11089,6 +11089,8 @@ async fn a_sent_form_keeps_the_payer_and_staff_may_enter_a_past_start() {
     let Some(app) = test_app().await else { return };
     let router = &app.suite.app;
     let (lead, _, login) = lead_with_login(&app, "Sent", "sent.qa1031@example.com").await;
+    // The past date is refused, not the missing health consent (owner 2026-11-14).
+    give_consent(router, lead, &login, "health_data_processing").await;
     let (status, refused) = json_request(
         router,
         "POST",
@@ -11147,6 +11149,8 @@ async fn the_services_internal_note_stays_with_staff() {
     let router = &app.suite.app;
     let pool = &app.suite.pool;
     let (lead, _, login) = lead_with_login(&app, "Intern", "intern.note1102@example.com").await;
+    // The services step waits for the health consent (owner 2026-11-14).
+    give_consent(router, lead, &login, "health_data_processing").await;
     let pm = app.staff("patient_manager");
     let secret = "Nur intern: Rueckruf Dienstag 1102";
     let (status, saved) = json_request(
@@ -11336,4 +11340,57 @@ async fn a_note_given_with_a_new_lead_stays_with_staff() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
     assert_eq!(refused["field"], "internal_note", "{refused}");
+}
+
+/// Owner 2026-11-14: without the consent to process health data — never given
+/// or withdrawn — the client goes no further than step "documents": the
+/// services are not stored and the request is not sent. Staff filling in the
+/// client's form are not held.
+#[tokio::test]
+async fn nothing_goes_further_without_the_health_consent() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let (lead, _, login) = lead_with_login(&app, "Zinonas", "zinonas.qa1114@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead}");
+    let services = format!("{request}/services");
+    let submit = format!("{request}/submit");
+    let wish = || Some(json!({ "services": ["driver"], "notes": "Abholung 1114" }));
+
+    // Never given: the services step refuses.
+    let (status, refused) = json_request(router, "POST", &services, &login, wish()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "health_consent_required", "{refused}");
+    // Staff in the client's form store it.
+    let pm = app.staff("patient_manager");
+    let (status, saved) = json_request(router, "POST", &services, &pm, wish()).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
+    // Everything else is there, then the consent is withdrawn: nothing is sent.
+    fill_in_complete_request(router, lead, &login).await;
+    let (status, revoked) = json_request(
+        router,
+        "POST",
+        &format!("{request}/consent/revoke"),
+        &login,
+        Some(json!({ "purpose": "health_data_processing" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    let (status, refused) = json_request(router, "POST", &services, &login, wish()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "health_consent_required", "{refused}");
+    let (status, refused) = json_request(router, "POST", &submit, &login, declared()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "health_consent_required", "{refused}");
+    let (status, still) = json_request(router, "GET", &request, &login, None).await;
+    assert_eq!(status, StatusCode::OK, "{still}");
+    assert!(still["submitted_at"].is_null(), "{still}");
+
+    // Given again: both go on.
+    give_consent(router, lead, &login, "health_data_processing").await;
+    let (status, saved) = json_request(router, "POST", &services, &login, wish()).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (status, sent) = json_request(router, "POST", &submit, &login, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert!(sent["submitted_at"].is_string(), "{sent}");
 }

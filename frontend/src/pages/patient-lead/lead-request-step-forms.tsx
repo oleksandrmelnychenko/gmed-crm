@@ -107,7 +107,7 @@ import { RepresentationSection, RepresentativeUpload } from "./lead-request-repr
 import { AgencyContactLine, HealthConsentText, useAgencyContact } from "./health-consent-text";
 import { LeadRequestIdentityRecognition } from "./lead-request-identity-recognition";
 import { useServerDraftSync } from "./lead-request-server-sync";
-import { inquiryConsentMissing, refusedIdentityUploadKeys, type StepId } from "./lead-request-steps";
+import { healthConsentMissing, inquiryConsentMissing, refusedIdentityUploadKeys, type StepId } from "./lead-request-steps";
 import { actsAsVormund, asLeadCabinetLang, childSectionTitle, hasInsuranceLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The steps of the lead cabinet that hold the base form (trigger flow
@@ -1378,6 +1378,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
         onChange={onChange}
         testId="lead-request-health-consent"
         withdrawAfterSend
+        invalidText={nav.missingShown && healthConsentMissing(request) ? text.healthConsentRequired : null}
       />
       {/* The reason and the uploads below wait for this consent: said once, here (labels audit 2026-10-26, A6). */}
       {!consentReady ? <ConsentNeededNote>{text.healthConsentRequired}</ConsentNeededNote> : null}
@@ -1446,6 +1447,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   return (
     <StepFrame
       testId="lead-request-documents"
+      extraMissing={healthConsentMissing(request) ? [{ label: text.healthConsentTitle, field: "health_consent" }] : []}
       step="documents"
       request={request}
       text={text}

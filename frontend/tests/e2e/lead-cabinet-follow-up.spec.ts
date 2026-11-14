@@ -137,7 +137,8 @@ function leadRequest() {
         type: "health_data_processing",
         version: CONSENT_VERSION,
         texts: { de: "Ich willige ein … (Art. 9 Abs. 2 lit. a DSGVO) …" },
-        given_at: null as string | null,
+        // Given by default: without it nothing after step «documents» opens (owner 2026-11-14).
+        given_at: "2026-10-03T09:10:00Z" as string | null,
       },
       lead_inquiry_processing: {
         type: "lead_inquiry_processing",
@@ -649,7 +650,9 @@ test.describe("live country questions before first submission", () => {
 
 test.describe("lead cabinet stepper and follow-up", () => {
   test("short steps with badges, free navigation, the identity document as an upload only, and the reason of the request", async ({ page }) => {
-    const { calls } = await setup(page);
+    const { request, calls } = await setup(page);
+    // The person gives the health consent here: not given yet (owner 2026-11-14).
+    request.consents.health_data_processing.given_at = null;
     await page.goto("/");
 
     // Six steps without open blocks, including disclosure: no "Ergänzende Angaben"; the contact is part of the first step, the
@@ -672,7 +675,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "person");
     await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveText("4");
     await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveText("1");
-    await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveCount(0);
+    // The health consent is still to give in step «documents» (owner 2026-11-14).
+    await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveText("1");
 
     // Free navigation: straight to the identity document, then back with the step bar.
     await tab(page, "identity").click();

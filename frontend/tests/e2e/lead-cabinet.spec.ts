@@ -121,7 +121,8 @@ function leadRequest() {
         type: "health_data_processing",
         version: CONSENT_VERSION,
         texts: { de: "Ich willige ein … (Art. 9 Abs. 2 lit. a DSGVO) …", ru: "Я даю согласие … (ст. 9) …" },
-        given_at: null as string | null,
+        // Given by default: without it nothing after step «documents» opens (owner 2026-11-14).
+        given_at: "2026-10-03T09:10:00Z" as string | null,
       },
       lead_inquiry_processing: {
         type: "lead_inquiry_processing",
@@ -816,6 +817,7 @@ test.describe("lead cabinet", () => {
   test("audit: concern waits for health consent and the combined upload limit applies", async ({ page }) => {
     const { request, calls } = await setup(page, "lead");
     Object.assign(request, { documents_used: 30 });
+    request.consents.health_data_processing.given_at = null;
     await page.goto("/");
     await step(page, "documents");
     const reason = page.getByRole("textbox", { name: "Grund der Anfrage" });
@@ -964,7 +966,9 @@ test.describe("lead cabinet", () => {
   });
 
   test("the patient enters the data, agrees, uploads and sends", async ({ page }) => {
-    const { calls } = await setup(page, "lead");
+    const { request, calls } = await setup(page, "lead");
+    // The person gives the health consent here: not given yet (owner 2026-11-14).
+    request.consents.health_data_processing.given_at = null;
     await page.goto("/");
 
     // Step 1: the consent first, then the person.
@@ -2969,6 +2973,56 @@ test.describe("Weiter holds a step the same way on every press", () => {
     await page.keyboard.press("Backspace");
     await expect(page.locator("#lead-request-service-program_date_from-error")).toHaveCount(0);
     await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "send");
+  });
+
+  // Owner 2026-11-14 (lead «Politis Zinonas» on DEV): a withdrawn or never given health consent
+  // holds the request at step "documents" — Weiter, the tabs, the address and Forward lead to the box.
+  test("without the health consent, given never or withdrawn, nothing after step «documents» opens", async ({ page }) => {
+    await setup(page, "lead", {
+      prepare: (request) => {
+        filled()(request);
+        Object.assign(request, { service_preferences: { services: [], service_comments: {}, program_date_from: "", notes: "" } });
+        Object.assign(request.consents.health_data_processing, { given_at: null, withdrawn_at: "2026-11-14T16:24:00Z" });
+      },
+    });
+    const box = page.getByTestId("lead-request-health-consent");
+    const checkbox = box.getByRole("checkbox");
+    // The address names a later step: the consent's step opens.
+    await page.goto("/?lead=lead-1&step=send");
+    await expect(current(page)).toHaveAttribute("data-current-step", "documents");
+    await expect(page.getByTestId("lead-request-health-consent-withdrawn")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Grund der Anfrage" })).toBeDisabled();
+    await expect(page.locator("#lead-request-files")).toBeDisabled();
+    // Every press of Weiter: the step stays, the box is named, marked and gets the cursor.
+    const missing = page.getByTestId("lead-request-documents").getByTestId("lead-request-step-missing");
+    for (let press = 1; press <= 2; press += 1) {
+      await page.getByRole("textbox", { name: "Grund der Anfrage" }).scrollIntoViewIfNeeded();
+      await next(page);
+      await expect(current(page)).toHaveAttribute("data-current-step", "documents");
+      await expect(missing.getByRole("listitem")).toHaveText(["Einwilligung zu Gesundheitsdaten"]);
+      await expect(page.locator("#lead-request-health-consent-error")).toHaveText("Bitte stimmen Sie zuerst der Verarbeitung der Gesundheitsdaten zu.");
+      await expect(checkbox).toBeFocused();
+      await expect(checkbox).toBeInViewport();
+    }
+    // The tabs of the later steps lead to the box as well.
+    for (const later of ["services", "send"]) {
+      await step(page, later);
+      await expect(current(page)).toHaveAttribute("data-current-step", "documents");
+      await expect(checkbox).toBeFocused();
+    }
+    // An earlier step stays free.
+    await step(page, "person");
+    await expect(current(page)).toHaveAttribute("data-current-step", "person");
+    // Given again: the request goes on.
+    await step(page, "documents");
+    await checkbox.click();
+    await expect(checkbox).toBeChecked();
+    await expect(page.locator("#lead-request-health-consent-error")).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Grund der Anfrage" })).toBeEnabled();
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "services");
+    await step(page, "send");
     await expect(current(page)).toHaveAttribute("data-current-step", "send");
   });
 
