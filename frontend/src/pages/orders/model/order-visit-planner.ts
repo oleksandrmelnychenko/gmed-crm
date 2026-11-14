@@ -21,6 +21,10 @@ export type DraftVisit = {
   title: string;
   interpreterNeeded: boolean;
   interpreterId: string;
+  /** «Текст для пациента»: the visit's line in the patient's plan (fix 63). */
+  patientPlanText: string;
+  /** «Примечание» under the day heading of the patient's plan, e.g. «Bitte nicht frühstücken!». */
+  patientPreparationNote: string;
 };
 
 /** Taken time the server reports (`GET /orders/{id}/appointments/busy`). */
@@ -284,6 +288,8 @@ export function newDraft(
     title: doctor.doctorName ?? doctor.providerName,
     interpreterNeeded: false,
     interpreterId: "",
+    patientPlanText: "",
+    patientPreparationNote: "",
   };
 }
 
@@ -356,6 +362,8 @@ export function batchPayload(drafts: readonly DraftVisit[], dryRun: boolean) {
       // the appointment form does; only a tick is the visit's own answer.
       interpreter_needed: draft.interpreterNeeded ? true : null,
       interpreter_id: draft.interpreterNeeded && draft.interpreterId ? draft.interpreterId : null,
+      patient_plan_text: draft.patientPlanText.trim() || null,
+      patient_preparation_note: draft.patientPreparationNote.trim() || null,
       // The appointment form fills the place from the provider the same way.
       location: draft.doctor.providerName,
     })),
@@ -375,6 +383,8 @@ export type SavedVisitDraft = {
   time_end: string;
   interpreter_needed: boolean;
   interpreter_id: string | null;
+  patient_plan_text?: string | null;
+  patient_preparation_note?: string | null;
 };
 
 /** The saved draft back on the grid; a line whose times cannot be read is left out. */
@@ -398,6 +408,8 @@ export function draftsFromSaved(saved: readonly SavedVisitDraft[]): DraftVisit[]
         title: item.title,
         interpreterNeeded: item.interpreter_needed,
         interpreterId: item.interpreter_id ?? "",
+        patientPlanText: item.patient_plan_text ?? "",
+        patientPreparationNote: item.patient_preparation_note ?? "",
       },
     ];
   });
@@ -415,6 +427,8 @@ export function draftSavePayload(drafts: readonly DraftVisit[]) {
       time_end: item.time_end,
       interpreter_needed: item.interpreter_needed === true,
       interpreter_id: item.interpreter_id,
+      patient_plan_text: item.patient_plan_text,
+      patient_preparation_note: item.patient_preparation_note,
     })),
   };
 }

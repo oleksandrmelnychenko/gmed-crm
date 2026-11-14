@@ -298,6 +298,8 @@ async fn batch_creates_unreleased_visits_with_audit_and_one_interpreter_notice()
     second["interpreter_id"] = json!(interpreter);
     let mut third = visit(&fx, fx.doctor_a, day(12), "08:00", "09:00");
     third["interpreter_needed"] = json!(false);
+    third["patient_plan_text"] = json!("  Blutabnahme nüchtern  ");
+    third["patient_preparation_note"] = json!("Bitte nicht frühstücken!");
 
     let (status, body) = post_batch(&fx, &fx.pm, false, vec![first, second, third]).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -332,6 +334,15 @@ async fn batch_creates_unreleased_visits_with_audit_and_one_interpreter_notice()
     assert_eq!(rows[0].3.as_deref(), Some("pending"));
     assert_eq!(rows[2].1, None);
     assert_eq!(rows[2].2, Some(false));
+    let texts: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT patient_plan_text, patient_preparation_note FROM appointments WHERE id = $1",
+    )
+    .bind(ids[2])
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(texts.0.as_deref(), Some("Blutabnahme nüchtern"));
+    assert_eq!(texts.1.as_deref(), Some("Bitte nicht frühstücken!"));
 
     let audit_rows: i64 = sqlx::query_scalar(
         r#"SELECT COUNT(*) FROM audit_log

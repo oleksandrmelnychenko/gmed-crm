@@ -161,7 +161,7 @@ describe("grid drafts of a lead's order", () => {
     expect(draftSavePayload(restored)).toEqual({
       items: [{
         provider_id: "p1", doctor_id: "d1", title: "Echo", date: "2026-11-20", time_start: "09:00", time_end: "10:30",
-        interpreter_needed: true, interpreter_id: null,
+        interpreter_needed: true, interpreter_id: null, patient_plan_text: null, patient_preparation_note: null,
       }],
     });
   });
@@ -205,5 +205,19 @@ describe("named conflicts and side-by-side cards (owner remarks 2026-11-14)", ()
     expect(lanes.get("new")).toEqual({ lane: 1, lanes: 2 });
     expect(lanes.get("later")).toEqual({ lane: 0, lanes: 1 });
     expect(lanes.get("alone")).toEqual({ lane: 0, lanes: 1 });
+  });
+});
+
+describe("patient plan texts travel with the visit (fix 63)", () => {
+  it("are sent trimmed, empty as null, and come back from a saved draft", async () => {
+    const { batchPayload, draftSavePayload, draftsFromSaved, newDraft } = await import("./order-visit-planner");
+    const draft = { ...newDraft("a", { providerId: "p", providerName: "P", doctorId: null, doctorName: null }, "2026-11-20", 540),
+      patientPlanText: "  Blutabnahme  ", patientPreparationNote: "" };
+    expect(batchPayload([draft], false).items[0]).toMatchObject({ patient_plan_text: "Blutabnahme", patient_preparation_note: null });
+    expect(draftSavePayload([draft]).items[0]).toMatchObject({ patient_plan_text: "Blutabnahme", patient_preparation_note: null });
+    const back = draftsFromSaved([{ id: "s", provider_id: "p", provider_name: "P", doctor_id: null, doctor_name: null, title: "T",
+      date: "2026-11-20", time_start: "09:00", time_end: "10:00", interpreter_needed: false, interpreter_id: null,
+      patient_plan_text: "Blutabnahme", patient_preparation_note: "Nüchtern" }]);
+    expect(back[0]).toMatchObject({ patientPlanText: "Blutabnahme", patientPreparationNote: "Nüchtern" });
   });
 });

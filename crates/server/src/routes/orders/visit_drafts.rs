@@ -45,6 +45,8 @@ struct DraftItem {
     #[serde(default)]
     interpreter_needed: bool,
     interpreter_id: Option<Uuid>,
+    patient_plan_text: Option<String>,
+    patient_preparation_note: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,7 +111,8 @@ async fn list_visit_drafts(
     let rows = match sqlx::query(
         r#"SELECT draft.id, draft.provider_id, provider.name AS provider_name,
                   draft.doctor_id, doctor.name AS doctor_name, draft.title, draft.date,
-                  draft.time_start, draft.time_end, draft.interpreter_needed, draft.interpreter_id
+                  draft.time_start, draft.time_end, draft.interpreter_needed, draft.interpreter_id,
+                  draft.patient_plan_text, draft.patient_preparation_note
            FROM order_visit_drafts draft
            JOIN providers provider ON provider.id = draft.provider_id
            LEFT JOIN provider_doctors doctor ON doctor.id = draft.doctor_id
@@ -146,6 +149,8 @@ async fn list_visit_drafts(
                 "time_end": time(row, "time_end"),
                 "interpreter_needed": row.try_get::<bool, _>("interpreter_needed").unwrap_or(false),
                 "interpreter_id": row.try_get::<Option<Uuid>, _>("interpreter_id").unwrap_or_default(),
+                "patient_plan_text": row.try_get::<Option<String>, _>("patient_plan_text").unwrap_or_default(),
+                "patient_preparation_note": row.try_get::<Option<String>, _>("patient_preparation_note").unwrap_or_default(),
             })
         })
         .collect();
@@ -192,8 +197,9 @@ async fn replace_visit_drafts(
     for (position, (item, slot)) in body.items.iter().zip(&slots).enumerate() {
         let inserted = sqlx::query(
             r#"INSERT INTO order_visit_drafts (order_id, provider_id, doctor_id, title, date,
-                    time_start, time_end, interpreter_needed, interpreter_id, position, created_by)
-               SELECT $1, $2, doctor.id, $4, $5, $6, $7, $8, $9, $10, $11
+                    time_start, time_end, interpreter_needed, interpreter_id, position, created_by,
+                    patient_plan_text, patient_preparation_note)
+               SELECT $1, $2, doctor.id, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
                FROM providers provider
                LEFT JOIN provider_doctors doctor
                  ON doctor.id = $3 AND doctor.provider_id = provider.id
@@ -211,6 +217,18 @@ async fn replace_visit_drafts(
         .bind(item.interpreter_id)
         .bind(position as i32)
         .bind(auth.user_id)
+        .bind(
+            item.patient_plan_text
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty()),
+        )
+        .bind(
+            item.patient_preparation_note
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty()),
+        )
         .execute(&mut *tx)
         .await;
         match inserted {

@@ -543,6 +543,20 @@ export function OrderVisitPlanner({
             ))}
           </NativeComboboxSelect>
         ) : null}
+        <Input
+          value={activeDraft.patientPlanText}
+          aria-label={tx("Текст для пациента", "Text für den Patienten")}
+          placeholder={tx("Текст для пациента (строка в плане)", "Text für den Patienten (Zeile im Plan)")}
+          onChange={(event) => updateDraft(activeDraft.key, { patientPlanText: event.target.value })}
+          className="h-8 text-[13px]"
+        />
+        <Input
+          value={activeDraft.patientPreparationNote}
+          aria-label={tx("Примечание", "Hinweis")}
+          placeholder={tx("Примечание, напр. «Пожалуйста, не завтракайте!»", "Hinweis, z. B. «Bitte nicht frühstücken!»")}
+          onChange={(event) => updateDraft(activeDraft.key, { patientPreparationNote: event.target.value })}
+          className="h-8 text-[13px]"
+        />
         <div className="flex items-center justify-between gap-2 pt-1">
           <Button
             type="button"

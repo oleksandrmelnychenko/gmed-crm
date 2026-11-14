@@ -62,6 +62,10 @@ pub(super) struct BatchVisit {
     interpreter_id: Option<Uuid>,
     location: Option<String>,
     notes: Option<String>,
+    /// «Текст для пациента»: the visit's line in the patient's plan.
+    patient_plan_text: Option<String>,
+    /// «Примечание» printed under the day heading of the patient's plan.
+    patient_preparation_note: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +138,11 @@ fn interpreter_notice_targets(created: &[(Uuid, PlannedSlot)]) -> Vec<BookingNot
             })
             .collect(),
     )
+}
+
+/// A text field as stored: trimmed, empty is none.
+fn trimmed(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|text| !text.is_empty())
 }
 
 fn failure(index: usize, code: &str, message: &str) -> serde_json::Value {
@@ -459,8 +468,8 @@ pub(super) async fn create_order_appointments(
         // A visit of an order waits for the plan's release to the portal
         // (owner decision 2026-11-02), as in `POST /appointments`.
         let inserted = sqlx::query(
-            "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, notes, created_by, interpreter_response, interpreter_needed, portal_released_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,'medical',$8,$9,$10,$11,$12,$13,$14,$15,$16,NULL)",
+            "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, notes, created_by, interpreter_response, interpreter_needed, portal_released_at, patient_plan_text, patient_preparation_note)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'medical',$8,$9,$10,$11,$12,$13,$14,$15,$16,NULL,$17,$18)",
         )
         .bind(appointment_id)
         .bind(patient_id)
@@ -479,6 +488,8 @@ pub(super) async fn create_order_appointments(
         .bind(auth.user_id)
         .bind(slot.interpreter_id.map(|_| "pending"))
         .bind(interpreter_needed)
+        .bind(trimmed(item.patient_plan_text.as_deref()))
+        .bind(trimmed(item.patient_preparation_note.as_deref()))
         .execute(&mut *tx)
         .await;
         if let Err(e) = inserted {
