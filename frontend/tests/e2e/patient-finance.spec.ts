@@ -16,7 +16,7 @@ async function prepare(page: Page, lang = "ru", role = "ceo") {
   ];
   const requests: string[] = [];
   const errors: string[] = [];
-  const state = { fail: false, provisional: false, holdFrom: "" };
+  const state = { fail: false, provisional: false, holdFrom: "", prepayment: "0" };
   let release: (() => void) | undefined;
   let wait: Promise<void> | undefined;
   await page.clock.setFixedTime(new Date("2026-09-10T12:00:00Z"));
@@ -53,7 +53,7 @@ async function prepare(page: Page, lang = "ru", role = "ceo") {
         return { id: entry.id, kind: entry.kind, entry_date: entry.date, occurred_at: `${entry.date}T12:00:00Z`, direction: entry.debit ? "debit" : "credit", description: "", document_number: `DOC-${entry.id}`, order_number: "A-TEST-1", debit: entry.debit.toFixed(2), credit: entry.credit.toFixed(2), balance_after: balance.toFixed(2), currency };
       });
       body = { patient_id: patientId, currency, available_currencies: ["EUR", "USD"], scope: "staff", amounts_complete: true,
-        summary: { opening_balance: opening.toFixed(2), calculated_balance: balance.toFixed(2), closing_balance: state.provisional ? null : balance.toFixed(2), reconciliation_required: state.provisional, invoice_due: "650", total_due: "650", external_receivable: "0", available_prepayment: "0", balance_side: balance > 0 ? "debit" : balance < 0 ? "credit" : "settled", invoiced_gross: "1000", cash_paid: "400", prepayment_applied: "0", debit_total: "1050", credit_total: "500", unreconciled_external_debit: "0" },
+        summary: { opening_balance: opening.toFixed(2), calculated_balance: balance.toFixed(2), closing_balance: state.provisional ? null : balance.toFixed(2), reconciliation_required: state.provisional, invoice_due: "650", total_due: "650", external_receivable: "0", available_prepayment: state.prepayment, balance_side: balance > 0 ? "debit" : balance < 0 ? "credit" : "settled", invoiced_gross: "1000", cash_paid: "400", prepayment_applied: "0", debit_total: "1050", credit_total: "500", unreconciled_external_debit: "0" },
         redaction: { hidden_invoice_amount_count: 0, external_expense_count: 0, services_hidden: false }, items: [], movements };
       if (from && state.holdFrom === from && wait) await wait;
       if (state.fail) return route.fulfill({ status: 503, json: { error: "unavailable" } });
@@ -124,6 +124,20 @@ test("refreshes payments after a financial event and recovers from a visible loa
   await expect(page.getByTestId("finance-closing")).toContainText("450,00");
   await expect(page.getByRole("button", { name: /Баланс: 450,00.*Долг/ })).toBeVisible();
   expect(api.errors).toEqual([]);
+});
+
+test("a paid advance shows next to the balance with «Создать счёт» (owner 2026-11-14)", async ({ page }) => {
+  const api = await prepare(page);
+  await page.goto(financeUrl);
+  await expect(page.getByTestId("finance-closing")).toBeVisible();
+  await expect(page.getByTestId("patient-header-prepayment")).toHaveCount(0);
+  api.state.prepayment = "2000.00";
+  await page.reload();
+  const advance = page.getByTestId("patient-header-prepayment");
+  await expect(advance).toContainText("Предоплата (не зачтена)");
+  await expect(advance).toContainText("2.000,00");
+  const link = advance.getByRole("link", {name: "Создать счёт"});
+  await expect(link).toHaveAttribute("href", `/invoices?create=1&patient=${patientId}&invoice_type=final`);
 });
 
 test("a provisional balance is clearly marked", async ({ page }) => {

@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 
 import { resolvePatientBalancePresentation, staffCreditSideLabel } from "../../model/account-balance";
+import { StaffLink } from "@/components/staff-link";
 import type { PatientNavigationItem } from "../../model/patient-navigation";
 import {
   canCompletePatientChecklistItem,
@@ -631,6 +632,12 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     };
   }, [activeTab, accountRevision, canViewFinance, detail, id]);
 
+  // A paid advance not yet set off against an invoice: shown on its own next
+  // to the balance (owner 2026-11-14), with the way to the invoice that uses it.
+  const availablePrepayment =
+    accountStatement && accountStatement.patient_id === id
+      ? Number(accountStatement.summary.available_prepayment ?? 0)
+      : 0;
   const balance = resolvePatientBalancePresentation(accountStatement && accountStatement.patient_id === id ? accountStatement.summary : null);
   const balanceSideLabel =
     balance?.side === "debit"
@@ -769,6 +776,27 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               ) : null}
             </span>
           </button>
+        ) : null}
+        {canViewFinance && availablePrepayment > 0 ? (
+          <div data-testid="patient-header-prepayment" className="shrink-0 px-1 text-left">
+            <span className="block text-[10px] font-medium text-muted-foreground">
+              {lang === "de" ? "Vorauszahlung (nicht verrechnet)" : "Предоплата (не зачтена)"}
+            </span>
+            <span className="flex items-center gap-2 text-sm font-semibold tabular-nums text-emerald-700">
+              {formatMoney(String(availablePrepayment), accountStatement?.currency)}
+              <StaffLink
+                to={`/invoices?create=1&patient=${encodeURIComponent(id ?? "")}&invoice_type=final`}
+                className="rounded-md border border-emerald-300 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50"
+                title={
+                  lang === "de"
+                    ? "Schlussrechnung erstellen: die Vorauszahlung wird bei der Ausgabe verrechnet"
+                    : "Создать итоговый счёт: предоплата зачтётся при выпуске"
+                }
+              >
+                {lang === "de" ? "Rechnung erstellen" : "Создать счёт"}
+              </StaffLink>
+            </span>
+          </div>
         ) : null}
         <div className="flex basis-full flex-wrap items-center justify-end gap-2 border-t border-border pt-2">
         {canPrintPatientLabel ? (
