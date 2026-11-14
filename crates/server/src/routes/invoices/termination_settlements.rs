@@ -1939,6 +1939,7 @@ async fn create_termination_final_invoice(
             &state,
             patient_id,
             order_id,
+            None,
             (
                 snapshot.total_net,
                 snapshot.total_vat,

@@ -1,0 +1,615 @@
+//! Draft invoices are changed and deleted before their release (owner
+//! 2026-11-14): lines rebuilt from the quote within the open quantities,
+//! due date and remark, a manual split of a prepayment advance, and the
+//! deletion that frees what the draft reserved. An advance smaller than the
+//! quote covers GMED's own services first, then the pass-through costs.
+
+mod support;
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use rust_decimal::Decimal;
+use serde_json::{Value, json};
+use sqlx::PgPool;
+use tower::ServiceExt;
+use uuid::Uuid;
+
+use gmed_server::auth::jwt;
+
+const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
+
+async fn raw_request(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    bearer: &str,
+    body: Option<Value>,
+) -> (StatusCode, Vec<u8>) {
+    let body = match body {
+        Some(value) => Body::from(serde_json::to_vec(&value).unwrap()),
+        None => Body::empty(),
+    };
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("Authorization", bearer)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap();
+    (status, bytes.to_vec())
+}
+
+async fn json_request(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    bearer: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let (status, bytes) = raw_request(app, method, path, bearer, body).await;
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+fn bearer(user_id: Uuid, role: &str) -> String {
+    let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
+    format!("Bearer {token}")
+}
+
+fn dec(value: &Value) -> Decimal {
+    match value {
+        Value::String(text) => text.parse().unwrap(),
+        Value::Number(number) => number.to_string().parse().unwrap(),
+        other => panic!("not a decimal: {other}"),
+    }
+}
+
+async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, 'test-password-hash', $2, $3) RETURNING id"#,
+    )
+    .bind(format!("{tag}-{role}@example.com"))
+    .bind(format!("{role} {tag}"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// A synthetic adult patient with a full postal address, so a release passes
+/// the recipient check.
+async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO patients (
+                patient_id, first_name, last_name, birth_date, gender, created_by,
+                address_street, address_zip, address_city, address_country
+           ) VALUES ($1, $2, 'Muster', '1980-01-01', 'diverse', $3,
+                     'Hauptstraße 1', '80331', 'München', 'Deutschland')
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(format!("Test {tag}"))
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// An order cleared for billing with the given services
+/// (description, quantity, unit price, VAT rate, pass-through).
+async fn seed_order(
+    pool: &PgPool,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    services: &[(&str, i32, f64, f64, bool)],
+) -> Uuid {
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE orders
+           SET package_coverage_status = 'not_covered',
+               package_coverage_note = 'test package gate',
+               package_coverage_decided_by = $2,
+               package_coverage_decided_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .bind(created_by)
+    .execute(pool)
+    .await
+    .unwrap();
+    // Quote lines follow the creation time of the services.
+    for (position, (description, quantity, price, vat_rate, passthrough)) in
+        services.iter().enumerate()
+    {
+        sqlx::query(
+            r#"INSERT INTO order_leistungen (
+                    order_id, description, quantity, unit_price, vat_rate,
+                    is_cost_passthrough, status, created_at
+               ) VALUES ($1, $2, $3, $4, $5, $6, 'approved',
+                         now() - make_interval(mins => $7))"#,
+        )
+        .bind(order_id)
+        .bind(*description)
+        .bind(*quantity)
+        .bind(*price)
+        .bind(*vat_rate)
+        .bind(*passthrough)
+        .bind(i32::try_from(services.len() - position).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    order_id
+}
+
+struct Fixture {
+    app: axum::Router,
+    pool: PgPool,
+    billing: String,
+    concierge: String,
+    order_id: Uuid,
+    quote_id: String,
+}
+
+async fn fixture(prefix: &str, services: &[(&str, i32, f64, f64, bool)]) -> Option<Fixture> {
+    let ctx = support::suite_context(TEST_SECRET).await?;
+    let tag = format!("{prefix}-{}", Uuid::new_v4().simple());
+    let billing = bearer(seed_user(&ctx.pool, &tag, "billing").await, "billing");
+    let manager = bearer(seed_user(&ctx.pool, &tag, "ceo").await, "ceo");
+    let concierge = bearer(seed_user(&ctx.pool, &tag, "concierge").await, "concierge");
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &tag).await;
+    let order_id = seed_order(&ctx.pool, patient_id, ctx.admin_id, &tag, services).await;
+    let (status, quote) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &manager,
+        Some(json!({ "notes": "draft test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote}");
+    Some(Fixture {
+        app: ctx.app,
+        pool: ctx.pool,
+        billing,
+        concierge,
+        order_id,
+        quote_id: quote["id"].as_str().unwrap().to_string(),
+    })
+}
+
+const SERVICES: &[(&str, i32, f64, f64, bool)] = &[
+    ("Quartalsbetreuung", 2, 100.0, 19.0, false),
+    ("Terminorganisation", 1, 50.0, 19.0, false),
+];
+
+async fn create_interim(fixture: &Fixture, line_items: Value) -> (StatusCode, Value) {
+    json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", fixture.quote_id),
+        &fixture.billing,
+        Some(json!({ "invoice_type": "interim", "line_items": line_items })),
+    )
+    .await
+}
+
+async fn put_draft(
+    fixture: &Fixture,
+    auth: &str,
+    invoice_id: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    json_request(
+        &fixture.app,
+        "PUT",
+        &format!("/api/v1/invoices/{invoice_id}/draft"),
+        auth,
+        Some(body),
+    )
+    .await
+}
+
+async fn audit_count(pool: &PgPool, action: &str, invoice_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = $1 AND entity_id = $2::uuid")
+        .bind(action)
+        .bind(invoice_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_draft_gets_new_lines_dates_and_remark_within_the_open_quote() {
+    let Some(fixture) = fixture("draft-edit", SERVICES).await else {
+        return;
+    };
+    let (status, invoice) =
+        create_interim(&fixture, json!([{ "line_index": 0, "quantity": 1 }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    let invoice_id = invoice["id"].as_str().unwrap().to_string();
+    assert_eq!(dec(&invoice["total_gross"]), Decimal::new(119, 0));
+
+    // The editor counts the draft's own quantity as open.
+    let (status, editor) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/draft"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{editor}");
+    assert_eq!(editor["lines_mode"], "quote_positions", "{editor}");
+    let lines = editor["quote_lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 2, "{editor}");
+    assert_eq!(dec(&lines[0]["open_quantity"]), Decimal::new(2, 0));
+    assert_eq!(dec(&lines[0]["selected_quantity"]), Decimal::ONE);
+    assert_eq!(dec(&lines[1]["open_quantity"]), Decimal::ONE);
+    assert!(lines[1]["selected_quantity"].is_null(), "{editor}");
+
+    // Both quarters and the second service, a due date and a remark.
+    let due_date = (gmed_server::app_time::today() + chrono::Days::new(21)).to_string();
+    let (status, changed) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({
+            "due_date": due_date,
+            "notes": "Bitte bis zum Fälligkeitstag überweisen",
+            "line_items": [
+                { "line_index": 0, "quantity": 2, "comment": "3. und 4. Quartal" },
+                { "line_index": 1, "quantity": 1 }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["status"], "draft");
+    assert!(changed["invoice_number"].is_null(), "{changed}");
+    assert_eq!(dec(&changed["total_net"]), Decimal::new(250, 0));
+    assert_eq!(dec(&changed["total_gross"]), Decimal::new(2975, 1));
+    assert_eq!(changed["due_date"], due_date.as_str(), "{changed}");
+    assert_eq!(changed["notes"], "Bitte bis zum Fälligkeitstag überweisen");
+    assert_eq!(changed["line_items"][0]["comment"], "3. und 4. Quartal");
+    let reserved: Decimal = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(quantity), 0) FROM invoice_order_line_allocations WHERE invoice_id = $1::uuid",
+    )
+    .bind(&invoice_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .unwrap();
+    assert_eq!(reserved, Decimal::new(3, 0));
+    assert_eq!(
+        audit_count(&fixture.pool, "update_invoice_draft", &invoice_id).await,
+        1
+    );
+
+    // The preview shows the new lines and the remark.
+    let (status, pdf) = raw_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&pdf)
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(text.contains("Terminorganisation"), "{text}");
+    assert!(
+        text.contains("Bitte bis zum Fälligkeitstag überweisen"),
+        "{text}"
+    );
+
+    // Refused: more than is open, a due date in the past, no right.
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "line_items": [{ "line_index": 0, "quantity": 3 }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "due_date": "2020-01-01" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, _) = put_draft(&fixture, &fixture.concierge, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Released, the invoice is no draft any more.
+    let (status, released) = json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &fixture.billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    let (status, body) = put_draft(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "invoice_not_a_draft", "{body}");
+}
+
+#[tokio::test]
+async fn deleting_a_draft_frees_its_quantities_and_never_touches_an_issued_invoice() {
+    let Some(fixture) = fixture("draft-delete", SERVICES).await else {
+        return;
+    };
+    let all_lines = json!([
+        { "line_index": 0, "quantity": 2 },
+        { "line_index": 1, "quantity": 1 }
+    ]);
+    let (status, draft) = create_interim(&fixture, all_lines.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let draft_id = draft["id"].as_str().unwrap().to_string();
+
+    // Concierge staff do not create invoices and do not delete them.
+    let (status, _) = json_request(
+        &fixture.app,
+        "DELETE",
+        &format!("/api/v1/invoices/{draft_id}"),
+        &fixture.concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, body) = json_request(
+        &fixture.app,
+        "DELETE",
+        &format!("/api/v1/invoices/{draft_id}"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["deleted"], true);
+    let (stored_status, number): (String, Option<String>) =
+        sqlx::query_as("SELECT status, invoice_number FROM invoices WHERE id = $1::uuid")
+            .bind(&draft_id)
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_status, "cancelled");
+    assert_eq!(number, None);
+    assert_eq!(
+        audit_count(&fixture.pool, "discard_invoice_draft", &draft_id).await,
+        1
+    );
+    let storno: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_storno_documents WHERE invoice_id = $1::uuid",
+    )
+    .bind(&draft_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .unwrap();
+    assert_eq!(storno, 0);
+
+    // Out of the list, unless cancelled invoices are asked for.
+    let (status, list) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices?order_id={}", fixture.order_id),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["id"] != draft_id.as_str()),
+        "{list}"
+    );
+    let (status, list) = json_request(
+        &fixture.app,
+        "GET",
+        &format!(
+            "/api/v1/invoices?order_id={}&status=cancelled",
+            fixture.order_id
+        ),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == draft_id.as_str()),
+        "{list}"
+    );
+
+    // The quantities are free: the same lines go on a new invoice.
+    let (status, again) = create_interim(&fixture, all_lines).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+    let again_id = again["id"].as_str().unwrap().to_string();
+
+    // A deleted draft is not deleted twice; an issued invoice never.
+    let (status, body) = json_request(
+        &fixture.app,
+        "DELETE",
+        &format!("/api/v1/invoices/{draft_id}"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, released) = json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/invoices/{again_id}/status"),
+        &fixture.billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    let (status, body) = json_request(
+        &fixture.app,
+        "DELETE",
+        &format!("/api/v1/invoices/{again_id}"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "invoice_not_a_draft", "{body}");
+    let still: String = sqlx::query_scalar("SELECT status FROM invoices WHERE id = $1::uuid")
+        .bind(&again_id)
+        .fetch_one(&fixture.pool)
+        .await
+        .unwrap();
+    assert_eq!(still, "sent");
+}
+
+fn advance_line(invoice: &Value, passthrough: bool) -> Option<Value> {
+    invoice["line_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| line["is_cost_passthrough"] == passthrough)
+        .cloned()
+}
+
+#[tokio::test]
+async fn an_advance_covers_own_services_first_and_can_be_split_by_hand() {
+    // 100 + 19 % VAT of own service (119 gross) and 300 of clinic costs
+    // passed through; the order asks for a prepayment of 200.
+    let services: &[(&str, i32, f64, f64, bool)] = &[
+        ("Dolmetscher", 1, 100.0, 19.0, false),
+        ("Klinikrechnung", 1, 300.0, 0.0, true),
+    ];
+    let Some(fixture) = fixture("draft-advance", services).await else {
+        return;
+    };
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = 200 WHERE id = $1",
+    )
+    .bind(fixture.order_id)
+    .execute(&fixture.pool)
+    .await
+    .unwrap();
+    let (status, advance) = json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", fixture.quote_id),
+        &fixture.billing,
+        Some(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{advance}");
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+
+    // Default: the own service in full with its VAT, the rest to the costs.
+    assert_eq!(dec(&advance["total_gross"]), Decimal::new(200, 0));
+    let own = advance_line(&advance, false).expect("own service line");
+    assert_eq!(dec(&own["line_gross"]), Decimal::new(119, 0), "{advance}");
+    assert_eq!(dec(&own["line_vat"]), Decimal::new(19, 0), "{advance}");
+    let costs = advance_line(&advance, true).expect("pass-through line");
+    assert_eq!(dec(&costs["line_gross"]), Decimal::new(81, 0), "{advance}");
+    assert_eq!(dec(&costs["line_vat"]), Decimal::ZERO, "{advance}");
+
+    let (status, editor) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{advance_id}/draft"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{editor}");
+    assert_eq!(editor["lines_mode"], "advance_split", "{editor}");
+    assert_eq!(
+        editor["advance"]["groups"].as_array().unwrap().len(),
+        2,
+        "{editor}"
+    );
+
+    // By hand: 50 to the own service, 150 to the costs.
+    let (status, split) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &advance_id,
+        json!({
+            "advance_split": [
+                { "is_cost_passthrough": false, "vat_rate": "19", "amount_gross": "50" },
+                { "is_cost_passthrough": true, "vat_rate": "0", "amount_gross": "150" }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{split}");
+    assert_eq!(dec(&split["total_gross"]), Decimal::new(200, 0));
+    assert_eq!(dec(&split["total_vat"]), Decimal::new(798, 2), "{split}");
+    let own = advance_line(&split, false).unwrap();
+    assert_eq!(dec(&own["line_net"]), Decimal::new(4202, 2), "{split}");
+    assert_eq!(own["advance_allocation"], "manual", "{split}");
+    assert_eq!(
+        dec(&advance_line(&split, true).unwrap()["line_gross"]),
+        Decimal::new(150, 0)
+    );
+
+    // Refused: shares not adding up, more than the group has open, quote lines.
+    for split in [
+        json!([
+            { "is_cost_passthrough": false, "vat_rate": "19", "amount_gross": "49" },
+            { "is_cost_passthrough": true, "vat_rate": "0", "amount_gross": "150" }
+        ]),
+        json!([
+            { "is_cost_passthrough": false, "vat_rate": "19", "amount_gross": "150" },
+            { "is_cost_passthrough": true, "vat_rate": "0", "amount_gross": "50" }
+        ]),
+    ] {
+        let (status, body) = put_draft(
+            &fixture,
+            &fixture.billing,
+            &advance_id,
+            json!({ "advance_split": split }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &advance_id,
+        json!({ "line_items": [{ "line_index": 0, "quantity": 1 }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "invoice_draft_lines_locked", "{body}");
+}

@@ -56,6 +56,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -187,7 +188,9 @@ import {
   updateInvoicePayer,
   updateInvoiceStatus,
   updateInvoiceVisibility,
+  deleteInvoiceDraft,
 } from "./data/invoice-api";
+import { DraftInvoiceEditorDialog } from "./ui/draft-invoice-editor";
 import { InternalNoteEditor } from "@/components/internal-note-editor";
 import { recordLoadErrorText } from "@/lib/section-load-error";
 import {
@@ -1175,6 +1178,11 @@ function useStaffInvoicesPageContent() {
   const [refundError, setRefundError] = useState<string | null>(null);
   // An internal note typed in the detail sheet but not saved yet.
   const [internalNoteDirty, setInternalNoteDirty] = useState(false);
+  // Draft invoice: «Редактировать» and «Удалить черновик» (owner 2026-11-14).
+  const [draftEditorOpen, setDraftEditorOpen] = useState(false);
+  const [draftDeleteOpen, setDraftDeleteOpen] = useState(false);
+  const [draftDeleteBusy, setDraftDeleteBusy] = useState(false);
+  const [draftDeleteError, setDraftDeleteError] = useState<string | null>(null);
   const [reversingRefundId, setReversingRefundId] = useState("");
   const [refundReversalReason, setRefundReversalReason] = useState("");
   const deferredSearch = useDeferredValue(filters.search);
@@ -2367,6 +2375,26 @@ function useStaffInvoicesPageContent() {
     internalNoteDirty,
   });
 
+  // A draft has no number yet: deleting it frees what it reserved; the server
+  // refuses an issued invoice (that one is cancelled with a Storno).
+  async function handleDeleteDraft() {
+    if (!detail || draftDeleteBusy) return;
+    setDraftDeleteBusy(true);
+    setDraftDeleteError(null);
+    try {
+      await deleteInvoiceDraft(detail.id);
+      setDraftDeleteOpen(false);
+      setSelectedInvoiceId("");
+      setDetail(null);
+      clearApiCache("/invoices");
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setDraftDeleteError(localizeInvoiceError(error, lang, t.common_error));
+    } finally {
+      setDraftDeleteBusy(false);
+    }
+  }
+
   async function handleSaveStatus(confirmed: Record<string, boolean> = {}) {
     if (!statusDirty || statusBusy || statusFormProblem) return;
     if (!selectedInvoiceId) return;
@@ -3264,28 +3292,72 @@ function useStaffInvoicesPageContent() {
                           {lang === "de" ? "Ausstellen" : "Выставить"}
                         </Button>
                       ) : null}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="size-8 rounded-lg"
-                        onClick={() => {
-                          setStatusError(null);
-                          setStatusConfirmation(null);
-                          setStornoConfirmOpen(false);
-                          // A status preset by «Выставить» and then dismissed is not kept.
-                          setStatusForm((current) => ({ ...current, status: invoiceToStatusForm(detail).status }));
-                          setStatusDialogOpen(true);
-                        }}
-                        disabled={!access.canManage}
-                        aria-label={t.common_edit}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
+                      {/* The draft is changed and deleted with named buttons
+                          (owner 2026-11-14); an issued invoice keeps the
+                          status dialog behind the pencil. */}
+                      {detail.status === "draft" && !isInvoiceReleased(detail) ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1.5 rounded-lg"
+                            data-testid="invoice-edit-draft"
+                            disabled={!access.canCreate}
+                            onClick={() => setDraftEditorOpen(true)}
+                          >
+                            <Pencil className="size-3.5" />
+                            {lang === "de" ? "Bearbeiten" : "Редактировать"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1.5 rounded-lg text-destructive hover:text-destructive"
+                            data-testid="invoice-delete-draft"
+                            disabled={!access.canCreate}
+                            onClick={() => {
+                              setDraftDeleteError(null);
+                              setDraftDeleteOpen(true);
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                            {lang === "de" ? "Entwurf löschen" : "Удалить черновик"}
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="size-8 rounded-lg"
+                          onClick={() => {
+                            setStatusError(null);
+                            setStatusConfirmation(null);
+                            setStornoConfirmOpen(false);
+                            // A status preset by «Выставить» and then dismissed is not kept.
+                            setStatusForm((current) => ({ ...current, status: invoiceToStatusForm(detail).status }));
+                            setStatusDialogOpen(true);
+                          }}
+                          disabled={!access.canManage}
+                          aria-label={t.common_edit}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
+                      )}
                     </div>
                   }
                 >
                   <div className="space-y-4">
+                    {detail.status === "draft" && !isInvoiceReleased(detail) ? (
+                      <ShellBanner tone="info">
+                        <span data-testid="invoice-draft-explainer">
+                          {lang === "de"
+                            ? "Entwurf ohne Nummer: Positionen, Fälligkeit, Anmerkung und Empfänger lassen sich noch ändern, der Entwurf kann gelöscht werden. „Ausstellen“ vergibt die Rechnungsnummer und das Rechnungsdatum (heute), archiviert das PDF unverändert und zeigt die Rechnung dem Patienten im Portal (sofern sichtbar) mit einer Benachrichtigung. Danach ist sie nur noch per Stornorechnung zu korrigieren."
+                            : "Черновик без номера: позиции, срок оплаты, примечание и получателя ещё можно изменить, черновик можно удалить. «Выставить» присваивает номер и дату счёта (сегодня), сохраняет PDF в архив без изменений и показывает счёт пациенту в кабинете (если он видим) с уведомлением. После этого счёт исправляется только документом сторно."}
+                        </span>
+                      </ShellBanner>
+                    ) : null}
                     <div className="grid gap-x-5 sm:grid-cols-2">
                       <SummaryLine label={t.invoices_patient} value={detail.patient_pid} />
                       <SummaryLine label={t.orders_title} value={detail.order_number ?? text.noOrder} />
@@ -5083,6 +5155,57 @@ function useStaffInvoicesPageContent() {
               >
                 {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                 {dunningActionLabel}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {detail && detail.status === "draft" ? (
+        <DraftInvoiceEditorDialog
+          open={draftEditorOpen}
+          onOpenChange={setDraftEditorOpen}
+          invoiceId={detail.id}
+          currency={detail.currency ?? "EUR"}
+          lang={lang}
+          canEditRecipient={access.canEditPayer}
+          onEditRecipient={() => setPayerDialogOpen(true)}
+          onSaved={() => {
+            clearApiCache("/invoices");
+            setReloadToken((current) => current + 1);
+          }}
+        />
+      ) : null}
+
+      <Dialog open={draftDeleteOpen} onOpenChange={(open) => !draftDeleteBusy && setDraftDeleteOpen(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <div className="space-y-4" data-testid="invoice-delete-draft-confirmation">
+            <DialogHeader>
+              <DialogTitle>
+                <SectionHeading icon={Trash2}>{lang === "de" ? "Entwurf löschen?" : "Удалить черновик?"}</SectionHeading>
+              </DialogTitle>
+              <DialogDescription>
+                {detail
+                  ? lang === "de"
+                    ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} · ${detail.patient_name ?? detail.patient_pid ?? ""} · ${invoiceTypeLabel(detail.invoice_type)} · ${formatMoney(detail.total_gross, detail.currency)}. Der Entwurf verschwindet aus der Liste; die Positionen, Leistungen und Lieferantenrechnungen, die er gebunden hat, sind wieder abrechenbar. Er hat keine Nummer, daher entsteht keine Stornorechnung; im Protokoll bleibt er erhalten.`
+                    : `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} · ${detail.patient_name ?? detail.patient_pid ?? ""} · ${invoiceTypeLabel(detail.invoice_type)} · ${formatMoney(detail.total_gross, detail.currency)}. Черновик пропадёт из списка; позиции сметы, услуги и счета поставщиков, которые он занимал, снова можно выставить. Номера у него нет, поэтому документ сторно не создаётся; в журнале изменений он остаётся.`
+                  : null}
+              </DialogDescription>
+            </DialogHeader>
+            {draftDeleteError ? <ShellBanner tone="error">{draftDeleteError}</ShellBanner> : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" disabled={draftDeleteBusy} onClick={() => setDraftDeleteOpen(false)}>
+                {lang === "de" ? "Nicht löschen" : "Не удалять"}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={draftDeleteBusy}
+                data-testid="invoice-delete-draft-confirm"
+                onClick={() => void handleDeleteDraft()}
+              >
+                {draftDeleteBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                {lang === "de" ? "Ja, Entwurf löschen" : "Да, удалить черновик"}
               </Button>
             </div>
           </div>

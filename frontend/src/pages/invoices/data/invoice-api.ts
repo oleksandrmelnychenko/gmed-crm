@@ -12,6 +12,7 @@ import type {
   PatientOption,
   QuoteOption,
 } from "../model/types";
+import type { DraftEditorPayload } from "../model/draft-editor";
 
 type JsonPayload = Record<string, unknown>;
 
@@ -99,6 +100,26 @@ export function createInvoice(quoteId: string, payload: JsonPayload) {
 
 export function updateInvoiceStatus(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/status`, payload);
+}
+
+/** What the draft editor offers (header, open quote lines or advance groups). */
+export function fetchInvoiceDraftEditor(invoiceId: string) {
+  return apiFetch<DraftEditorPayload>(`/invoices/${invoiceId}/draft`);
+}
+
+/** Saves the draft editor: header always, lines or advance split when changed. */
+export function updateInvoiceDraft(invoiceId: string, payload: JsonPayload) {
+  return apiFetch<InvoiceItem>(`/invoices/${invoiceId}/draft`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Deletes a draft invoice; an issued invoice is refused by the server. */
+export function deleteInvoiceDraft(invoiceId: string) {
+  return apiFetch<{ id: string; deleted: boolean }>(`/invoices/${invoiceId}`, {
+    method: "DELETE",
+  });
 }
 
 export function createInvoicePayment(invoiceId: string, payload: JsonPayload) {

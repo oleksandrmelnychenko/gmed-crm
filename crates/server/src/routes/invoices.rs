@@ -4,7 +4,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::{StatusCode, header},
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use printpdf::{
@@ -38,6 +38,7 @@ mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
 mod document;
+mod drafts;
 mod dunning_blocks;
 mod dunning_letters;
 mod ledger_text;
@@ -131,7 +132,14 @@ pub fn router() -> Router<AppState> {
             get(get_issuer_tax_registration),
         )
         .route("/invoices", get(list_invoices))
-        .route("/invoices/{invoice_id}", get(get_invoice))
+        .route(
+            "/invoices/{invoice_id}",
+            get(get_invoice).delete(drafts::discard_invoice_draft),
+        )
+        .route(
+            "/invoices/{invoice_id}/draft",
+            get(drafts::get_invoice_draft_editor).put(drafts::update_invoice_draft),
+        )
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
         .route(
             "/invoices/{invoice_id}/storno/pdf",
@@ -577,6 +585,9 @@ struct QuoteInvoiceContext {
     /// Current quantity of the order's not cancelled services: an approved
     /// report or a split planned block changes it after the quote was made.
     service_quantities: BTreeMap<Uuid, Decimal>,
+    /// The draft whose lines are being rebuilt (see `drafts`): its own
+    /// allocations and package overages count as open, not as billed.
+    editing_invoice_id: Option<Uuid>,
 }
 
 struct InvoiceCreationSnapshot {
@@ -3855,6 +3866,7 @@ async fn load_quote_invoice_context(
                 ))
             })
             .collect(),
+        editing_invoice_id: None,
     }))
 }
 
@@ -3938,6 +3950,7 @@ async fn build_selected_invoice_snapshot(
     }
 
     let allocated = load_allocated_quote_quantities(state, ctx.quote_id).await?;
+    let allocated = drafts::without_own_allocations(state, ctx, allocated).await?;
     let mut requested = BTreeMap::<usize, Decimal>::new();
     let mut requested_comments = BTreeMap::<usize, String>::new();
     if let Some(items) = requested_items {
@@ -4190,6 +4203,7 @@ async fn build_selected_invoice_snapshot(
                 state,
                 ctx.patient_id,
                 ctx.order_id,
+                ctx.editing_invoice_id,
                 (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Vec::new()),
             )
             .await?;
@@ -4239,6 +4253,7 @@ async fn build_selected_invoice_snapshot(
             state,
             ctx.patient_id,
             ctx.order_id,
+            ctx.editing_invoice_id,
             base,
         )
         .await?;
@@ -4259,10 +4274,13 @@ async fn build_selected_invoice_snapshot(
 /// 550 EUR quote) instead of the quote positions; without a configured
 /// prepayment the whole quote is billed. It is taxed like a positions
 /// advance: the amount is split over the quote's VAT groups (rate, and
-/// pass-through costs without VAT) in proportion to their gross, one
-/// "Anzahlung" line per group referencing the quote, so the VAT of the
-/// prepayment matches the services it pays for. A single-rate quote gets a
-/// single line. Advances consume no quote quantities.
+/// pass-through costs without VAT), one "Anzahlung" line per group
+/// referencing the quote, so the VAT of the prepayment matches the services
+/// it pays for. GMED's own services are covered first, in full with their
+/// VAT; only what is left goes to the expected pass-through costs (owner
+/// decision 2026-11-14, see `drafts::own_services_first`). Staff can set the
+/// split by hand on the draft. A single-rate quote gets a single line.
+/// Advances consume no quote quantities.
 async fn build_prepayment_advance_snapshot(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
@@ -4281,6 +4299,40 @@ async fn build_prepayment_advance_snapshot(
         )
     })?;
 
+    let (groups, part_billed) = load_prepayment_advance_groups(state, ctx).await?;
+    let quote_gross: Decimal = groups.iter().map(|group| group.open_gross).sum();
+    let amount = required.unwrap_or(quote_gross).round_cents();
+    if amount <= Decimal::ZERO {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The required prepayment must be greater than zero",
+        ));
+    }
+    if amount > quote_gross && part_billed {
+        return Err(coded_err(
+            StatusCode::CONFLICT,
+            release::ADVANCE_OVER_BILLED,
+            "The advance exceeds what this quote has left to bill",
+            json!({}),
+        ));
+    }
+    if amount > quote_gross {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The required prepayment exceeds the quote total",
+        ));
+    }
+    let shares = drafts::own_services_first(amount, &groups);
+    Ok(prepayment_advance_snapshot(ctx, &groups, &shares, false))
+}
+
+/// The VAT groups of the quote with the gross no invoice bills yet, own
+/// services first (pass-through costs last), and whether part of the quote is
+/// billed already.
+async fn load_prepayment_advance_groups(
+    state: &AppState,
+    ctx: &QuoteInvoiceContext,
+) -> Result<(Vec<drafts::AdvanceGroup>, bool), axum::response::Response> {
     // The prepayment is measured against what no invoice bills yet: beside an
     // interim invoice the whole quote would be billed twice (QA 2026-11-01, Y2 B1).
     let allocated = load_allocated_quote_quantities(state, ctx.quote_id).await?;
@@ -4334,44 +4386,38 @@ async fn build_prepayment_advance_snapshot(
             "Quote has no invoiceable line items",
         ));
     }
-    let amount = required.unwrap_or(quote_gross).round_cents();
-    if amount <= Decimal::ZERO {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "The required prepayment must be greater than zero",
-        ));
-    }
-    if amount > quote_gross && part_billed {
-        return Err(coded_err(
-            StatusCode::CONFLICT,
-            release::ADVANCE_OVER_BILLED,
-            "The advance exceeds what this quote has left to bill",
-            json!({}),
-        ));
-    }
-    if amount > quote_gross {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "The required prepayment exceeds the quote total",
-        ));
-    }
+    // BTreeMap order: `false` (own services) before `true` (pass-through).
+    let groups: Vec<drafts::AdvanceGroup> = groups
+        .into_iter()
+        .map(
+            |((is_cost_passthrough, vat_rate), open_gross)| drafts::AdvanceGroup {
+                is_cost_passthrough,
+                vat_rate,
+                open_gross,
+            },
+        )
+        .collect();
+    Ok((groups, part_billed))
+}
 
+/// The "Anzahlung" lines of a prepayment advance from the gross share of
+/// each VAT group (`shares[i]` belongs to `groups[i]`); a group without a
+/// share gets no line.
+fn prepayment_advance_snapshot(
+    ctx: &QuoteInvoiceContext,
+    groups: &[drafts::AdvanceGroup],
+    shares: &[Decimal],
+    manual: bool,
+) -> InvoiceCreationSnapshot {
     let group_count = groups.len();
-    let mut remaining = amount;
     let mut total_net = Decimal::ZERO;
     let mut total_vat = Decimal::ZERO;
     let mut total_gross = Decimal::ZERO;
     let mut line_items = Vec::with_capacity(group_count);
-    for (position, ((is_cost_passthrough, vat_rate), group_gross)) in groups.into_iter().enumerate()
-    {
-        // The last group takes the rounding remainder, so the lines add up to
-        // the required prepayment.
-        let share = if position + 1 == group_count {
-            remaining
-        } else {
-            (amount * group_gross / quote_gross).round_cents()
-        };
-        remaining -= share;
+    for (group, share) in groups.iter().zip(shares.iter().copied()) {
+        let is_cost_passthrough = group.is_cost_passthrough;
+        let vat_rate = group.vat_rate;
+        let group_gross = group.open_gross;
         if share <= Decimal::ZERO {
             continue;
         }
@@ -4414,16 +4460,17 @@ async fn build_prepayment_advance_snapshot(
             "quote_id": ctx.quote_id,
             "quote_number": ctx.quote_number,
             "quote_group_gross": decimal_to_string(group_gross),
+            "advance_allocation": if manual { "manual" } else { "own_services_first" },
         }));
     }
 
-    Ok(InvoiceCreationSnapshot {
+    InvoiceCreationSnapshot {
         total_net: total_net.round_cents(),
         total_vat: total_vat.round_cents(),
         total_gross: total_gross.round_cents(),
         line_items: Value::Array(line_items),
         allocations: Vec::new(),
-    })
+    }
 }
 
 /// The printed line of an approved package overage: German like the invoice's
@@ -4439,6 +4486,8 @@ async fn build_invoice_snapshot_with_approved_package_overages(
     state: &AppState,
     patient_id: Uuid,
     order_id: Uuid,
+    // A draft being rebuilt takes back the overages it already holds.
+    editing_invoice_id: Option<Uuid>,
     (mut total_net, mut total_vat, mut total_gross, mut line_items): (
         Decimal,
         Decimal,
@@ -4470,13 +4519,14 @@ async fn build_invoice_snapshot_with_approved_package_overages(
            LEFT JOIN tax_profiles snapshot_tp ON snapshot_tp.id = spc.tax_profile_id_snapshot
            WHERE psp.patient_id = $1
              AND COALESCE(spc.order_id, psp.order_id) = $2
-             AND spc.invoice_id IS NULL
+             AND (spc.invoice_id IS NULL OR spc.invoice_id = $3::uuid)
              AND spc.overage_quantity > 0
              AND spc.approval_status = 'approved'
            ORDER BY spc.created_at, spc.id"#,
     )
     .bind(patient_id)
     .bind(order_id)
+    .bind(editing_invoice_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -7116,6 +7166,10 @@ async fn list_invoices(
              AND ($5::text IS NULL
                   OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $5)
              AND ($6::text IS NULL OR i.invoice_type = $6)
+             -- A deleted draft (cancelled before its release, see `drafts`)
+             -- is left out unless cancelled invoices are asked for.
+             AND (i.status <> 'cancelled' OR i.released_at IS NOT NULL
+                  OR $5::text = 'cancelled')
              -- The rule of `invoices_30d` in stats.rs (load_billing_kpis).
              AND ($7::int IS NULL
                   OR (i.created_at >= now() - make_interval(days => $7::int)

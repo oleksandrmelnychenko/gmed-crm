@@ -25,6 +25,26 @@ const EXACT: Record<string, Pair> = {
     "Die Positionen einer ausgestellten Rechnung können nicht geändert werden. Rechnung stornieren und neu ausstellen.",
     "Позиции выпущенного счёта изменить нельзя. Отмените счёт и выпустите новый.",
   ],
+  "the shares must add up to the advance amount": [
+    "Die Anteile müssen zusammen den Betrag der Anzahlung ergeben.",
+    "Сумма долей должна равняться сумме аванса.",
+  ],
+  "a share exceeds what its vat group has left to bill": [
+    "Ein Anteil ist größer als der offene Betrag seiner Gruppe.",
+    "Доля больше открытого остатка своей группы.",
+  ],
+  "the due date must be on or after the invoice date": [
+    "Die Fälligkeit darf nicht vor dem Rechnungsdatum (heute) liegen.",
+    "Срок оплаты не может быть раньше даты счёта (сегодня).",
+  ],
+  "selected quantity exceeds the remaining quote line quantity": [
+    "Die Menge ist größer als der offene Rest der Angebotsposition.",
+    "Количество больше открытого остатка позиции сметы.",
+  ],
+  "the draft changed meanwhile; reload it and try again": [
+    "Der Entwurf wurde inzwischen geändert. Bitte neu laden und erneut versuchen.",
+    "Черновик уже изменился. Обновите страницу и повторите.",
+  ],
   "invoice line comment is too long": [
     "Die Anmerkung zur Position ist zu lang (max. 300 Zeichen).",
     "Примечание к позиции слишком длинное (не более 300 символов).",
@@ -349,6 +369,15 @@ const EXACT: Record<string, Pair> = {
 
 /** Machine-readable error codes of the payer and release checks. */
 const CODES: Record<string, Pair> = {
+  // Draft editor and «Удалить черновик» (owner 2026-11-14).
+  invoice_not_a_draft: [
+    "Nur ein Entwurf kann geändert oder gelöscht werden. Eine ausgestellte Rechnung wird storniert.",
+    "Изменить или удалить можно только черновик. Выпущенный счёт отменяется документом сторно.",
+  ],
+  invoice_draft_lines_locked: [
+    "Die Positionen dieses Entwurfs lassen sich hier nicht ändern. Entwurf löschen und eine neue Rechnung erstellen.",
+    "Позиции этого черновика здесь не меняются. Удалите черновик и создайте новый счёт.",
+  ],
   // § 14 Abs. 4 Nr. 2 UStG: GMED's Steuernummer or USt-IdNr. must be on the invoice.
   // Also for credit notes, their reversals and cancellation documents (QA D2-09).
   issuer_tax_registration_missing: [
