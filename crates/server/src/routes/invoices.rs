@@ -4,7 +4,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::{StatusCode, header},
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use printpdf::{
