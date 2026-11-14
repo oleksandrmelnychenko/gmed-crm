@@ -8,7 +8,7 @@
 //! five kinds of labels, row by row:
 //!
 //! 1. rows 1–2: the full patient label (ID, salutation, «Nachname, Vorname»,
-//!    «geb. am», KT1, KT2, language code), 9.5 pt;
+//!    «geb. am», KT1, KT2, passport nationality), 9.5 pt;
 //! 2. rows 3–4: the patient number alone, 12.5 pt, centred;
 //! 3. row 5: salutation, name and date of birth, 12.5 pt;
 //! 4. row 6: name and date of birth with the GMED postal address
@@ -42,8 +42,8 @@ pub struct PatientLabelData {
     pub birth_date: Option<String>,
     pub kt1: String,
     pub kt2: String,
-    /// ISO 639-2 code in capitals (FRA, RUS, UKR …).
-    pub language_code: Option<String>,
+    /// Passport nationality, ISO 3166-1 alpha-3 (FRA, UKR, DEU …).
+    pub nationality_code: Option<String>,
 }
 
 /// The GMED postal block of the address and contact labels.
@@ -160,7 +160,7 @@ fn label_lines(kind: LabelKind, data: &PatientLabelData, agency: &PatientLabelAg
             lines.extend(person_lines(data));
             lines.push(line(format!("KT1: {}", data.kt1.trim()).trim_end(), true));
             lines.push(line(format!("KT2: {}", data.kt2.trim()).trim_end(), true));
-            if let Some(code) = data.language_code.as_deref().map(str::trim)
+            if let Some(code) = data.nationality_code.as_deref().map(str::trim)
                 && !code.is_empty()
             {
                 lines.push(line(code, true));
@@ -273,80 +273,27 @@ pub fn cost_bearer_codes(
     (kt1, String::new())
 }
 
-/// ISO 639-1 (as `patients.languages` stores it) to ISO 639-2/T in capitals.
-const ISO_639_2: &[(&str, &str)] = &[
-    ("ar", "ARA"),
-    ("az", "AZE"),
-    ("be", "BEL"),
-    ("bg", "BUL"),
-    ("bs", "BOS"),
-    ("cs", "CES"),
-    ("da", "DAN"),
-    ("de", "DEU"),
-    ("el", "ELL"),
-    ("en", "ENG"),
-    ("es", "SPA"),
-    ("et", "EST"),
-    ("fa", "FAS"),
-    ("fi", "FIN"),
-    ("fr", "FRA"),
-    ("he", "HEB"),
-    ("hi", "HIN"),
-    ("hr", "HRV"),
-    ("hu", "HUN"),
-    ("hy", "HYE"),
-    ("it", "ITA"),
-    ("ja", "JPN"),
-    ("ka", "KAT"),
-    ("kk", "KAZ"),
-    ("ko", "KOR"),
-    ("ku", "KUR"),
-    ("ky", "KIR"),
-    ("lt", "LIT"),
-    ("lv", "LAV"),
-    ("mk", "MKD"),
-    ("mn", "MON"),
-    ("nl", "NLD"),
-    ("no", "NOR"),
-    ("pl", "POL"),
-    ("ps", "PUS"),
-    ("pt", "POR"),
-    ("ro", "RON"),
-    ("ru", "RUS"),
-    ("sk", "SLK"),
-    ("sl", "SLV"),
-    ("sq", "SQI"),
-    ("sr", "SRP"),
-    ("sv", "SWE"),
-    ("tg", "TGK"),
-    ("tk", "TUK"),
-    ("tr", "TUR"),
-    ("uk", "UKR"),
-    ("ur", "URD"),
-    ("uz", "UZB"),
-    ("vi", "VIE"),
-    ("zh", "ZHO"),
-];
-
-/// The language code of the label: the patient's first language other than
-/// German (the language GMED interprets into), else German, as ISO 639-2.
-pub fn label_language_code(languages: &[String]) -> Option<String> {
-    let normalized: Vec<String> = languages
-        .iter()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .collect();
-    let chosen = normalized
-        .iter()
-        .find(|value| value.as_str() != "de")
-        .or_else(|| normalized.first())?;
-    Some(
-        ISO_639_2
-            .iter()
-            .find(|(two, _)| two == chosen)
-            .map(|(_, three)| (*three).to_string())
-            .unwrap_or_else(|| chosen.to_ascii_uppercase()),
-    )
+/// The nationality on the label, as the passport prints it (owner
+/// 2026-11-14: «це національність по паспорту»): the patient's first
+/// citizenship (ISO alpha-2, `patients.citizenships`) as ISO 3166-1 alpha-3
+/// (FRA, UKR, DEU …); for an old record without citizenships, the free-text
+/// nationality when it is already a two or three letter code.
+pub fn label_nationality_code(
+    citizenships: &[String],
+    nationality: Option<&str>,
+) -> Option<String> {
+    let alpha3 = |value: &str| crate::services::mrz::country_alpha3(value).map(str::to_string);
+    if let Some(code) = citizenships.iter().find_map(|value| alpha3(value)) {
+        return Some(code);
+    }
+    let text = nationality
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    match text.len() {
+        2 if text.chars().all(|c| c.is_ascii_alphabetic()) => alpha3(text),
+        3 if text.chars().all(|c| c.is_ascii_alphabetic()) => Some(text.to_ascii_uppercase()),
+        _ => None,
+    }
 }
 
 struct Fonts {
@@ -613,7 +560,7 @@ mod tests {
             birth_date: Some("02.03.1951".into()),
             kt1: "SZ".into(),
             kt2: String::new(),
-            language_code: Some("UKR".into()),
+            nationality_code: Some("UKR".into()),
         }
     }
 
@@ -727,7 +674,7 @@ mod tests {
         let mut sparse = data();
         sparse.salutation.clear();
         sparse.birth_date = None;
-        sparse.language_code = None;
+        sparse.nationality_code = None;
         sparse.kt1.clear();
         let lines = label_lines(LabelKind::Full, &sparse, &PatientLabelAgency::default());
         let texts: Vec<_> = lines.iter().map(|line| line.text.as_str()).collect();
@@ -761,20 +708,26 @@ mod tests {
     }
 
     #[test]
-    fn language_code_prefers_the_interpreted_language() {
-        let langs = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+    fn nationality_code_is_the_passport_country() {
+        let codes = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            label_language_code(&langs(&["de", "fr"])).as_deref(),
+            label_nationality_code(&codes(&["FR"]), None).as_deref(),
             Some("FRA")
         );
         assert_eq!(
-            label_language_code(&langs(&["RU", "de"])).as_deref(),
+            label_nationality_code(&codes(&["UA", "DE"]), Some("Deutschland")).as_deref(),
+            Some("UKR")
+        );
+        assert_eq!(
+            label_nationality_code(&[], Some("de")).as_deref(),
+            Some("DEU")
+        );
+        assert_eq!(
+            label_nationality_code(&[], Some("rus")).as_deref(),
             Some("RUS")
         );
-        assert_eq!(label_language_code(&langs(&["uk"])).as_deref(), Some("UKR"));
-        assert_eq!(label_language_code(&langs(&["de"])).as_deref(), Some("DEU"));
-        assert_eq!(label_language_code(&langs(&["xx"])).as_deref(), Some("XX"));
-        assert_eq!(label_language_code(&[]), None);
+        assert_eq!(label_nationality_code(&[], Some("Ukraine")), None);
+        assert_eq!(label_nationality_code(&[], None), None);
     }
 
     #[test]

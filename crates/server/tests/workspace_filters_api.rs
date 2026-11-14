@@ -6315,7 +6315,7 @@ async fn patient_label_pdf_prints_the_word_sheet_and_single_labels() {
            SET patient_id = $2, first_name = 'Erika', last_name = 'Beispiel',
                birth_date = '1951-03-02', gender = 'female',
                insurance_type = 'self_pay', insurance_provider = NULL,
-               languages = ARRAY['de', 'uk']
+               languages = ARRAY['de', 'ru'], citizenships = ARRAY['UA']
            WHERE id = $1"#,
     )
     .bind(patient_uuid)

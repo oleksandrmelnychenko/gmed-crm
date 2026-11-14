@@ -9820,8 +9820,8 @@ async fn get_patient_label_pdf(
     };
     let patient = sqlx::query(
         r#"SELECT patient_id, first_name, last_name, birth_date, gender,
-                  insurance_type, insurance_provider,
-                  COALESCE(languages, ARRAY[]::text[]) AS languages
+                  insurance_type, insurance_provider, nationality,
+                  COALESCE(citizenships, ARRAY[]::text[]) AS citizenships
            FROM patients
            WHERE id = $1"#,
     )
@@ -9838,10 +9838,11 @@ async fn get_patient_label_pdf(
     let insurance_provider: Option<String> = patient
         .try_get("insurance_provider")
         .map_err(|e| failed(&e))?;
-    let languages: Vec<String> = patient.try_get("languages").map_err(|e| failed(&e))?;
+    let citizenships: Vec<String> = patient.try_get("citizenships").map_err(|e| failed(&e))?;
+    let nationality: Option<String> = patient.try_get("nationality").map_err(|e| failed(&e))?;
     let (kt1, kt2) =
         label_pdf::cost_bearer_codes(insurance_type.as_deref(), insurance_provider.as_deref());
-    let language_code = label_pdf::label_language_code(&languages);
+    let nationality_code = label_pdf::label_nationality_code(&citizenships, nationality.as_deref());
     let data = label_pdf::PatientLabelData {
         patient_number: patient_number.clone(),
         salutation: patient_label_salutation(gender.as_deref().unwrap_or_default()).to_string(),
@@ -9859,7 +9860,7 @@ async fn get_patient_label_pdf(
             .map(|date| date.format("%d.%m.%Y").to_string()),
         kt1,
         kt2,
-        language_code: language_code.clone(),
+        nationality_code: nationality_code.clone(),
     };
     let label_agency = label_pdf::PatientLabelAgency {
         care_of: agency.care_of.clone(),
@@ -9899,7 +9900,7 @@ async fn get_patient_label_pdf(
             "format": format.id,
             "output": "pdf",
             "bytes": bytes.len(),
-            "language_code": language_code,
+            "nationality_code": nationality_code,
         }),
     ));
 

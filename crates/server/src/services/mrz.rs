@@ -274,6 +274,16 @@ pub(crate) fn country_alpha2(field: &str) -> Option<String> {
     crate::services::citizenships::is_country_code(alpha2).then(|| alpha2.to_string())
 }
 
+/// The three letter ISO 3166-1 code of an alpha-2 code («FR» → «FRA»), as a
+/// passport prints the nationality.
+pub(crate) fn country_alpha3(alpha2: &str) -> Option<&'static str> {
+    let alpha2 = alpha2.trim().to_ascii_uppercase();
+    ISO_ALPHA3
+        .iter()
+        .find(|(_, two)| *two == alpha2)
+        .map(|(three, _)| *three)
+}
+
 /// The lower line of TD2 and TD3 (same layout up to the optional data).
 struct LowerLine<'a> {
     number: &'a str,
