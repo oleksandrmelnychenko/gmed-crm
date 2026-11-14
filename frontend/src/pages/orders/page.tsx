@@ -5605,6 +5605,30 @@ function useOrdersPageContent() {
                         canReleasePlan={canReleaseOrderPlan}
                         canPlan={Boolean(detailNewAppointmentHref)}
                         canDraft={canDraftOrderPlan}
+                        onAddToEstimate={
+                          permissions.canAddLeistung && !orderStepsLocked
+                            ? (appointment) => {
+                                // A manual line for the doctor; staff set the price,
+                                // then the new estimate version goes to the client.
+                                setLeistungError(null);
+                                setLeistungForm({
+                                  ...blankLeistungForm(),
+                                  description: [
+                                    ...new Set(
+                                      [appointment.title, appointment.doctor_name, appointment.provider_name]
+                                        .map((part) => part?.trim())
+                                        .filter((part): part is string => Boolean(part)),
+                                    ),
+                                  ].join(" · "),
+                                  quantity: "1",
+                                  providerId: appointment.provider_id ?? "",
+                                  doctorId: appointment.doctor_id ?? "",
+                                  currency: orderDetail.currency || "EUR",
+                                });
+                                setLeistungOpen(true);
+                              }
+                            : undefined
+                        }
                         leadId={detailLeadId}
                         patientId={detailPatientId}
                         onChanged={() => setReloadNonce((current) => current + 1)}

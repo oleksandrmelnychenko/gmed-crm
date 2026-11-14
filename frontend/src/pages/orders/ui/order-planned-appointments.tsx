@@ -50,6 +50,8 @@ type OrderPlannedAppointmentsProps = {
   patientId?: string | null;
   /** An appointment was added: the other planning blocks reload. */
   onChanged?: () => void;
+  /** «Добавить в смету» for a visit whose doctor the signed estimate lacks. */
+  onAddToEstimate?: (appointment: OrderPipelineAppointment) => void;
 };
 
 type GroupBy = "grid" | "day" | "doctor";
@@ -86,14 +88,59 @@ export function PlanReleaseButton({ count, busy, lang, onRelease }: PlanReleaseB
  * A doctor outside the signed quote may be planned (owner decision
  * 2026-11-02, question 5); completing the visit then adds an invoice line.
  */
-export function OutsideQuoteWarning({ lang }: { lang: string }) {
+export function outsideQuoteWhy(lang: string) {
+  return lang === "de"
+    ? "Der Patient hat einen KV ohne diesen Arzt unterschrieben: nach dem Termin entsteht eine Rechnungszeile über die unterschriebene Summe hinaus. In den KV aufnehmen und die neue Version unterschreiben lassen."
+    : "Клиент подписал смету без этого врача: после приёма появится строка счёта сверх подписанной суммы. Добавьте врача в смету и дайте подписать новую версию.";
+}
+
+export function OutsideQuoteWarning({
+  lang,
+  compact = false,
+  onAdd,
+}: {
+  lang: string;
+  /** Several visits share it: a small marker, the explanation sits in the summary above. */
+  compact?: boolean;
+  /** «Добавить в смету»: the order's service sheet, prefilled for this doctor. */
+  onAdd?: () => void;
+}) {
+  const addLabel = lang === "de" ? "In den KV aufnehmen" : "Добавить в смету";
+  const addButton = onAdd ? (
+    <button
+      type="button"
+      data-testid="order-planned-appointment-add-to-estimate"
+      onClick={onAdd}
+      className="shrink-0 rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-100"
+    >
+      {addLabel}
+    </button>
+  ) : null;
+  if (compact) {
+    return (
+      <span
+        data-testid="order-planned-appointment-outside-quote"
+        title={outsideQuoteWhy(lang)}
+        className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900"
+      >
+        <Info aria-hidden="true" className="size-3" />
+        {lang === "de" ? "außerhalb des KV" : "вне сметы"}
+        {addButton}
+      </span>
+    );
+  }
   return (
-    <div data-testid="order-planned-appointment-outside-quote" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-900">
+    <div
+      data-testid="order-planned-appointment-outside-quote"
+      title={outsideQuoteWhy(lang)}
+      className="mt-2 flex flex-wrap items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-900"
+    >
       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-      <span>
+      <span className="min-w-0 flex-1">
       {lang === "de"
         ? "Arzt nicht im unterschriebenen KV – beim Abschluss des Termins entsteht eine neue Rechnungszeile"
         : "Врача нет в подписанном КВ — при завершении приёма появится новая строка счёта"}</span>
+      {addButton}
     </div>
   );
 }
@@ -125,6 +172,7 @@ export function OrderPlannedAppointments({
   leadId = null,
   patientId = null,
   onChanged,
+  onAddToEstimate,
 }: OrderPlannedAppointmentsProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
@@ -188,6 +236,9 @@ export function OrderPlannedAppointments({
   const careTeam = loaded?.orderId === orderId ? loaded.careTeam : null;
   const extraDoctors = addedDoctors.orderId === orderId ? addedDoctors.doctors : [];
   const unreleased = appointments ? unreleasedPlanCount(appointments) : 0;
+  const outsideQuoteCount = (appointments ?? []).filter(
+    (appointment) => appointment.outside_signed_quote && appointment.status !== "cancelled",
+  ).length;
   const gridShown = gridAllowed && groupBy === "grid";
   const [requestedSpecialties, setRequestedSpecialties] = useState<{
     leadId: string;
@@ -322,6 +373,21 @@ export function OrderPlannedAppointments({
       </div>
 
       <div className="mt-2 space-y-2">
+        {outsideQuoteCount >= 2 ? (
+          <div
+            data-testid="order-planned-appointments-outside-quote-summary"
+            title={outsideQuoteWhy(lang)}
+            className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-900"
+          >
+            <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              {tx(
+                `${outsideQuoteCount} приёмов вне подписанной сметы — при завершении появятся новые строки счёта. Добавьте их в смету («Добавить в смету» у приёма).`,
+                `${outsideQuoteCount} Termine außerhalb des unterschriebenen KV – beim Abschluss entstehen neue Rechnungszeilen. Über «In den KV aufnehmen» am Termin ergänzen.`,
+              )}
+            </span>
+          </div>
+        ) : null}
         {error ? <Banner tone="error">{error}</Banner> : null}
         {!error && !appointments ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -387,7 +453,13 @@ export function OrderPlannedAppointments({
                           .filter(Boolean)
                           .join(" · ")}</span>
                       </div>
-                      {appointment.outside_signed_quote ? <OutsideQuoteWarning lang={lang} /> : null}
+                      {appointment.outside_signed_quote ? (
+                        <OutsideQuoteWarning
+                          lang={lang}
+                          compact={outsideQuoteCount >= 2}
+                          onAdd={onAddToEstimate ? () => onAddToEstimate(appointment) : undefined}
+                        />
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
                       {isShownToPatient(appointment) ? null : (

@@ -891,6 +891,7 @@ test("planning warns about a doctor outside the quote and records the agreement 
   const {order, writes} = await prepare(page);
   order.planning_preparation.treatment_plan_status = "draft";
   order.planning_preparation.treatment_plan_note = "";
+  Object.assign(order.planning_preparation, {appointments_last_added_at: "2026-11-01T10:00:00Z"});
   const item = (id: string, outside: boolean) => ({
     id, title: id, appointment_type: "medical", date: "2026-11-02", time_start: null, time_end: null, status: "planned",
     location: null, provider_name: "Klinik Nord", doctor_name: "Dr. Weber", interpreter_name: null,
@@ -911,6 +912,13 @@ test("planning warns about a doctor outside the quote and records the agreement 
   await plan.getByRole("button", {name: "По дням"}).click();
   await expect(plan.getByTestId("order-planned-appointment-outside-quote")).toHaveCount(1);
   await expect(plan.locator("li", {hasText: "Ausserhalb KV"})).toContainText("Врача нет в подписанном КВ");
+  // The note explains itself and offers the action: the order's service sheet, prefilled for the doctor.
+  await expect(plan.getByTestId("order-planned-appointment-outside-quote")).toHaveAttribute("title", /сверх подписанной суммы/);
+  await plan.getByTestId("order-planned-appointment-add-to-estimate").click();
+  const serviceSheet = page.getByRole("dialog").filter({has: page.locator('input[value="Ausserhalb KV · Dr. Weber · Klinik Nord"], textarea:has-text("Ausserhalb KV · Dr. Weber · Klinik Nord")')});
+  await expect(serviceSheet).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(serviceSheet).toHaveCount(0);
 
   const agreement = page.getByTestId("order-plan-agreement");
   await expect(agreement).toContainText("Черновик");
