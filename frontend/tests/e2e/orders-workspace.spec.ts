@@ -507,6 +507,9 @@ test("planning adds visits right under the doctors and a new doctor (plan stage 
 
   const loadsBefore = pipelineLoads;
   await typeInto(/^Начало/, "1300");
+  await weberRow.getByRole("textbox", {name: "Название"}).click();
+  // The end follows the start by 60 minutes until it is typed by hand.
+  await expect(pickerValue(/^Конец/)).toHaveValue("14:00");
   await typeInto(/^Конец/, "1330");
   await weberRow.getByRole("textbox", {name: "Название"}).fill("Nachbesprechung");
   await weberRow.getByRole("button", {name: "Добавить"}).click();

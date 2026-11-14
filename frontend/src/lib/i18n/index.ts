@@ -525,6 +525,7 @@ export interface Translations
   appointments_repeat_this: string;
   appointments_repeat_hint: string;
   appointments_time_pair_error: string;
+  appointments_time_end_capped: string;
   appointments_time_range_error: string;
   appointments_repeat_interval_error: string;
   appointments_repeat_require_end_error: string;

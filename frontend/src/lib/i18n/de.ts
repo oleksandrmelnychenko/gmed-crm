@@ -638,6 +638,8 @@ export const de = {
     "Eine wiederkehrende Serie basierend auf dem aktuellen Datum und Zeitfenster erstellen.",
   appointments_time_pair_error:
     "Start- und Endzeit müssen gemeinsam angegeben oder beide leer gelassen werden.",
+  appointments_time_end_capped:
+    "Ende auf 23:59 begrenzt: Ein Termin kann nicht in den nächsten Tag reichen.",
   appointments_time_range_error:
     "Die Endzeit muss nach der Startzeit liegen.",
   appointments_repeat_interval_error:

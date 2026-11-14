@@ -636,6 +636,8 @@ export const ru = {
     "Создать повторяющуюся серию на основе текущей даты и временного слота.",
   appointments_time_pair_error:
     "Укажите время начала и окончания вместе либо оставьте оба поля пустыми.",
+  appointments_time_end_capped:
+    "Окончание ограничено 23:59: приём не может переходить на следующий день.",
   appointments_time_range_error:
     "Время окончания должно быть позже времени начала.",
   appointments_repeat_interval_error:

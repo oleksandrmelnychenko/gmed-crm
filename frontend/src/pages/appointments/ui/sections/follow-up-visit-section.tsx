@@ -37,6 +37,7 @@ import {
   shiftAppointmentSlot,
   shiftLocalDateTime,
 } from "@/pages/appointments/model/date-time";
+import { useAppointmentEndAutofill } from "@/pages/appointments/model/time-autofill";
 import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import {
@@ -216,6 +217,7 @@ function useAppointmentFollowUpVisitSectionContent({
   )
     ? form.reminderUserId
     : "";
+  const endAutofill = useAppointmentEndAutofill();
   const setForm = (nextValue: SetStateAction<FollowUpVisitFormState>) => {
     dispatchSectionState((current) => ({
       form:
@@ -708,12 +710,10 @@ function useAppointmentFollowUpVisitSectionContent({
               !hasPairedAppointmentTimes(form.timeStart, form.timeEnd) ||
               !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
             }
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  timeStart: event.target.value,
-                }))
-              }
+              onChange={(event) => {
+                const next = endAutofill.changeStart(form, event.target.value);
+                setForm((current) => ({ ...current, ...next }));
+              }}
               className={appointmentSlateInputClassName}
             />
           </Field>
@@ -725,16 +725,19 @@ function useAppointmentFollowUpVisitSectionContent({
               !hasPairedAppointmentTimes(form.timeStart, form.timeEnd) ||
               !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
             }
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  timeEnd: event.target.value,
-                }))
-              }
+              onChange={(event) => {
+                const next = endAutofill.changeEnd(form, event.target.value);
+                setForm((current) => ({ ...current, ...next }));
+              }}
               className={appointmentSlateInputClassName}
             />
           </Field>
         </div>
+        {endAutofill.isEndCapped(form.timeEnd) ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            {t.appointments_time_end_capped}
+          </p>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-3">
           <Field label={t.common_provider} className="md:col-span-2">
             <ProviderSelectWithTaxonomyFilter

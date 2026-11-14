@@ -65,6 +65,7 @@ import {
   validateEditAppointmentForm,
 } from "@/pages/appointments/model/edit-payload";
 import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
+import { useAppointmentEndAutofill } from "@/pages/appointments/model/time-autofill";
 import {
   doctorLabel,
   normalizeCarePathKindForAppointmentType,
@@ -367,6 +368,7 @@ function useEditAppointmentSectionContentContent({
       (hasAppointmentFormChanges(nextForm, openSnapshot.form) ||
         nextRecurrenceScope !== openSnapshot.recurrenceScope);
   };
+  const endAutofill = useAppointmentEndAutofill();
   const setFormFromUser = (value: SetStateAction<AppointmentFormState>) => {
     dispatchEditState({
       type: "update",
@@ -1026,12 +1028,10 @@ function useEditAppointmentSectionContentContent({
               aria-invalid={
                 !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
               }
-              onChange={(event) =>
-                setFormFromUser((current) => ({
-                  ...current,
-                  timeStart: event.target.value,
-                }))
-              }
+              onChange={(event) => {
+                const next = endAutofill.changeStart(form, event.target.value);
+                setFormFromUser((current) => ({ ...current, ...next }));
+              }}
               className={inputClassName}
             />
           </Field>
@@ -1042,16 +1042,19 @@ function useEditAppointmentSectionContentContent({
               aria-invalid={
                 !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
               }
-              onChange={(event) =>
-                setFormFromUser((current) => ({
-                  ...current,
-                  timeEnd: event.target.value,
-                }))
-              }
+              onChange={(event) => {
+                const next = endAutofill.changeEnd(form, event.target.value);
+                setFormFromUser((current) => ({ ...current, ...next }));
+              }}
               className={inputClassName}
             />
           </Field>
         </div>
+        {endAutofill.isEndCapped(form.timeEnd) ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            {t.appointments_time_end_capped}
+          </p>
+        ) : null}
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         <h3><SectionHeading icon={ClipboardList}>{appointmentText("appointments_status_and_responsibilities")}</SectionHeading></h3>

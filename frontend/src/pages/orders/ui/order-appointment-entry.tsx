@@ -20,6 +20,7 @@ import {
 import { blankAppointmentFormForCurrentUser } from "@/pages/appointments/model/form-factories";
 import { doctorLabel, useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { useScheduleWarnings } from "@/pages/appointments/model/schedule-warnings";
+import { useAppointmentEndAutofill } from "@/pages/appointments/model/time-autofill";
 import type {
   ConflictSummary,
   DoctorOption,
@@ -66,6 +67,7 @@ export function AppointmentEntryRow({
   const [date, setDate] = useState(defaultDate ?? blank.date);
   const [timeStart, setTimeStart] = useState("");
   const [timeEnd, setTimeEnd] = useState("");
+  const endAutofill = useAppointmentEndAutofill();
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -152,14 +154,20 @@ export function AppointmentEntryRow({
           type="time"
           aria-label={appointmentText("appointments_start")}
           value={timeStart}
-          onChange={(event) => setTimeStart(event.target.value)}
+          onChange={(event) => {
+            const next = endAutofill.changeStart({ timeStart, timeEnd }, event.target.value);
+            setTimeStart(next.timeStart);
+            setTimeEnd(next.timeEnd);
+          }}
           className="h-8 text-[13px]"
         />
         <Input
           type="time"
           aria-label={appointmentText("appointments_end")}
           value={timeEnd}
-          onChange={(event) => setTimeEnd(event.target.value)}
+          onChange={(event) => {
+            setTimeEnd(endAutofill.changeEnd({ timeStart, timeEnd }, event.target.value).timeEnd);
+          }}
           className="h-8 text-[13px]"
         />
         <Input
@@ -175,6 +183,11 @@ export function AppointmentEntryRow({
           {tx("Добавить", "Hinzufügen")}
         </Button>
       </div>
+      {endAutofill.isEndCapped(timeEnd) ? (
+        <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">
+          {t.appointments_time_end_capped}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="mt-1.5 text-xs text-rose-700">
           {error}

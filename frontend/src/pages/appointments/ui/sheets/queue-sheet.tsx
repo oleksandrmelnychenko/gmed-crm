@@ -41,6 +41,7 @@ import {
   hasPairedAppointmentTimes,
   hasValidAppointmentTimeRange,
 } from "@/pages/appointments/model/date-time";
+import { useAppointmentEndAutofill } from "@/pages/appointments/model/time-autofill";
 import type {
   AppointmentAttentionItem,
   AppointmentListItem,
@@ -336,6 +337,7 @@ function useQueueSheetContent({
   const [scheduleForm, setScheduleForm] =
     useState<RequestScheduleFormState | null>(scheduleDraft?.form ?? null);
   const [scheduleError, setScheduleError] = useState(scheduleDraft?.error ?? "");
+  const endAutofill = useAppointmentEndAutofill();
   const [doctorOptions, setDoctorOptions] = useState<{
     providerId: string;
     rows: DoctorOption[];
@@ -662,13 +664,15 @@ function useQueueSheetContent({
                                   visibleScheduleForm.timeEnd,
                                 )
                               }
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const next = endAutofill.changeStart(
+                                  visibleScheduleForm,
+                                  event.target.value,
+                                );
                                 setScheduleForm((current) =>
-                                  current
-                                    ? { ...current, timeStart: event.target.value }
-                                    : current,
-                                )
-                              }
+                                  current ? { ...current, ...next } : current,
+                                );
+                              }}
                               className={inputClass}
                             />
                           </label>
@@ -685,16 +689,23 @@ function useQueueSheetContent({
                                   visibleScheduleForm.timeEnd,
                                 )
                               }
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const next = endAutofill.changeEnd(
+                                  visibleScheduleForm,
+                                  event.target.value,
+                                );
                                 setScheduleForm((current) =>
-                                  current
-                                    ? { ...current, timeEnd: event.target.value }
-                                    : current,
-                                )
-                              }
+                                  current ? { ...current, ...next } : current,
+                                );
+                              }}
                               className={inputClass}
                             />
                           </label>
+                          {endAutofill.isEndCapped(visibleScheduleForm.timeEnd) ? (
+                            <p className="col-span-2 text-xs text-amber-700 dark:text-amber-300">
+                              {t.appointments_time_end_capped}
+                            </p>
+                          ) : null}
                         </div>
                         {item.appointment_type === "medical" ? (
                           <div className="space-y-3 md:col-span-2">

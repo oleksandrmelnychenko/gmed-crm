@@ -41,6 +41,7 @@ import {
   usePatientOrderOptionsState,
 } from "@/pages/appointments/data/use-patient-order-options";
 import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
+import { useAppointmentEndAutofill } from "@/pages/appointments/model/time-autofill";
 import {
   doctorLabel,
   patientName,
@@ -223,6 +224,7 @@ function useCreateAppointmentSheetContent({
   const savedBannerRef = useRef<HTMLDivElement | null>(null);
   const latestDraftRef = useRef<AppointmentFormState | null>(draft ?? null);
   const wasOpenRef = useRef(false);
+  const endAutofill = useAppointmentEndAutofill();
   const setForm = (nextValue: SetStateAction<AppointmentFormState>) => {
     dispatchSheetState((current) => ({
       form: resolveStateAction(nextValue, current.form),
@@ -743,12 +745,10 @@ function useCreateAppointmentSheetContent({
                           form.timeEnd,
                         )
                       }
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          timeStart: event.target.value,
-                        }))
-                      }
+                      onChange={(event) => {
+                        const next = endAutofill.changeStart(form, event.target.value);
+                        setForm((current) => ({ ...current, ...next }));
+                      }}
                       className={createSheetInputClassName}
                     />
                   </Field>
@@ -762,16 +762,19 @@ function useCreateAppointmentSheetContent({
                           form.timeEnd,
                         )
                       }
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          timeEnd: event.target.value,
-                        }))
-                      }
+                      onChange={(event) => {
+                        const next = endAutofill.changeEnd(form, event.target.value);
+                        setForm((current) => ({ ...current, ...next }));
+                      }}
                       className={createSheetInputClassName}
                     />
                   </Field>
                 </div>
+                {endAutofill.isEndCapped(form.timeEnd) ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    {t.appointments_time_end_capped}
+                  </p>
+                ) : null}
                 <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
                   <label
                     htmlFor="appointment-repeat-enabled"
