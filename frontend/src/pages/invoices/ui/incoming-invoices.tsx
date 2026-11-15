@@ -231,14 +231,12 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
                 onClick={() => void updatePatientPayment(paymentChoice, paymentChoice.paid_by !== "patient")}>
                 <span className="mb-3 flex items-center text-foreground"><UserRound className="size-5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{paymentChoice.paid_by === "patient" ? tx("Снова не оплачен", "Wieder unbezahlt") : tx("Пациент оплатил сам", "Patient hat selbst bezahlt")}</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMED не создаётся.", "Es wird keine GMED-Geldbewegung erstellt.")}</span>
               </button> : null}
               <button type="button" disabled={paymentBusy || paidOnRefused || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => { setPaymentError(null); setPendingSettlement(paymentChoice); setPaymentChoice(null); }}>
                 <span className="mb-3 flex items-center text-foreground"><Building2 className="size-5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{Number(paymentChoice.company_paid_gross) > 0 ? tx("История оплат GMED", "GMED-Zahlungsverlauf") : tx("Оплатила GMED", "Von GMED bezahlt")}</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Оплата проводится через счёт компании.", "Die Zahlung wird über ein Unternehmenskonto gebucht.")}</span>
               </button>
             </div>
           </fieldset>

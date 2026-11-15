@@ -720,15 +720,7 @@ export function MedicationBmpImportAction({
           <>
             <section className="rounded-xl border bg-card p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={CodeXml}>{tx("Декодированный XML", "Dekodiertes XML")}</SectionHeading></h3>
-                  <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                    {tx(
-                      "XML анализируется на сервере. Сам план не применяется до отдельного подтверждения.",
-                      "Das XML wird serverseitig geprüft. Der Plan wird erst nach einer separaten Bestätigung übernommen.",
-                    )}
-                  </p>
-                </div>
+                <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={CodeXml}>{tx("Декодированный XML", "Dekodiertes XML")}</SectionHeading></h3>
                 <div className="flex flex-wrap items-center gap-2">
                   {scannerAvailable ? (
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={busy} onClick={() => void scanCarrier()}>

@@ -271,7 +271,6 @@ describe("signature request members", () => {
     expect(attachmentRows[0]).toContain("Datenschutzinformation");
     expect(attachmentRows[1]).toContain("Dokument ohne Zugriff");
     expect(attachmentRows[1]).not.toContain("<button");
-    expect(markup).toContain("nicht aufgeteilt");
   });
 
   it("shows nothing extra for a single document without attachments", () => {

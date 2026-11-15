@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { LoaderCircle, PencilLine, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { SectionHeading } from "@/components/ui/section-heading";
@@ -41,20 +41,14 @@ type Copy = Record<string, string>;
 const COPY: Record<"ru" | "de", Copy> = {
   ru: {
     title: "Редактировать черновик",
-    description:
-      "Черновик ещё не выставлен: менять можно срок оплаты, примечание, получателя и позиции. Дата счёта — день выставления.",
     dueDate: "Срок оплаты",
-    dueDateHint: "Пусто — дата счёта + срок оплаты из настроек.",
     notes: "Примечание в счёте",
     recipient: "Получатель счёта…",
     lines: "Позиции из сметы",
-    linesHint: "Количество — не больше открытого остатка позиции (с учётом этого черновика).",
     open: "открыто",
     quantity: "Кол-во",
     comment: "Примечание к позиции",
     split: "Распределение аванса",
-    splitHint:
-      "По умолчанию аванс сначала полностью покрывает услуги GMED с НДС, остаток — ожидаемые расходы третьих лиц. Можно распределить вручную в пределах открытых остатков; сумма должна равняться сумме аванса.",
     splitDefault: "Сначала услуги GMED",
     ownGroup: "Услуги GMED, НДС {rate} %",
     passthroughGroup: "Расходы третьих лиц (без НДС)",
@@ -83,20 +77,14 @@ const COPY: Record<"ru" | "de", Copy> = {
   },
   de: {
     title: "Entwurf bearbeiten",
-    description:
-      "Der Entwurf ist noch nicht ausgestellt: Fälligkeit, Anmerkung, Empfänger und Positionen lassen sich ändern. Rechnungsdatum ist der Tag der Ausstellung.",
     dueDate: "Fällig am",
-    dueDateHint: "Leer: Rechnungsdatum + Zahlungsziel aus den Einstellungen.",
     notes: "Anmerkung auf der Rechnung",
     recipient: "Rechnungsempfänger…",
     lines: "Positionen aus dem Angebot",
-    linesHint: "Menge höchstens der offene Rest der Position (dieser Entwurf eingerechnet).",
     open: "offen",
     quantity: "Menge",
     comment: "Anmerkung zur Position",
     split: "Aufteilung der Anzahlung",
-    splitHint:
-      "Standard: Die Anzahlung deckt zuerst die Leistungen der GMED samt USt., der Rest geht auf die erwarteten Fremdkosten. Manuell innerhalb der offenen Beträge möglich; die Summe muss den Betrag der Anzahlung ergeben.",
     splitDefault: "Zuerst GMED-Leistungen",
     ownGroup: "GMED-Leistungen, {rate} % USt.",
     passthroughGroup: "Fremdkosten (ohne USt.)",
@@ -202,7 +190,6 @@ export function DraftInvoiceEditorDialog({
             <DialogTitle>
               <SectionHeading icon={PencilLine}>{copy.title}</SectionHeading>
             </DialogTitle>
-            <DialogDescription>{copy.description}</DialogDescription>
           </DialogHeader>
           {loadError ? <ShellBanner tone="error">{loadError}</ShellBanner> : null}
           {saveError ? <ShellBanner tone="error">{saveError}</ShellBanner> : null}
@@ -221,7 +208,6 @@ export function DraftInvoiceEditorDialog({
                     onChange={(event) => setForm({ ...form, dueDate: event.target.value })}
                     data-testid="invoice-draft-due-date"
                   />
-                  <span className="block text-xs text-muted-foreground">{copy.dueDateHint}</span>
                 </label>
                 <div className="flex items-end">
                   <Button
@@ -258,7 +244,6 @@ export function DraftInvoiceEditorDialog({
               {payload.lines_mode === "quote_positions" ? (
                 <section className="space-y-2">
                   <h3 className="text-sm font-medium text-foreground">{copy.lines}</h3>
-                  <p className="text-xs text-muted-foreground">{copy.linesHint}</p>
                   <div className="divide-y divide-border rounded-lg border border-border">
                     {payload.quote_lines.map((line) => {
                       const entry = form.lines[line.line_index];
@@ -322,7 +307,6 @@ export function DraftInvoiceEditorDialog({
                       {copy.splitDefault}
                     </Button>
                   </div>
-                  <p className="text-xs leading-5 text-muted-foreground">{copy.splitHint}</p>
                   <div className="overflow-x-auto rounded-lg border border-border">
                     <table className="w-full min-w-[34rem] text-sm">
                       <thead className="bg-muted/40 text-xs text-muted-foreground">

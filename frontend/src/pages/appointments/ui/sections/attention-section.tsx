@@ -16,7 +16,6 @@ function AppointmentAttentionSection({
   const { appointmentText, attentionIssueLabel, attentionReasonLabel } = useAppointmentLabels();
   const { formatAppointmentDateTimeLabel } = useAppointmentFormatters();
   const title = appointmentText("appointments_operational_follow_up_open");
-  const subtitle = appointmentText("appointments_this_appointment_still_has_unresolved_operational_follow");
   const hasOverdueReminder =
     attention.reason_details?.some(
       (reason) => reason.key === "appointments_attention_reason_overdue_reminders_count",
@@ -35,7 +34,6 @@ function AppointmentAttentionSection({
               <SectionHeading icon={AlarmClock}>{title}</SectionHeading>
             </h3>
           </div>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
         <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
           {attention.attention_score}{" "}

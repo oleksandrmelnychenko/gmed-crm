@@ -143,21 +143,12 @@ export function OrderCancellationBanner({
   return (
     <Banner tone="warning" withIcon>
       <div className="grid gap-2" data-testid="order-cancellation-banner">
-        <p className="font-semibold">
-          {tx("Заказ отменён", "Auftrag storniert")}
-          {cancelledAtLabel ? ` · ${cancelledAtLabel}` : ""}
-        </p>
+        {cancelledAtLabel ? <p className="font-semibold">{cancelledAtLabel}</p> : null}
         {reason ? (
           <p className="whitespace-pre-wrap break-words">
             {tx("Причина", "Grund")}: {orderCancellationReasonLabel(reason, lang)}
           </p>
         ) : null}
-        <p className="text-xs">
-          {tx(
-            "Запланированные услуги, предстоящие приёмы и открытые предложения отменены. Оказанные и выставленные позиции остаются основанием для итогового счёта или возврата.",
-            "Geplante Leistungen, anstehende Termine und offene Angebote wurden storniert. Erbrachte und berechnete Positionen bleiben die Grundlage für die Schlussrechnung oder eine Rückerstattung.",
-          )}
-        </p>
         {settlement ? <OrderCancellationBasis settlement={settlement} lang={lang} /> : null}
       </div>
     </Banner>
@@ -254,8 +245,8 @@ export function OrderCancellationDialog({
             <DialogTitle><SectionHeading icon={Ban}>{tx("Отменить заказ", "Auftrag stornieren")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {tx(
-                "Отмена закрывает всё, что ещё не выполнено. Оказанные и выставленные позиции остаются и служат основанием для итогового счёта или возврата.",
-                "Die Stornierung schließt alles, was noch nicht erbracht ist. Erbrachte und berechnete Positionen bleiben und sind die Grundlage für die Schlussrechnung oder eine Rückerstattung.",
+                "Невыполненное будет отменено, оказанное останется.",
+                "Nicht Erbrachtes wird storniert, Erbrachtes bleibt.",
               )}
             </DialogDescription>
           </DialogHeader>

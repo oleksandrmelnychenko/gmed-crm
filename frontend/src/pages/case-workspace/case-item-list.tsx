@@ -30,7 +30,8 @@ type SheetState =
 export type CaseItemListProps<T> = {
   icon?: LucideIcon;
   title: string;
-  description: string;
+  /** Not shown (owner 2026-11-15: no explanatory subtitles). */
+  description?: string;
   items: readonly T[];
   blankItem: T;
   cloneItem: (item: T) => T;
@@ -76,7 +77,6 @@ function caseItemStableKey(item: unknown) {
 export function CaseItemList<T>({
   icon,
   title,
-  description,
   items,
   blankItem,
   cloneItem,
@@ -298,7 +298,6 @@ export function CaseItemList<T>({
       <Panel
         icon={icon}
         title={title}
-        description={description}
         action={
           <>
             <CountBadge>

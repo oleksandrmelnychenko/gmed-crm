@@ -5535,11 +5535,7 @@ function ProviderDoctorFormSheet({
                 <p className="text-xs text-muted-foreground">
                   {l("providers_existing_doctor_empty")}
                 </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {l("providers_existing_doctor_hint")}
-                </p>
-              )}
+              ) : null}
             </AdminFormSection>
           ) : null}
           {isMedicalProvider ? (
@@ -6615,9 +6611,6 @@ function ProviderOverviewSection({
             <span className="block text-sm font-semibold text-foreground">
               {l("providers_patient_links")}
             </span>
-            <span className="mt-2 block text-xs leading-snug text-muted-foreground">
-              {l("providers_open_patients_linked_to_this_provider")}
-            </span>
             <span className="absolute top-2 right-2 flex size-6 items-center justify-center text-foreground">
               <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
             </span>
@@ -6629,9 +6622,6 @@ function ProviderOverviewSection({
           >
             <span className="block text-sm font-semibold text-foreground">
               {l("providers_appointments")}
-            </span>
-            <span className="mt-2 block text-xs leading-snug text-muted-foreground">
-              {l("providers_open_appointments_for_this_provider")}
             </span>
             <span className="absolute top-2 right-2 flex size-6 items-center justify-center text-foreground">
               <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />

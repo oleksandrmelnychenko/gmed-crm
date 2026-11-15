@@ -266,9 +266,6 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
               <dd className="flex items-center gap-1.5 text-xs">
                 <KeyRound aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="font-mono">{connection.key_hint ?? ""}</span>
-                <span className="text-muted-foreground">
-                  · {tx("сохранён, повторный ввод не нужен", "gespeichert, keine erneute Eingabe nötig")}
-                </span>
               </dd>
             </div>
             <div className="min-w-0 space-y-1">
@@ -325,11 +322,8 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
         <div className="space-y-3 p-3.5">
           <p className="text-xs leading-5 text-muted-foreground">
             {connection?.source === "disconnected"
-              ? tx("Отправка e-mail отключена. Введите ключ, чтобы подключить снова.", "Der E-Mail-Versand ist getrennt. Geben Sie einen Schlüssel ein, um ihn wieder zu verbinden.")
-              : tx(
-                  "Письма из системы (например, вход для лида) отправляются через Mittaro — сервис с серверами в Германии, без трекинга. Создайте API-ключ в кабинете Mittaro и подтвердите там домен отправителя.",
-                  "E-Mails aus dem System (z. B. der Zugang für einen Lead) werden über Mittaro versendet – Server in Deutschland, ohne Tracking. Erstellen Sie im Mittaro-Konto einen API-Schlüssel und bestätigen Sie dort die Absenderdomain.",
-                )}{" "}
+              ? <>{tx("Отправка e-mail отключена. Введите ключ, чтобы подключить снова.", "Der E-Mail-Versand ist getrennt. Geben Sie einen Schlüssel ein, um ihn wieder zu verbinden.")}{" "}</>
+              : null}
             <a href={MITTARO_DOCS} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">
               {tx("Документация", "Dokumentation")}
             </a>
@@ -375,12 +369,6 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
                 onChange={(event) => setReplyTo(event.target.value)}
               />
             </label>
-            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
-              {tx(
-                "Ключ сохраняется в зашифрованном виде и больше не показывается.",
-                "Der Schlüssel wird verschlüsselt gespeichert und nicht mehr angezeigt.",
-              )}
-            </p>
           </fieldset>
           {feedback}
         </div>

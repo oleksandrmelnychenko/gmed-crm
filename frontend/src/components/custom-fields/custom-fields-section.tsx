@@ -96,7 +96,6 @@ export function CustomFieldsSection({ entityId, locked = false, className, rende
   const { fields } = state.data;
   if (fields.length === 0) return null;
   const mayEdit = state.data.can_edit && !locked;
-  const hasRequired = fields.some((field) => field.is_required);
 
   const startEditing = () => {
     setDraft(
@@ -180,14 +179,6 @@ export function CustomFieldsSection({ entityId, locked = false, className, rende
               />
             ))}
           </div>
-          {hasRequired ? (
-            <p className="text-xs text-muted-foreground">
-              {tx(
-                "* — обязательное поле; сохранить можно и без него.",
-                "* — Pflichtfeld; speichern geht auch ohne.",
-              )}
-            </p>
-          ) : null}
           {saveError ? (
             <p role="alert" className="text-sm text-rose-700">{saveError.message}</p>
           ) : null}

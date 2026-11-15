@@ -28,7 +28,6 @@ export function StaffDashboardDemographicsSection({
       <SectionHeader
         icon={UsersRound}
         title={tr.dash_sec_demographics ?? tr.common_unknown}
-        hint={tr.dash_sec_demographics_hint ?? tr.common_unknown}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">

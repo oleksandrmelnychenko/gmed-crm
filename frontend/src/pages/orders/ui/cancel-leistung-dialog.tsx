@@ -170,8 +170,8 @@ export function CancelLeistungDialog({
             <DialogTitle><SectionHeading icon={CircleX}>{tx("Отменить услугу", "Leistung stornieren")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {tx(
-                "Услуга останется в заказе с отметкой об отмене, но больше не учитывается в предложениях, счетах и при завершении заказа.",
-                "Die Leistung bleibt mit Stornovermerk im Auftrag, zählt aber nicht mehr für Angebote, Rechnungen und den Auftragsabschluss.",
+                "Отменённая услуга больше не учитывается в предложениях и счетах.",
+                "Die stornierte Leistung zählt nicht mehr für Angebote und Rechnungen.",
               )}
             </DialogDescription>
           </DialogHeader>

@@ -60,7 +60,6 @@ const workflowCopy = {
     noProjectsTitle: "Проектов пока нет",
     createProject: "Создать проект",
     workflow: "Схема проекта",
-    workflowHint: "Задачи, зависимости, блокеры и прогресс в одной схеме.",
     tasks: "Задачи",
     completed: "Выполнено",
     blocked: "Заблокировано",
@@ -90,11 +89,9 @@ const workflowCopy = {
     prerequisite: "Сначала должна быть выполнена",
     selectTaskPlaceholder: "Выберите задачу",
     selectPrerequisite: "Выберите предыдущую задачу",
-    dependencyHelp: "После сохранения связь появится на схеме. Циклические связи запрещены.",
     saveDependency: "Связать задачи",
     removeDependency: "Удалить связь",
     removeTitle: "Удалить зависимость?",
-    removeHint: "Задача больше не будет ждать выбранную предыдущую задачу.",
     remove: "Удалить",
     cancel: "Отмена",
     openTask: "Открыть задачу",
@@ -136,7 +133,6 @@ const workflowCopy = {
     noProjectsTitle: "Noch keine Projekte",
     createProject: "Projekt erstellen",
     workflow: "Projekt-Workflow",
-    workflowHint: "Aufgaben, Abhängigkeiten, Blocker und Fortschritt in einer Ansicht.",
     tasks: "Aufgaben",
     completed: "Erledigt",
     blocked: "Blockiert",
@@ -166,11 +162,9 @@ const workflowCopy = {
     prerequisite: "Muss zuerst erledigt sein",
     selectTaskPlaceholder: "Aufgabe auswählen",
     selectPrerequisite: "Vorherige Aufgabe auswählen",
-    dependencyHelp: "Nach dem Speichern erscheint die Verbindung im Canvas. Zyklen sind nicht zulässig.",
     saveDependency: "Aufgaben verbinden",
     removeDependency: "Verknüpfung entfernen",
     removeTitle: "Abhängigkeit entfernen?",
-    removeHint: "Die Aufgabe wartet danach nicht mehr auf die ausgewählte vorherige Aufgabe.",
     remove: "Entfernen",
     cancel: "Abbrechen",
     openTask: "Aufgabe öffnen",
@@ -348,10 +342,7 @@ function WorkflowCanvas({
   return (
     <div className="overflow-hidden rounded-2xl border bg-muted/10" role="region" aria-label={labels.workflow}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-card px-4 py-3">
-        <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={GitBranch}>{labels.workflow}</SectionHeading></h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{labels.workflowHint}</p>
-        </div>
+        <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={GitBranch}>{labels.workflow}</SectionHeading></h3>
         <div className="hidden items-center rounded-lg border bg-background p-0.5 md:flex" role="group" aria-label={labels.resetZoom}>
           <Button type="button" size="icon" variant="ghost" className="size-8" disabled={zoom <= 0.75} aria-label={labels.zoomOut} onClick={() => changeZoom(zoom - 0.25)}><Minus className="size-3.5" /></Button>
           <Button type="button" size="sm" variant="ghost" className="h-8 min-w-16 px-2 font-mono text-[11px]" aria-label={labels.resetZoom} onClick={() => setZoom(1)}><RotateCcw className="size-3.5" />{Math.round(zoom * 100)}%</Button>
@@ -528,7 +519,6 @@ function DependencyDialog({
             </NativeComboboxSelect>
           </label>
           {selectedTaskId && !available.length ? <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">{labels.allLinked}</p> : null}
-          <p className="text-xs text-muted-foreground">{labels.dependencyHelp}</p>
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" disabled={saving} onClick={() => changeOpen(false)}>{labels.cancel}</Button>
@@ -659,7 +649,7 @@ export function ProjectWorkflowView({
                 {canEditDependencies && tasks.length > 1 ? <Button type="button" size="sm" onClick={() => setDependencyDialogOpen(true)}><Link2 />{labels.addDependency}</Button> : null}
               </div>
             </div>
-          ) : projects.length ? <p className="text-sm text-muted-foreground">{labels.workflowHint}</p> : null}
+          ) : null}
         </div>
       </section>
 
@@ -669,7 +659,7 @@ export function ProjectWorkflowView({
         <div className="flex min-h-80 flex-col items-center justify-center rounded-2xl border border-dashed bg-card px-6 text-center">
           <GitBranch className="size-10 text-orange-500" />
           <h2 className="mt-3 font-semibold">{projects.length ? labels.selectProject : labels.noProjectsTitle}</h2>
-          <p className="mt-1 max-w-md text-sm text-muted-foreground">{projects.length ? labels.workflowHint : labels.noProjects}</p>
+          {projects.length ? null : <p className="mt-1 max-w-md text-sm text-muted-foreground">{labels.noProjects}</p>}
           {!projects.length && onCreateProject ? <Button className="mt-4" onClick={onCreateProject}><Plus />{labels.createProject}</Button> : null}
         </div>
       ) : loading ? (
@@ -799,7 +789,6 @@ export function ProjectWorkflowView({
       <Dialog open={Boolean(deleteCandidate)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteCandidate(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle><SectionHeading icon={Unlink}>{labels.removeTitle}</SectionHeading></DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">{labels.removeHint}</p>
           {localError ? <div role="alert" className="text-sm text-destructive">{localError}</div> : null}
           <DialogFooter>
             <Button type="button" variant="outline" disabled={deleteBusy} onClick={() => setDeleteCandidate(null)}>{labels.cancel}</Button>

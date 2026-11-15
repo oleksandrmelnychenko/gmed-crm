@@ -395,12 +395,6 @@ export function OrderGroupPanel({
             <p className="text-xs font-medium text-foreground">
               {tx("Плательщик группы", "Zahler der Gruppe")}
             </p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {tx(
-                "Счета заказа и подзаказов семьи выставляются плательщику целиком: имя, e-mail и почтовый адрес для счёта.",
-                "Rechnungen des Auftrags und der Familien-Unteraufträge gehen an diesen Zahler – mit Name, E-Mail und Rechnungsanschrift.",
-              )}
-            </p>
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <select
                 value={payer.relationId}

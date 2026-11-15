@@ -412,7 +412,6 @@ function examinationKindLabel(kind: string, tx: (ru: string, de: string) => stri
 
 type ScopedListSectionProps<T extends EpisodeEntry> = {
   title: string;
-  description: string;
   full: readonly T[];
   save: (next: T[]) => Promise<boolean>;
   busy: boolean;
@@ -441,7 +440,6 @@ type ScopedListSectionProps<T extends EpisodeEntry> = {
  */
 function ScopedListSection<T extends EpisodeEntry>({
   title,
-  description,
   full,
   save,
   busy,
@@ -497,7 +495,6 @@ function ScopedListSection<T extends EpisodeEntry>({
       <CaseItemList<T>
         icon={ClipboardList}
         title={title}
-        description={description}
         items={visible}
         blankItem={{ ...blankItem, case_id: caseUuid }}
         cloneItem={(item) => ({ ...item })}
@@ -547,10 +544,6 @@ export function CaseRecordBefundeSection() {
   return (
     <ScopedListSection<ClinicalExamination>
       title={t.cases_workspace_section_befunde}
-      description={tx(
-        "Обследования и результаты из карты пациента.",
-        "Befunde und Ergebnisse aus der Patientenakte.",
-      )}
       full={record.profile?.examinations ?? []}
       save={(next) => record.runSave(() => savePatientExaminations(patientId, next))}
       busy={record.busy}
@@ -753,10 +746,6 @@ export function CaseRecordProceduresSection() {
   return (
     <ScopedListSection<ClinicalProcedure>
       title={t.cases_workspace_section_procedures}
-      description={tx(
-        "Терапия и вмешательства из карты пациента.",
-        "Therapie und Eingriffe aus der Patientenakte.",
-      )}
       full={record.profile?.procedures ?? []}
       save={(next) => record.runSave(() => savePatientProcedures(patientId, next))}
       busy={record.busy}
@@ -891,10 +880,6 @@ export function CaseRecordVerlaufSection() {
   return (
     <ScopedListSection<ClinicalVerlaufEntry>
       title={t.cases_workspace_section_verlauf}
-      description={tx(
-        "Клиническая динамика из карты пациента.",
-        "Klinischer Verlauf aus der Patientenakte.",
-      )}
       full={record.profile?.verlauf ?? []}
       save={(next) => record.runSave(() => savePatientVerlauf(patientId, next))}
       busy={record.busy}

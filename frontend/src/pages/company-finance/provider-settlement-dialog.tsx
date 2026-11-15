@@ -53,7 +53,6 @@ type Props = {
 const copy = {
   ru: {
     title: "Выплаты партнёру / исполнителю",
-    description: "Частичные и полные выплаты по счёту партнёра / исполнителя",
     invoiceAmount: "Сумма счёта партнёра / исполнителя",
     paid: "Выплачено компанией",
     remaining: "Осталось выплатить партнёру / исполнителю",
@@ -97,7 +96,6 @@ const copy = {
   },
   de: {
     title: "Zahlungen an Partner / Leistungserbringer",
-    description: "Teil- und Vollzahlungen einer Rechnung des Partners / Leistungserbringers",
     invoiceAmount: "Rechnungsbetrag des Partners / Leistungserbringers",
     paid: "Vom Unternehmen bezahlt",
     remaining: "Noch an Partner / Leistungserbringer zu zahlen",
@@ -388,7 +386,7 @@ export function ProviderSettlementDialog({
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><SectionHeading icon={HandCoins}>{text.title}</SectionHeading></DialogTitle>
           <DialogDescription className="break-words text-xs leading-5">
-            <span className="font-mono text-foreground">{settlement?.external_invoice_number ?? liability?.external_invoice_number}</span> · {text.description}
+            <span className="font-mono text-foreground">{settlement?.external_invoice_number ?? liability?.external_invoice_number}</span>
           </DialogDescription>
         </DialogHeader>
 

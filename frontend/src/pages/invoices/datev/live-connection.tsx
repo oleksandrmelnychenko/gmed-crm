@@ -157,14 +157,13 @@ export function DatevLiveConnection({ canAdmin = true }: { canAdmin?: boolean } 
         {access.clients.map((company) => <div key={company.id} className="space-y-2"><p className="text-sm font-medium">{company.name}</p><p className="text-xs">Beraternummer: {company.consultant_number} · Mandantennummer: {company.client_number}</p><ul className="space-y-1 text-sm">{company.services.map((service, index) => <li key={`${service.name}-${index}`}>{service.name}</li>)}</ul>{company.services.length === 0 ? <p className="text-sm">{t.noServices}</p> : null}</div>)}
       </section> : null}
     </DatevSetupSection>
-    {canStaffPath("/invoices") ? <DatevSetupSection icon={Download} title={t.readTitle} description={t.readHint}>
+    {canStaffPath("/invoices") ? <DatevSetupSection icon={Download} title={t.readTitle}>
       <p className="text-xs leading-5 text-muted-foreground">{t.originals}</p>
       <div className="grid items-end gap-3 sm:grid-cols-3">
         <label className="space-y-1 text-xs">{t.kind}<select aria-label={t.kind} className={selectClass} disabled={busy} value={kind} onChange={(e) => { setKind(e.target.value as ReadKind); setResult(null); }}>{Object.entries(kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {kind !== "fiscal-years" ? <label className="space-y-1 text-xs">{t.year}<Input aria-label={t.year} type="date" min="1992-01-01" max="2099-12-31" value={year} disabled={busy} onChange={(e) => { setYear(e.target.value); setResult(null); }} /></label> : <div />}
         <DatevActionButton title={t.read} description={describe("read")} context={<>{context}<p className="mt-2 font-medium">{kinds[kind]}{kind !== "fiscal-years" ? ` · ${year}` : ""}</p></>} contextKey={`${identity}:${kind}:${year}`} disabled={!canRead || (kind !== "fiscal-years" && !fiscalYear(year))} onConfirm={() => run(async (current) => { setResult(null); const value = await readDatev(confirmedTarget(), kind, kind === "fiscal-years" ? undefined : fiscalYear(year)); matchesCompany(value); if (current()) setResult(value); })}>{t.read}</DatevActionButton>
       </div>
-      {kind !== "fiscal-years" ? <p className="text-xs text-muted-foreground">{t.yearHint}</p> : null}
       {!hasCompany ? <p className="text-xs text-muted-foreground">{t.companyMissing}</p> : !connection?.exchange_enabled ? <p className="text-xs text-muted-foreground">{t.exchangeMissing}</p> : null}
       <div className="rounded-md border bg-muted/20 p-3 text-xs leading-5">{t.unavailableOperations}</div>
       {result ? <DatevReadResult key={result.retrieved_at} result={result} disabled={blocked} de={de} /> : null}

@@ -120,7 +120,6 @@ export function SettlementFigures({
       <p className={cn("text-sm font-semibold", settlementBalanceClass(figures.balance_gross))}>
         {settlementBalanceLabel(figures.balance_gross, currency, lang)}
       </p>
-      <p className="text-xs text-muted-foreground">{text.finance_settlement_basis}</p>
     </div>
   );
 }
@@ -207,8 +206,8 @@ function ForceSettleDialog({
             <DialogTitle><SectionHeading icon={CircleCheck}>{tx("Закрыть расчёт с остатком", "Abrechnung mit Restbetrag schließen")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {tx(
-                "Расчёт ещё не сведён. Принудительное закрытие списывает остаток: пациенту больше не будет выставлено и не будет возвращено ничего по этому заказу.",
-                "Die Abrechnung ist noch nicht ausgeglichen. Beim erzwungenen Schließen wird der Restbetrag ausgebucht: für diesen Auftrag wird nichts mehr berechnet oder erstattet.",
+                "Остаток будет списан: по этому заказу больше ничего не выставляется и не возвращается.",
+                "Der Restbetrag wird ausgebucht: für diesen Auftrag wird nichts mehr berechnet oder erstattet.",
               )}
             </DialogDescription>
           </DialogHeader>
@@ -363,12 +362,6 @@ export function SettlementActions({
           <DialogContent className="sm:max-w-[480px]" data-testid="termination-final-invoice-confirm">
             <DialogHeader>
               <DialogTitle><SectionHeading icon={FilePlus2}>{tx("Создать финальный счёт?", "Schlussrechnung erstellen?")}</SectionHeading></DialogTitle>
-              <DialogDescription>
-                {tx(
-                  "Будет создан черновик финального счёта на невыставленную сумму этого заказа. Номер он получит при выпуске; до выпуска черновик можно отменить.",
-                  "Es wird ein Entwurf der Schlussrechnung über den nicht berechneten Betrag dieses Auftrags erstellt. Die Nummer erhält er bei der Ausstellung; bis dahin kann der Entwurf storniert werden.",
-                )}
-              </DialogDescription>
             </DialogHeader>
             {invoiceAmount > 0 ? (
               <p className="font-mono text-sm font-semibold tabular-nums">

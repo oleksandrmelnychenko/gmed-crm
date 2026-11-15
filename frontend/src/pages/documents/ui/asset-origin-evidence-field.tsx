@@ -104,14 +104,9 @@ export function AssetOriginEvidenceField({ value, subject, lang, disabled = fals
           </label>
         </span>
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">
-        {hasSubject
-          ? tx(
-              "Выписки со счёта, договоры купли-продажи, справки о доходах и т. п. (PDF, JPG, PNG). Файлы сохраняются в документах и перечисляются в формуляре.",
-              "Kontoauszüge, Kaufverträge, Einkommensnachweise u. Ä. (PDF, JPG, PNG). Die Dateien werden in der Akte abgelegt und im Dokumentationsbogen aufgeführt.",
-            )
-          : tx("Сначала выберите пациента.", "Wählen Sie zuerst den Patienten aus.")}
-      </p>
+      {hasSubject ? null : <p className="text-xs leading-5 text-muted-foreground">
+        {tx("Сначала выберите пациента.", "Wählen Sie zuerst den Patienten aus.")}
+      </p>}
       {value.length > 0 ? (
         <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60">
           {value.map((item) => (

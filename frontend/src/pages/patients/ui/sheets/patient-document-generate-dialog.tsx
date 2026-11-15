@@ -721,12 +721,6 @@ export function PatientDocumentGenerateDialog({
               {isFreeTextDocument && validationError ? (
                 <p className="text-xs text-destructive">{validationError}</p>
               ) : null}
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                {tx(
-                  "Если изменить текст, PDF будет создан именно из этой версии.",
-                  "Wenn der Text bearbeitet wird, entsteht das PDF genau aus dieser Version.",
-                )}
-              </p>
             </div>
           ) : null}
         </>

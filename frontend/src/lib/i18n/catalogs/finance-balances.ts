@@ -5,7 +5,6 @@
  */
 export interface FinanceBalancesTranslations {
   finance_credit_note_section_title: string;
-  finance_credit_note_section_description: string;
   finance_credit_note_mode_lines: string;
   finance_credit_note_mode_vat_rate: string;
   finance_credit_note_line_remaining: string;
@@ -31,7 +30,6 @@ export interface FinanceBalancesTranslations {
   finance_credit_note_limit_applied_advance: string;
   finance_credit_note_error_limit_exceeded: string;
   /** Invoices whose line snapshot carries no amounts take credits by amount (QA D-55). */
-  finance_credit_note_by_amount_hint: string;
   finance_credit_note_empty: string;
   finance_credit_note_visible_in_portal: string;
   finance_credit_note_staff_only: string;
@@ -47,7 +45,6 @@ export interface FinanceBalancesTranslations {
   finance_credit_note_portal_title: string;
   finance_accounting_category_patient_credit: string;
   finance_credit_section_title: string;
-  finance_credit_balance_description: string;
   finance_credit_balance_amount: string;
   finance_credit_transfer_target: string;
   finance_credit_transfer_target_option: string;
@@ -81,12 +78,10 @@ export interface FinanceBalancesTranslations {
   finance_settlement_in_drafts: string;
   finance_settlement_billable_now: string;
   finance_settlement_unmatched_lines: string;
-  finance_settlement_basis: string;
   /** Quote notes: printed on the cost estimate and copied into its invoices. */
   finance_quote_printed_notes: string;
   /** Staff-only note of a quote or an invoice: never printed or shown to the patient/payer. */
   finance_internal_note: string;
-  finance_internal_note_hint: string;
   finance_internal_note_save: string;
   finance_internal_note_saved: string;
   finance_internal_note_too_long: string;
@@ -100,8 +95,6 @@ export interface FinanceBalancesTranslations {
 
 export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_credit_note_section_title: "Кредит-ноты (корректировки счёта)",
-  finance_credit_note_section_description:
-    "Кредит-нота уменьшает выбранные позиции счёта; НДС берётся по ставке каждой позиции, поэтому позиция 0 % не уменьшает НДС. Ошибочная кредит-нота отменяется сторно, а не удаляется.",
   finance_credit_note_mode_lines: "По позициям",
   finance_credit_note_mode_vat_rate: "Сумма в ставке НДС",
   finance_credit_note_line_remaining: "Можно скорректировать: {amount}",
@@ -126,8 +119,6 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_credit_note_limit_applied_advance:
     "Можно скорректировать: {amount}. Этот аванс зачтён в финальный счёт: сначала снимите зачёт в финальном счёте или скорректируйте финальный счёт кредит-нотой.",
   finance_credit_note_error_limit_exceeded: "Сумма больше, чем можно скорректировать по счёту ({amount}).",
-  finance_credit_note_by_amount_hint:
-    "Позиции этого счёта сохранены в старом формате без сумм: кредит-нота выставляется на сумму, НДС — в пропорции самого счёта.",
   finance_credit_note_empty: "Кредит-нот пока нет.",
   finance_credit_note_visible_in_portal: "Видно в портале",
   finance_credit_note_staff_only: "Только для сотрудников",
@@ -143,8 +134,6 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_credit_note_portal_title: "Корректировки счёта",
   finance_accounting_category_patient_credit: "Переплата пациента (не выручка)",
   finance_credit_section_title: "Переплата и зачёты",
-  finance_credit_balance_description:
-    "Получено больше, чем требует счёт (переплата или кредит-нота после оплаты). Сумму можно вернуть пациенту в разделе «Возвраты» или зачесть в другой открытый счёт пациента.",
   finance_credit_balance_amount: "Кредит пациента",
   finance_credit_transfer_target: "Зачесть в счёт",
   finance_credit_transfer_target_option: "{number} · {order} · к оплате {amount}",
@@ -182,12 +171,8 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_settlement_billable_now: "финальный счёт выставит сейчас: {amount}",
   finance_settlement_unmatched_lines:
     "Строки счетов на {amount} не удалось сопоставить с услугами заказа — проверьте их перед закрытием расчёта.",
-  finance_settlement_basis:
-    "Итог = выставлено (за вычетом кредит-нот) + не выставлено − оплачено (включая авансы). Так же считается сальдо в карточке пациента.",
   finance_quote_printed_notes: "Примечание для клиента (печатается в предложении и счетах)",
   finance_internal_note: "Внутренняя заметка (не печатается)",
-  finance_internal_note_hint:
-    "Только для сотрудников: не печатается, не переносится в счета, не показывается пациенту и плательщику. Можно менять и после выпуска счёта; каждое изменение записывается в журнал.",
   finance_internal_note_save: "Сохранить заметку",
   finance_internal_note_saved: "Заметка сохранена.",
   finance_internal_note_too_long: "Внутренняя заметка — не более 4000 символов.",
@@ -200,8 +185,6 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
 
 export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_credit_note_section_title: "Rechnungskorrekturen (Gutschriften)",
-  finance_credit_note_section_description:
-    "Eine Rechnungskorrektur mindert ausgewählte Rechnungspositionen; die Umsatzsteuer folgt dem Steuersatz jeder Position, eine 0-%-Position mindert also keine Umsatzsteuer. Eine falsche Korrektur wird storniert, nicht gelöscht.",
   finance_credit_note_mode_lines: "Nach Positionen",
   finance_credit_note_mode_vat_rate: "Betrag je Steuersatz",
   finance_credit_note_line_remaining: "Korrigierbar: {amount}",
@@ -228,8 +211,6 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
     "Korrigierbar: {amount}. Diese Anzahlung ist in die Schlussrechnung angerechnet: Heben Sie zuerst die Anrechnung in der Schlussrechnung auf oder korrigieren Sie die Schlussrechnung per Gutschrift.",
   finance_credit_note_error_limit_exceeded:
     "Der Betrag übersteigt den korrigierbaren Betrag der Rechnung ({amount}).",
-  finance_credit_note_by_amount_hint:
-    "Die Positionen dieser Rechnung sind im alten Format ohne Beträge gespeichert: Die Korrektur erfolgt über einen Betrag, die Umsatzsteuer im Verhältnis der Rechnung.",
   finance_credit_note_empty: "Keine Rechnungskorrekturen.",
   finance_credit_note_visible_in_portal: "Im Portal sichtbar",
   finance_credit_note_staff_only: "Nur intern",
@@ -245,8 +226,6 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_credit_note_portal_title: "Rechnungskorrekturen",
   finance_accounting_category_patient_credit: "Patientenguthaben (kein Umsatz)",
   finance_credit_section_title: "Guthaben und Verrechnungen",
-  finance_credit_balance_description:
-    "Es ist mehr eingegangen, als die Rechnung verlangt (Überzahlung oder Rechnungskorrektur nach Zahlung). Der Betrag kann unter „Erstattungen“ an den Patienten zurückgezahlt oder mit einer anderen offenen Rechnung des Patienten verrechnet werden.",
   finance_credit_balance_amount: "Patientenguthaben",
   finance_credit_transfer_target: "Verrechnen mit Rechnung",
   finance_credit_transfer_target_option: "{number} · {order} · offen {amount}",
@@ -285,12 +264,8 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_settlement_billable_now: "die Schlussrechnung berechnet jetzt: {amount}",
   finance_settlement_unmatched_lines:
     "Rechnungspositionen über {amount} konnten keiner Auftragsleistung zugeordnet werden – bitte vor dem Abschluss prüfen.",
-  finance_settlement_basis:
-    "Saldo = berechnet (abzüglich Rechnungskorrekturen) + nicht berechnet − bezahlt (inklusive Anzahlungen). Genauso wird der Saldo in der Patientenakte berechnet.",
   finance_quote_printed_notes: "Hinweis für den Kunden (wird auf Angebot und Rechnungen gedruckt)",
   finance_internal_note: "Interne Notiz (wird nicht gedruckt)",
-  finance_internal_note_hint:
-    "Nur für Mitarbeitende: wird nicht gedruckt, nicht in Rechnungen übernommen und weder dem Patienten noch dem Zahler angezeigt. Auch nach Ausstellung der Rechnung änderbar; jede Änderung wird protokolliert.",
   finance_internal_note_save: "Notiz speichern",
   finance_internal_note_saved: "Notiz gespeichert.",
   finance_internal_note_too_long: "Die interne Notiz darf höchstens 4000 Zeichen haben.",

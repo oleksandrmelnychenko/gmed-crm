@@ -215,9 +215,6 @@ function PatientLegalStatusSheetContent({
               </div>
             );
           })}
-          <p className="text-xs leading-5 text-muted-foreground">
-            {l("patient_legal_doc_read_only_hint")}
-          </p>
           {checklist.map((item) => {
             const active = form[item.key];
             // "Compliance completed" waits for a consent signed after the

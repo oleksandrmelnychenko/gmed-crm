@@ -44,7 +44,6 @@ describe("LeadPayerPaymentRoute (owner 2026-10-26)", () => {
     expect(html).toContain('data-testid="lead-payer-route-save"');
     // Cash asks no account.
     expect(html).not.toContain("Владелец счёта");
-    expect(html).toContain("его ответ заменит этот");
     expect(render({ ...cash, payment_route_source: "payer" } as PayerDeclaration, { tx: de })).toContain("vom Zahler angegeben");
   });
 

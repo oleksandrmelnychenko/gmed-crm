@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 type PanelProps = {
   icon?: LucideIcon;
   title: string;
-  description?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -18,7 +17,6 @@ type PanelProps = {
 export function Panel({
   icon,
   title,
-  description,
   action,
   children,
   className,
@@ -33,16 +31,9 @@ export function Panel({
       )}
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>
-            {accent ? <SectionHeading icon={icon}>{title}</SectionHeading> : title}
-          </h3>
-          {description ? (
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              {description}
-            </p>
-          ) : null}
-        </div>
+        <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full flex-1 break-words")}>
+          {accent ? <SectionHeading icon={icon}>{title}</SectionHeading> : title}
+        </h3>
         {action ? (
           <div className="flex shrink-0 items-center gap-2">{action}</div>
         ) : null}

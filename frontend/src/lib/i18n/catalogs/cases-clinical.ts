@@ -84,7 +84,6 @@ export interface CasesClinicalTranslations {
   cases_workspace_overview_intake_open: string;
   cases_workspace_overview_save: string;
   cases_workspace_record_hint_title: string;
-  cases_workspace_record_hint_description: string;
   cases_workspace_record_badge: string;
   cases_workspace_scope_episode: string;
   cases_workspace_scope_all: string;
@@ -103,7 +102,6 @@ export interface CasesClinicalTranslations {
   cases_workspace_item_submit_edit: string;
   cases_workspace_item_remove: string;
   cases_workspace_specialty_relevant: string;
-  cases_workspace_specialty_relevant_hint: string;
   cases_workspace_specialty_key_signs: string;
   cases_workspace_specialty_save: string;
 
@@ -343,8 +341,6 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_workspace_overview_intake_open: "Не завершён",
   cases_workspace_overview_save: "Сохранить обзор",
   cases_workspace_record_hint_title: "Карта пациента недоступна",
-  cases_workspace_record_hint_description:
-    "Карта пациента появится после создания пациента в мастере лида.",
   cases_workspace_record_badge: "Карта пациента",
   cases_workspace_scope_episode: "Этот эпизод",
   cases_workspace_scope_all: "Вся карта",
@@ -363,8 +359,6 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_workspace_item_submit_edit: "Сохранить изменения",
   cases_workspace_item_remove: "Удалить",
   cases_workspace_specialty_relevant: "Относится к специальности",
-  cases_workspace_specialty_relevant_hint:
-    "Включите, если этот раздел относится к кейсу.",
   cases_workspace_specialty_key_signs: "Ключевые симптомы",
   cases_workspace_specialty_save: "Сохранить раздел",
 
@@ -634,8 +628,6 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_workspace_overview_intake_open: "Offen",
   cases_workspace_overview_save: "Übersicht speichern",
   cases_workspace_record_hint_title: "Patientenakte nicht verfügbar",
-  cases_workspace_record_hint_description:
-    "Die Patientenakte erscheint, sobald der Patient im Lead-Assistenten angelegt wurde.",
   cases_workspace_record_badge: "Patientenakte",
   cases_workspace_scope_episode: "Diese Episode",
   cases_workspace_scope_all: "Gesamte Akte",
@@ -654,8 +646,6 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_workspace_item_submit_edit: "Änderungen speichern",
   cases_workspace_item_remove: "Entfernen",
   cases_workspace_specialty_relevant: "Fachrelevant",
-  cases_workspace_specialty_relevant_hint:
-    "Aktivieren, wenn dieser Fachbereich für den Fall berücksichtigt werden soll.",
   cases_workspace_specialty_key_signs: "Leitsymptome",
   cases_workspace_specialty_save: "Abschnitt speichern",
 

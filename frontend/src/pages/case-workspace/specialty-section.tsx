@@ -102,14 +102,9 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
               : cn(tokens.surface.mutedCard, "hover:bg-muted/30"),
           )}
         >
-          <div>
-            <p className="text-sm font-medium text-foreground">
-              {t.cases_workspace_specialty_relevant}
-            </p>
-            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-              {t.cases_workspace_specialty_relevant_hint}
-            </p>
-          </div>
+          <p className="text-sm font-medium text-foreground">
+            {t.cases_workspace_specialty_relevant}
+          </p>
           <input
             id={relevantInputId}
             type="checkbox"

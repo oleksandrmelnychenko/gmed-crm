@@ -3122,9 +3122,6 @@ function useFinanceCatalogPageContent() {
                     </Field>
                   </div>
                 </Section>
-                <p className="text-xs leading-5 text-muted-foreground">
-                  {t.finance_catalog_price_history_hint}
-                </p>
             </div>
             <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none px-5 py-3 sm:justify-between">
               <div>
@@ -3807,11 +3804,6 @@ function useFinanceCatalogPageContent() {
 
                 <Section icon={FilePenLine} title={t.revenue_agency_service_description_status}>
                   <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
-                    <p className="text-muted-foreground">
-                      {lang === "de"
-                        ? "Diese Platzhalter werden im Lead-Assistenten und in den daraus erstellten Dokumenten mit den ausgewählten Fachrichtungen und dem Programmzeitraum ausgefüllt."
-                        : "Эти поля автоматически заполняются в визарде лида и создаваемых из него документах: из выбранных специализаций и дат программы."}
-                    </p>
                     <dl className="grid gap-2 sm:grid-cols-3">
                       {[
                         ["[Fachrichtung 1]", lang === "de" ? "Ausgewählte Fachrichtungen (auch 2, 3, n, n+1)" : "Выбранные специализации (также 2, 3, n, n+1)"],
@@ -4153,10 +4145,7 @@ function useFinanceCatalogPageContent() {
 
                 <Section icon={ListTree} title={t.finance_catalog_included_items}>
                   <div className="space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs text-muted-foreground">
-                        {t.finance_catalog_included_items_hint}
-                      </p>
+                    <div className="flex flex-wrap items-center justify-end gap-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <NativeComboboxSelect
                           value="__select_existing__"

@@ -50,7 +50,6 @@ const copy = {
     notes: "Notiz",
     linkPatient: "Patient zuordnen",
     medicalToggle: "Medizinisches Dokument",
-    medicalHint: "Medizinische Dokumente müssen einem Patienten zugeordnet werden.",
     cancel: "Abbrechen",
     save: "Hochladen",
     saving: "Wird hochgeladen",
@@ -76,7 +75,6 @@ const copy = {
     notes: "Примечание",
     linkPatient: "Привязать пациента",
     medicalToggle: "Медицинский документ",
-    medicalHint: "Медицинский документ обязательно привязывается к пациенту.",
     cancel: "Отмена",
     save: "Загрузить",
     saving: "Загрузка",
@@ -258,7 +256,7 @@ export function ProviderDocumentsSection({
             </AdminFormSection>
             <AdminFormSection icon={ContactRound} title={labels.linkPatient}>
               <Field label={labels.patient} htmlFor="provider-document-patient"><select id="provider-document-patient" className={selectClass} value={patientId} required={isMedical} onChange={(event) => setPatientId(event.target.value)}><option value="">{labels.noPatient}</option>{patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.patientNumber}</option>)}</select></Field>
-              <label className="flex items-start gap-2 py-1 text-xs"><input type="checkbox" className={checkboxClass} checked={isMedical} onChange={(event) => setIsMedical(event.target.checked)} /><span><span className="font-medium">{labels.medicalToggle}</span><span className="mt-0.5 block leading-5 text-muted-foreground">{labels.medicalHint}</span></span></label>
+              <label className="flex items-start gap-2 py-1 text-xs"><input type="checkbox" className={checkboxClass} checked={isMedical} onChange={(event) => setIsMedical(event.target.checked)} /><span className="font-medium">{labels.medicalToggle}</span></label>
             </AdminFormSection>
             <AdminFormSection icon={NotebookPen} title={labels.notes}>
               <textarea aria-label={labels.notes} className={textareaClass} value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} />

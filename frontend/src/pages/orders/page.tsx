@@ -200,7 +200,6 @@ import {
   partnerCostAmountsError,
   partnerCostAmountsForSubmit,
   partnerCostAmountsFrom,
-  partnerCostAmountsHint,
   type PartnerCostAmounts,
 } from "./model/partner-cost-amounts";
 import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
@@ -399,7 +398,6 @@ const ORDER_REALTIME_EVENTS = [
 type SectionCardProps = {
   icon?: LucideIcon;
   title: string;
-  description?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -430,7 +428,6 @@ const ORDER_TASK_STATUS_LABEL_KEYS = {
 function SectionCard({
   icon,
   title,
-  description,
   action,
   children,
   className,
@@ -445,9 +442,6 @@ function SectionCard({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-card px-3 py-2">
         <div className="min-w-0 flex-1">
           <h2 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h2>
-          {description ? (
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-          ) : null}
         </div>
         {action ? <div className="flex max-w-full flex-wrap gap-2">{action}</div> : null}
       </div>
@@ -3690,9 +3684,6 @@ function useOrdersPageContent() {
                   {debtQueue.length}
                 </Badge>
               </h2>
-              <p className={cn(tokens.text.muted, "mt-1 max-w-3xl")}>
-                {l("orders_auftrage_die_durch_uberfallige_forderungen_oder_einen_of")}
-              </p>
             </div>
           </div>
 
@@ -4331,28 +4322,16 @@ function useOrdersPageContent() {
                   <div className="rounded-b-xl border-t border-border/70 px-3 py-2">
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-                        <StatusChip
-                          tone={orderNextStep?.kind === "terminal" && orderNextStep.status === "cancelled"
-                            ? "neutral" : orderNextStepBlocked ? "warning" : "success"}
-                        >
-                          {orderNextStep?.kind === "terminal" &&
-                          orderNextStep.status === "cancelled" ? (
-                            <X className="size-4" />
-                          ) : orderNextStepBlocked ? (
+                        {/* A finished or cancelled order: the status badge above already says it. */}
+                        {orderNextStep?.kind === "terminal" ? null : (
+                        <StatusChip tone={orderNextStepBlocked ? "warning" : "success"}>
+                          {orderNextStepBlocked ? (
                             <AlertTriangle className="size-4" />
                           ) : (
                             <CheckCircle2 className="size-4" />
                           )}
                           <span>
-                            {orderNextStep?.kind === "terminal"
-                              ? orderNextStep.status === "cancelled"
-                                ? lang === "de"
-                                  ? "Auftrag storniert"
-                                  : "Заказ отменён"
-                                : lang === "de"
-                                  ? "Auftrag abgeschlossen"
-                                  : "Заказ завершён"
-                              : orderNextStep?.kind === "completion"
+                            {orderNextStep?.kind === "completion"
                                 ? orderNextStep.blocked
                                   ? lang === "de"
                                     ? orderNextStep.reasons.length + " Aufgaben bis zum Abschluss"
@@ -4369,6 +4348,7 @@ function useOrdersPageContent() {
                                     : "Можно переходить к следующему этапу"}
                           </span>
                         </StatusChip>
+                        )}
                           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground">
                             {currentLifecyclePhaseIndex >= 0 ? (
                               <span>
@@ -4484,11 +4464,6 @@ function useOrdersPageContent() {
                     <SectionCard
                       icon={ClipboardList}
                       title={lang === "de" ? "Auftrag auf einen Blick" : "Главное о заказе"}
-                      description={
-                        lang === "de"
-                          ? "Patientenbedarf, Vereinbarungen und Leistungsfortschritt."
-                          : "Потребность пациента, договорённости и состояние услуг."
-                      }
                     >
                       <div className="grid min-w-0 gap-4 @min-[52rem]:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
                         <div className="min-w-0 space-y-3">
@@ -4682,11 +4657,6 @@ function useOrdersPageContent() {
                     <SectionCard
                       icon={Wallet}
                       title={lang === "de" ? "Finanzen des Auftrags" : "Деньги по заказу"}
-                      description={
-                        lang === "de"
-                          ? "Die wichtigsten Beträge für die tägliche Arbeit. Der vollständige Bericht ist unten verfügbar."
-                          : "Основные суммы для работы. Полный расчёт можно раскрыть ниже."
-                      }
                       action={
                         orderDetail ? (
                           <>
@@ -4783,8 +4753,8 @@ function useOrdersPageContent() {
                           ) > 0 ? (
                             <p className="text-xs text-muted-foreground" data-testid="order-not-yet-billed">
                               {lang === "de"
-                                ? `Noch nicht in Rechnung gestellt: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}. „Noch vom Patienten zu erhalten“ zählt nur ausgestellte Rechnungen.`
-                                : `Ещё не выставлено счётом: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}. «Осталось получить» считает только выпущенные счета.`}
+                                ? `Noch nicht in Rechnung gestellt: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}`
+                                : `Ещё не выставлено счётом: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}`}
                             </p>
                           ) : null}
                           <OrderConciergeSales economics={orderEconomics} lang={lang} formatMoney={formatOptionalMoney} />
@@ -5118,16 +5088,9 @@ function useOrdersPageContent() {
                     {orderNextStepBlocked ? (
                       <div className="mt-2 overflow-hidden rounded-xl border border-amber-200 bg-card">
                         <div className="flex flex-wrap items-start justify-between gap-2 border-b border-amber-200 bg-amber-50/70 px-3 py-2">
-                          <div>
-                            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                              <SectionHeading icon={ListTodo}>{lang === "de" ? "Was noch zu erledigen ist" : "Что ещё нужно сделать"}</SectionHeading>
-                            </h3>
-                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                              {lang === "de"
-                                ? "Öffnen Sie einen Punkt, um ihn direkt zu vervollständigen."
-                                : "Откройте пункт — система сразу покажет, где его завершить."}
-                            </p>
-                          </div>
+                          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                            <SectionHeading icon={ListTodo}>{lang === "de" ? "Was noch zu erledigen ist" : "Что ещё нужно сделать"}</SectionHeading>
+                          </h3>
                           <Badge
                             variant="outline"
                             className="rounded-full border-amber-300 bg-white text-amber-900"
@@ -5323,9 +5286,6 @@ function useOrdersPageContent() {
                               <div className="text-sm font-semibold text-foreground">
                                 <SectionHeading icon={Wallet}>{l("orders_debt_management")}</SectionHeading>
                               </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {l("orders_aktiven_debt_workflow_nachverfolgen_owner_zuweisen_und_d")}
-                              </div>
                             </div>
                             {canManageDebt ? (
                               <Button
@@ -5418,9 +5378,6 @@ function useOrdersPageContent() {
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
                               <SectionHeading icon={PackageCheck}>{l("orders_paketdeckung")}</SectionHeading>
-                            </div>
-                            <div className="mt-1 text-sm text-muted-foreground">
-                              {l("orders_bestehende_paketdeckung_kann_wiederholungsleistungen_ohn")}
                             </div>
                             <div className="mt-4 space-y-3">
                               <NativeComboboxSelect
@@ -5765,9 +5722,6 @@ function useOrdersPageContent() {
                             <div className="text-[13px] font-semibold text-foreground">
                               <SectionHeading icon={SlidersHorizontal}>{l("orders_planungssteuerung")}</SectionHeading>
                             </div>
-                            <div className="mt-1 text-[13px] text-muted-foreground">
-                              {l("orders_behandlungsplan_fixieren_bedarf_an_nicht_medizinischen_l")}
-                            </div>
                             <div className="mt-3 grid gap-2 @min-[32rem]:grid-cols-2">
                               <label className="grid min-w-0 content-start gap-1 text-xs font-medium text-muted-foreground">
                                 <span>{l("orders_behandlungsplan")}</span>
@@ -5926,9 +5880,6 @@ function useOrdersPageContent() {
                           <div className="rounded-lg border border-border p-3">
                             <div className="text-[13px] font-semibold text-foreground">
                               <SectionHeading icon={Handshake}>{l("orders_operative_ubergabe")}</SectionHeading>
-                            </div>
-                            <div className="mt-1 text-[13px] text-muted-foreground">
-                              {l("orders_verknupfte_arbeitsbereiche_nutzen_um_medizinische_slots")}
                             </div>
                             <div className="mt-2 grid gap-2 @min-[32rem]:grid-cols-2 @min-[56rem]:grid-cols-3">
                               {[
@@ -6128,9 +6079,6 @@ function useOrdersPageContent() {
                           <div className="text-sm font-semibold text-foreground">
                             <SectionHeading icon={ClipboardCheck}>{l("orders_steuerung_der_durchfuhrung")}</SectionHeading>
                           </div>
-                          <div className="mt-1 text-sm text-muted-foreground">
-                            {l("orders_ankunft_leistungsumfang_und_klarung_von_abweichungen_ode")}
-                          </div>
                           <fieldset
                             disabled={!permissions.canManagePhase}
                             className="mt-4 space-y-3"
@@ -6294,9 +6242,6 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             <SectionHeading icon={Files}>{l("orders_nachweise_der_durchfuhrung")}</SectionHeading>
-                          </div>
-                          <div className="mt-1 text-sm text-muted-foreground">
-                            {l("orders_verknupfte_arbeitsbereiche_nutzen_um_die_restliche_opera")}
                           </div>
                           <div className="mt-4 grid gap-3">
                             <OrderSummaryLine
@@ -6492,9 +6437,6 @@ function useOrdersPageContent() {
                           <div className="text-sm font-semibold text-foreground">
                             <SectionHeading icon={Settings2}>{l("orders_steuerung_der_nachsorge")}</SectionHeading>
                           </div>
-                          <div className="mt-1 text-sm text-muted-foreground">
-                            {l("orders_markieren_welche_meilensteine_erforderlich_sind_und_ob_d")}
-                          </div>
                           <fieldset
                             disabled={!permissions.canManagePhase}
                             className="mt-4 space-y-3"
@@ -6629,9 +6571,6 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
                             <SectionHeading icon={Milestone}>{l("orders_empfohlene_meilenstein_anker")}</SectionHeading>
-                          </div>
-                          <div className="mt-1 text-sm text-muted-foreground">
-                            {l("orders_bestehende_termin_presets_und_portalsichtbarkeit_lesen_d")}
                           </div>
                           <div className="mt-4 space-y-3">
                             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
@@ -7203,7 +7142,6 @@ function useOrdersPageContent() {
                     <SectionCard
                       icon={ChartNoAxesCombined}
                       title={l("orders_leistungsubersicht")}
-                      description={t.orders_services_section_description}
                       action={
                         // A completed or cancelled order takes no new services (QA 2026-10-11 C-19).
                         permissions.canAddLeistung && !orderStepsLocked ? (
@@ -7969,13 +7907,6 @@ function useOrdersPageContent() {
                                               </option>
                                             ))}
                                           </NativeComboboxSelect>
-                                          {invoice.order_service_billed && invoice.paid_by !== "patient" ? (
-                                            <p className="text-xs leading-snug text-muted-foreground">
-                                              {lang === "de"
-                                                ? "GMED-Kosten der Leistung: dem Patienten wird die Leistung berechnet, keine Zuordnung nötig."
-                                                : "Расход GMED по услуге: пациенту выставляется услуга, связывать со счётом не нужно."}
-                                            </p>
-                                          ) : null}
                                           {(numberFromUnknown(invoice.patient_receivable_gross) ?? 0) > 0 ||
                                           (numberFromUnknown(invoice.allocated_receivable_gross) ?? 0) > 0 ? (
                                             <Button
@@ -8469,7 +8400,6 @@ function useOrdersPageContent() {
                         className={inputClassName}
                       />
                     </Field>
-                    <p className="text-xs text-muted-foreground">{partnerCostAmountsHint(lang)}</p>
                     <Field label={lang === "de" ? "Grund der Änderung" : "Причина изменения"}>
                       <textarea
                         value={plannedCostEditor.reason}
@@ -9035,13 +8965,8 @@ function useOrdersPageContent() {
                 {createForm.patientId ? (
                   <OrderSheetSection icon={UserRoundCheck} title={l("orders_re_check_fur_bestandskunden")}>
                     <div className="space-y-4">
+                {createRecheck ? (
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      {l("orders_stammdaten_compliance_identitat_dokumentenpaket_vertrags")}
-                    </p>
-                  </div>
-                  {createRecheck ? (
                     <Badge
                       variant="outline"
                       className={cn(
@@ -9058,8 +8983,8 @@ function useOrdersPageContent() {
                           ? l("orders_bereit_fur_auftrag")
                           : l("orders_blockiert_2")}
                     </Badge>
-                  ) : null}
                 </div>
+                ) : null}
 
                 {createRecheckLoading ? (
                   <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
@@ -9366,11 +9291,6 @@ function useOrdersPageContent() {
                     <OrderPrepaymentFields
                       value={createForm.prepayment}
                       lang={lang}
-                      hint={
-                        lang === "de"
-                          ? "Der Kostenvoranschlag des Auftrags muss diesen Betrag decken; ein Kostenvoranschlag mit kleinerer Summe wird abgelehnt."
-                          : "Смета заказа должна покрывать эту сумму: смету с меньшим итогом создать не получится."
-                      }
                       onChange={(patch) =>
                         setCreateForm((current) => ({
                           ...current,
@@ -9714,9 +9634,6 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <p className="text-xs text-muted-foreground md:col-span-3">
-                  {partnerCostAmountsHint(lang)}
-                </p>
                 </> : null}
               </div>
             </OrderSheetSection>
@@ -9795,13 +9712,8 @@ function useOrdersPageContent() {
                   }
                   className={cn(checkboxClass, "mt-1")}
                 />
-                <span>
-                  <div className="text-sm font-medium text-foreground">
-                    {t.orders_treat_as_cost_pass_through}
-                  </div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    {t.orders_cost_pass_through_hint}
-                  </div>
+                <span className="text-sm font-medium text-foreground">
+                  {t.orders_treat_as_cost_pass_through}
                 </span>
               </label>
             </div>
@@ -9840,9 +9752,6 @@ function useOrdersPageContent() {
                     </option>
                   ))}
                 </NativeComboboxSelect>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t.orders_supporting_document_pin_hint}
-                </p>
               </Field>
             ) : null}
             </OrderSheetSection>

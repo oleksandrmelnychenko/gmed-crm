@@ -237,12 +237,6 @@ function PatientProfileSection({
         contactMode="multiple"
         readOnly={!canEdit}
       />
-
-      {!canEdit ? (
-        <p className="text-[12px] text-muted-foreground italic">
-          {l("patients_this_role_has_read_only_access_to_patient_demographics")}
-        </p>
-      ) : null}
     </div>
   );
 }

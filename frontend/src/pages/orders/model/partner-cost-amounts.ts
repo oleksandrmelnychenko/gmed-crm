@@ -68,12 +68,6 @@ export function editPartnerCostAmounts(
   return next;
 }
 
-export function partnerCostAmountsHint(lang: "de" | "ru") {
-  return lang === "de"
-    ? "Brutto = Netto + Mehrwertsteuer. Geben Sie Netto oder Brutto ein, der andere Betrag wird berechnet."
-    : "Сумма с налогом = сумма без налога + налог. Введите сумму без налога или с налогом — другая рассчитается автоматически.";
-}
-
 export function partnerCostAmountsError(lang: "de" | "ru") {
   return lang === "de"
     ? "Geplante Partnerkosten: Bitte nicht negative Beträge angeben; die Mehrwertsteuer darf den Bruttobetrag nicht übersteigen."

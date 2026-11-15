@@ -674,7 +674,6 @@ function useAdminNotificationsPageContent() {
               icon={BellPlus}
               onSubmit={handleCreate}
               title={editingId ? t.notif_edit : t.notif_new}
-              description={t.notif_subtitle}
               footer={(
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
@@ -730,7 +729,6 @@ function useAdminNotificationsPageContent() {
           <AdminDialogScaffold
             icon={Radio}
             title={selectedChannel?.name ?? t.notif_title}
-            description={t.notif_subtitle}
             footer={(
               <SheetActionsFooter>
                 <Button

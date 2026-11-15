@@ -18,7 +18,6 @@ export interface PersonnelTranslations {
   personnel_employees_empty: string;
   personnel_employee_new: string;
   personnel_employee_edit: string;
-  personnel_employee_dialog_hint: string;
   personnel_section_person: string;
   personnel_section_employment: string;
   personnel_section_document: string;
@@ -28,7 +27,6 @@ export interface PersonnelTranslations {
   personnel_salutation_none: string;
   personnel_first_name: string;
   personnel_last_name: string;
-  personnel_name_file_hint: string;
   personnel_number: string;
   personnel_employment_start: string;
   personnel_employment_end: string;
@@ -36,7 +34,6 @@ export interface PersonnelTranslations {
   personnel_employment_range_invalid: string;
   personnel_since: string;
   personnel_user_link: string;
-  personnel_user_link_hint: string;
   personnel_no_user_link: string;
   personnel_notes: string;
   personnel_status: string;
@@ -54,20 +51,17 @@ export interface PersonnelTranslations {
   personnel_month_to: string;
   personnel_range_invalid: string;
   personnel_completeness_summary: string;
-  personnel_late_rule: string;
   personnel_cell_present: string;
   personnel_cell_late: string;
   personnel_cell_missing: string;
   personnel_cell_open: string;
   personnel_cell_not_employed: string;
-  personnel_intake_intro: string;
   personnel_intake_add: string;
   personnel_intake_uploaded: string;
   personnel_intake_uploaded_many: string;
   personnel_import_title: string;
   personnel_import_source: string;
   personnel_import_section: string;
-  personnel_import_hint: string;
   personnel_import_action: string;
   personnel_intake_empty: string;
   personnel_intake_assign: string;
@@ -82,13 +76,6 @@ export interface PersonnelTranslations {
   personnel_export_include_versions: string;
   personnel_export_download: string;
   personnel_export_done: string;
-  personnel_export_contents_title: string;
-  personnel_export_contents_files: string;
-  personnel_export_contents_index: string;
-  personnel_export_contents_manifest: string;
-  personnel_export_contents_report: string;
-  personnel_export_logged: string;
-  personnel_integrity_intro: string;
   personnel_tsa_not_configured: string;
   personnel_integrity_runs: string;
   personnel_integrity_run_now: string;
@@ -105,7 +92,6 @@ export interface PersonnelTranslations {
   personnel_trigger_manual: string;
   personnel_open_file: string;
   personnel_anchors: string;
-  personnel_anchors_hint: string;
   personnel_anchors_empty: string;
   personnel_anchor_now: string;
   personnel_anchor_done: string;
@@ -121,13 +107,10 @@ export interface PersonnelTranslations {
   personnel_settings_archive: string;
   personnel_settings_saved: string;
   personnel_late_days: string;
-  personnel_late_days_hint: string;
   personnel_tsa_url: string;
-  personnel_tsa_url_hint: string;
   personnel_deletion_enabled: string;
   personnel_deletion_warning: string;
   personnel_retention_periods: string;
-  personnel_retention_periods_hint: string;
   personnel_retention_years: string;
   personnel_retention_years_invalid: string;
   personnel_retention_from: string;
@@ -149,10 +132,8 @@ export interface PersonnelTranslations {
   personnel_reason_required: string;
   personnel_upload: string;
   personnel_upload_title: string;
-  personnel_upload_hint: string;
   personnel_upload_correction: string;
   personnel_correction_title: string;
-  personnel_correction_hint: string;
   personnel_correction_of: string;
   personnel_correction_none: string;
   personnel_correction_reason: string;
@@ -170,7 +151,6 @@ export interface PersonnelTranslations {
   personnel_immutable_hint: string;
   personnel_archive_action: string;
   personnel_archived_toast: string;
-  personnel_immutable_notice: string;
   personnel_immutable: string;
   personnel_health_hidden: string;
   personnel_health_badge: string;
@@ -183,7 +163,6 @@ export interface PersonnelTranslations {
   personnel_legal_hold: string;
   personnel_legal_hold_set: string;
   personnel_legal_hold_release: string;
-  personnel_legal_hold_hint: string;
   personnel_preview: string;
   personnel_download: string;
   personnel_open_new_tab: string;
@@ -226,7 +205,6 @@ export interface PersonnelTranslations {
   personnel_category_schriftverkehr: string;
   personnel_category_sonstiges: string;
   personnel_my_file_missing: string;
-  personnel_my_file_notice: string;
   personnel_notification_intake_title: string;
   personnel_notification_intake_body: string;
   personnel_notification_missing_title: string;
@@ -283,7 +261,6 @@ export const personnelRu: PersonnelTranslations = {
   personnel_employees_empty: "Личных дел пока нет",
   personnel_employee_new: "Новое дело",
   personnel_employee_edit: "Редактировать",
-  personnel_employee_dialog_hint: "Имя и фамилия входят в имена архивных файлов. Уже сохранённые файлы при изменении не переименовываются.",
   personnel_section_person: "Личные данные",
   personnel_section_employment: "Трудовые отношения",
   personnel_section_document: "Документ",
@@ -293,7 +270,6 @@ export const personnelRu: PersonnelTranslations = {
   personnel_salutation_none: "Без обращения",
   personnel_first_name: "Имя",
   personnel_last_name: "Фамилия",
-  personnel_name_file_hint: "Как в паспорте. В именах файлов умлауты заменяются: ä → ae, ß → ss.",
   personnel_number: "Персональный номер (DATEV)",
   personnel_employment_start: "Дата приёма",
   personnel_employment_end: "Дата увольнения",
@@ -301,7 +277,6 @@ export const personnelRu: PersonnelTranslations = {
   personnel_employment_range_invalid: "Дата увольнения не может быть раньше даты приёма.",
   personnel_since: "с",
   personnel_user_link: "Аккаунт в GMED",
-  personnel_user_link_hint: "Сотрудник с привязанным аккаунтом видит своё дело в разделе «Моё личное дело» — только просмотр и скачивание.",
   personnel_no_user_link: "Не привязан",
   personnel_notes: "Заметки",
   personnel_status: "Статус",
@@ -319,20 +294,17 @@ export const personnelRu: PersonnelTranslations = {
   personnel_month_to: "По месяц",
   personnel_range_invalid: "Начальный месяц позже конечного.",
   personnel_completeness_summary: "Не хватает: {missing} · с опозданием: {late}",
-  personnel_late_rule: "«С опозданием» — документ за месяц добавлен позже чем через {days} дн. после конца месяца, документ с датой — позже чем через {days} дн. после этой даты. До этого срока месяц считается открытым.",
   personnel_cell_present: "Есть",
   personnel_cell_late: "Есть, с опозданием",
   personnel_cell_missing: "Не хватает",
   personnel_cell_open: "Срок ещё идёт",
   personnel_cell_not_employed: "Не работал(а)",
-  personnel_intake_intro: "Сюда попадают сканы со скан-станции (режим «gmed-scan --personnel») и файлы, загруженные вручную. Каждый скан нужно добавить в дело сотрудника или отклонить с причиной. (Сдать скан может и Patient Manager со скан-станции; видит очередь и распределяет сканы только CEO.)",
   personnel_intake_add: "Загрузить файлы",
   personnel_intake_uploaded: "Файл добавлен во входящие",
   personnel_intake_uploaded_many: "Добавлено файлов: {count}",
   personnel_import_title: "Добавить документ из профиля переводчика",
   personnel_import_source: "Файл из профиля переводчика",
   personnel_import_section: "В профиле переводчика есть документы, которых нет в деле",
-  personnel_import_hint: "В дело сохраняется копия под архивным именем; документ в профиле не меняется. Каждый документ добавляется один раз.",
   personnel_import_action: "Добавить в дело",
   personnel_intake_empty: "Новых сканов нет",
   personnel_intake_assign: "Добавить в дело",
@@ -347,14 +319,7 @@ export const personnelRu: PersonnelTranslations = {
   personnel_export_include_versions: "С прежними версиями (проверяющий увидит исправления)",
   personnel_export_download: "Скачать ZIP",
   personnel_export_done: "Выгрузка сохранена: {name}",
-  personnel_export_contents_title: "Что внутри ZIP",
-  personnel_export_contents_files: "Файлы под архивными именами, по папке на сотрудника",
-  personnel_export_contents_index: "Index.csv — список документов: сотрудник, категория, период, имя файла, дата добавления, версия, SHA-256",
-  personnel_export_contents_manifest: "Manifest.sha256 — контрольные суммы всех файлов",
-  personnel_export_contents_report: "Pruefbericht.txt — результат проверки целостности и отметки времени",
-  personnel_export_logged: "Каждая выгрузка записывается в журнал.",
-  personnel_integrity_intro: "Раз в неделю система сверяет каждый файл и цепочку SHA-256. Раз в день все цепочки получают отметку времени RFC 3161 — независимое доказательство даты. (При сбое CEO получает уведомление; инцидент в реестре заводится вручную.)",
-  personnel_tsa_not_configured: "Сервис отметок времени (TSA) не настроен (сервис ещё не выбран): ежедневные отметки создаются без внешней подписи. Адрес TSA указывается в настройках.",
+  personnel_tsa_not_configured: "Сервис отметок времени (TSA) не настроен: отметки создаются без внешней подписи.",
   personnel_integrity_runs: "Проверки",
   personnel_integrity_run_now: "Проверить сейчас",
   personnel_integrity_no_runs: "Проверок ещё не было",
@@ -370,7 +335,6 @@ export const personnelRu: PersonnelTranslations = {
   personnel_trigger_manual: "вручную",
   personnel_open_file: "Открыть дело",
   personnel_anchors: "Ежедневные отметки времени",
-  personnel_anchors_hint: "Хеш всех цепочек за день. В сервис TSA уходит только хеш, без персональных данных.",
   personnel_anchors_empty: "Отметок ещё нет",
   personnel_anchor_now: "Создать отметку",
   personnel_anchor_done: "Отметка создана",
@@ -386,13 +350,10 @@ export const personnelRu: PersonnelTranslations = {
   personnel_settings_archive: "Архив",
   personnel_settings_saved: "Настройки сохранены",
   personnel_late_days: "Срок сдачи, дней после конца месяца",
-  personnel_late_days_hint: "Документ за месяц, добавленный позже этого срока после конца месяца, и документ с датой, добавленный позже этого срока после своей даты, помечаются «с опозданием». По умолчанию: 7 дней.",
   personnel_tsa_url: "Адрес сервиса отметок времени (RFC 3161)",
-  personnel_tsa_url_hint: "Если пусто, отметки времени не запрашиваются.",
   personnel_deletion_enabled: "Разрешить удаление после окончания срока хранения",
-  personnel_deletion_warning: "Не включайте, пока Steuerberater не подтвердит сроки. Удаление необратимо: в архиве остаётся только запись с хешем.",
+  personnel_deletion_warning: "Не включайте до подтверждения сроков Steuerberater: удаление необратимо.",
   personnel_retention_periods: "Сроки хранения (предложение — ждёт подтверждения Steuerberater)",
-  personnel_retention_periods_hint: "Срок считается от конца года документа или года увольнения. При изменении срока даты хранения пересчитываются.",
   personnel_retention_years: "Лет",
   personnel_retention_years_invalid: "Укажите срок от 1 до 50 лет.",
   personnel_retention_from: "Считается от",
@@ -406,7 +367,7 @@ export const personnelRu: PersonnelTranslations = {
   personnel_retention_until: "Хранить до",
   personnel_delete: "Удалить",
   personnel_delete_title: "Удалить документ",
-  personnel_delete_description: "Файл {name} будет удалён безвозвратно. В архиве останутся запись с хешем и причина.",
+  personnel_delete_description: "Файл {name} будет удалён безвозвратно.",
   personnel_deleted_toast: "Документ удалён",
   personnel_deleted: "Удалён",
   personnel_reason: "Причина",
@@ -414,10 +375,8 @@ export const personnelRu: PersonnelTranslations = {
   personnel_reason_required: "Укажите причину.",
   personnel_upload: "Загрузить документ",
   personnel_upload_title: "Загрузить документ",
-  personnel_upload_hint: "Имя файла система составит из категории, периода и имени сотрудника (схема имён, включая «_», согласуется со Steuerberater). После сохранения документ изменить нельзя.",
   personnel_upload_correction: "Исправить",
   personnel_correction_title: "Новая версия документа",
-  personnel_correction_hint: "Исправленный файл сохраняется новой версией, прежняя остаётся в истории. Укажите причину.",
   personnel_correction_of: "Заменяет документ",
   personnel_correction_none: "Нет, это новый документ",
   personnel_correction_reason: "Причина исправления",
@@ -435,7 +394,6 @@ export const personnelRu: PersonnelTranslations = {
   personnel_immutable_hint: "После сохранения файл не меняется; исправить можно только новой версией.",
   personnel_archive_action: "Сохранить в архив",
   personnel_archived_toast: "Сохранено: {name}",
-  personnel_immutable_notice: "Сохранённые документы нельзя изменить или заменить — только добавить исправленную версию с причиной. Документы за месяц, добавленные позже {days} дн. после его конца, и документы с датой (например, больничный или договор), добавленные позже {days} дн. после этой даты, помечаются «с опозданием».",
   personnel_immutable: "Неизменяемый файл",
   personnel_health_hidden: "Документы с данными о здоровье скрыты: нет прав на просмотр.",
   personnel_health_badge: "Данные о здоровье",
@@ -448,7 +406,6 @@ export const personnelRu: PersonnelTranslations = {
   personnel_legal_hold: "Запрет удаления",
   personnel_legal_hold_set: "Запретить удаление",
   personnel_legal_hold_release: "Снять запрет удаления",
-  personnel_legal_hold_hint: "Документ с запретом не удаляется и после окончания срока хранения — например, на время спора или проверки.",
   personnel_preview: "Просмотр",
   personnel_download: "Скачать",
   personnel_open_new_tab: "Открыть в новой вкладке",
@@ -491,7 +448,6 @@ export const personnelRu: PersonnelTranslations = {
   personnel_category_schriftverkehr: "Переписка",
   personnel_category_sonstiges: "Прочее",
   personnel_my_file_missing: "К вашему аккаунту не привязано личное дело.",
-  personnel_my_file_notice: "Только просмотр и скачивание; каждое открытие записывается в журнал. Если в документе ошибка, обратитесь к руководству.",
   personnel_notification_intake_title: "Личные дела: новый скан",
   personnel_notification_intake_body: "Скан ждёт распределения в личное дело.",
   personnel_notification_missing_title: "Личные дела: не хватает документов за {month}",
@@ -548,7 +504,6 @@ export const personnelDe: PersonnelTranslations = {
   personnel_employees_empty: "Noch keine Personalakten",
   personnel_employee_new: "Neue Personalakte",
   personnel_employee_edit: "Bearbeiten",
-  personnel_employee_dialog_hint: "Stammdaten der Akte. Vor- und Nachname gehen in die Archiv-Dateinamen ein; bereits archivierte Dateien werden nicht umbenannt.",
   personnel_section_person: "Person",
   personnel_section_employment: "Beschäftigung",
   personnel_section_document: "Dokument",
@@ -558,7 +513,6 @@ export const personnelDe: PersonnelTranslations = {
   personnel_salutation_none: "Ohne Anrede",
   personnel_first_name: "Vorname",
   personnel_last_name: "Nachname",
-  personnel_name_file_hint: "Wie im Ausweis schreiben; Umlaute und ß werden im Dateinamen umgeschrieben (ä → ae, ß → ss).",
   personnel_number: "Personalnummer (DATEV)",
   personnel_employment_start: "Eintritt",
   personnel_employment_end: "Austritt",
@@ -566,7 +520,6 @@ export const personnelDe: PersonnelTranslations = {
   personnel_employment_range_invalid: "Der Austritt darf nicht vor dem Eintritt liegen.",
   personnel_since: "seit",
   personnel_user_link: "GMED-Benutzerkonto",
-  personnel_user_link_hint: "Das verknüpfte Konto sieht die eigene Akte unter „Meine Personalakte“ (nur Ansehen und Herunterladen).",
   personnel_no_user_link: "Kein Benutzerkonto",
   personnel_notes: "Notizen",
   personnel_status: "Status",
@@ -584,20 +537,17 @@ export const personnelDe: PersonnelTranslations = {
   personnel_month_to: "Bis Monat",
   personnel_range_invalid: "Der Anfangsmonat liegt nach dem Endmonat.",
   personnel_completeness_summary: "Fehlend: {missing} · verspätet: {late}",
-  personnel_late_rule: "„Verspätet“: Das Monatsdokument wurde später als {days} Tage nach Monatsende archiviert, ein datiertes Dokument später als {days} Tage nach seinem Datum. Bis dahin gilt der Monat als offen.",
   personnel_cell_present: "Vorhanden, rechtzeitig",
   personnel_cell_late: "Vorhanden, verspätet",
   personnel_cell_missing: "Fehlt",
   personnel_cell_open: "Frist läuft noch",
   personnel_cell_not_employed: "Nicht beschäftigt",
-  personnel_intake_intro: "Hier landen Scans der Scan-Station (Modus „gmed-scan --personnel“) und manuell hochgeladene Dateien. Jeder Scan wird einer Personalakte zugeordnet oder mit Begründung verworfen. (Auch Patient Manager können über die Scan-Station Scans abgeben; nur der CEO sieht den Eingang und ordnet die Scans zu.)",
   personnel_intake_add: "Dateien hochladen",
   personnel_intake_uploaded: "Datei im Eingang abgelegt",
   personnel_intake_uploaded_many: "Hochgeladene Dateien: {count}",
   personnel_import_title: "Dokument aus dem Dolmetscherprofil übernehmen",
   personnel_import_source: "Datei aus dem Dolmetscherprofil",
   personnel_import_section: "Im Dolmetscherprofil liegen Dokumente, die noch nicht in der Akte sind",
-  personnel_import_hint: "Die Akte erhält eine Kopie unter dem Archivnamen; das Dokument im Profil bleibt unverändert. Jedes Dokument wird einmal übernommen.",
   personnel_import_action: "In die Akte übernehmen",
   personnel_intake_empty: "Keine Scans im Eingang",
   personnel_intake_assign: "Zuordnen",
@@ -612,14 +562,7 @@ export const personnelDe: PersonnelTranslations = {
   personnel_export_include_versions: "Frühere Versionen einschließen (Korrekturen bleiben für die Prüfung sichtbar)",
   personnel_export_download: "ZIP herunterladen",
   personnel_export_done: "Export gespeichert: {name}",
-  personnel_export_contents_title: "Inhalt des ZIP",
-  personnel_export_contents_files: "Dateien unter ihren Archivnamen, ein Ordner je Mitarbeitende(r)",
-  personnel_export_contents_index: "Index.csv: Mitarbeitende(r), Kategorie, Zeitraum, Dateiname, Archivierungsdatum, Version, SHA-256",
-  personnel_export_contents_manifest: "Manifest.sha256 zur Prüfung der Unveränderbarkeit",
-  personnel_export_contents_report: "Pruefbericht.txt: Ergebnis der Hash-Ketten-Prüfung und TSA-Zeitstempel",
-  personnel_export_logged: "Jeder Export wird im Protokoll der Personalakten vermerkt.",
-  personnel_integrity_intro: "Wöchentlich prüft das System jede Datei und die SHA-256-Kette. Täglich erhalten alle Ketten einen RFC-3161-Zeitstempel als unabhängigen Nachweis des Datums. (Bei einem Fehler wird der CEO benachrichtigt; ein Vorfall im Register wird manuell angelegt.)",
-  personnel_tsa_not_configured: "Kein Zeitstempeldienst (TSA) eingerichtet (Dienst noch nicht ausgewählt): Die täglichen Anker entstehen ohne externen Zeitstempel. TSA-Adresse in den Einstellungen hinterlegen.",
+  personnel_tsa_not_configured: "Kein Zeitstempeldienst (TSA) eingerichtet: Die Anker entstehen ohne externen Zeitstempel.",
   personnel_integrity_runs: "Integritätsprüfungen",
   personnel_integrity_run_now: "Jetzt prüfen",
   personnel_integrity_no_runs: "Noch keine Prüfung",
@@ -635,7 +578,6 @@ export const personnelDe: PersonnelTranslations = {
   personnel_trigger_manual: "manuell",
   personnel_open_file: "Akte öffnen",
   personnel_anchors: "Tägliche Zeitstempel",
-  personnel_anchors_hint: "Hash aller Ketten eines Tages; an den TSA geht nur der Hash, keine personenbezogenen Daten.",
   personnel_anchors_empty: "Noch keine Zeitstempel",
   personnel_anchor_now: "Zeitstempel erstellen",
   personnel_anchor_done: "Zeitstempel erstellt",
@@ -651,13 +593,10 @@ export const personnelDe: PersonnelTranslations = {
   personnel_settings_archive: "Archiv",
   personnel_settings_saved: "Einstellungen gespeichert",
   personnel_late_days: "Abgabefrist, Tage nach Monatsende",
-  personnel_late_days_hint: "Monatsdokumente, die später als diese Frist nach Monatsende archiviert werden, und datierte Dokumente, die später als diese Frist nach ihrem Datum archiviert werden, werden als „verspätet“ markiert. Standard: 7 Tage.",
   personnel_tsa_url: "Adresse des Zeitstempeldienstes (RFC 3161)",
-  personnel_tsa_url_hint: "Leer: Es werden keine Zeitstempel angefordert.",
   personnel_deletion_enabled: "Löschung nach Ablauf der Aufbewahrungsfristen erlauben",
-  personnel_deletion_warning: "Ausgeschaltet lassen, bis das Steuerbüro die Aufbewahrungsfristen bestätigt hat. Die Löschung ist endgültig; im Archiv bleibt nur ein Eintrag mit Hash.",
+  personnel_deletion_warning: "Erst nach Bestätigung der Fristen durch das Steuerbüro einschalten: Die Löschung ist endgültig.",
   personnel_retention_periods: "Aufbewahrungsfristen je Kategorie (Vorschlag – Bestätigung durch das Steuerbüro ausstehend)",
-  personnel_retention_periods_hint: "Die Frist läuft ab Ende des Kalenderjahres des Dokuments bzw. des Austritts. Eine Änderung berechnet das Aufbewahrungsende vorhandener Dokumente neu.",
   personnel_retention_years: "Jahre",
   personnel_retention_years_invalid: "Bitte 1 bis 50 Jahre angeben.",
   personnel_retention_from: "Fristbeginn",
@@ -671,7 +610,7 @@ export const personnelDe: PersonnelTranslations = {
   personnel_retention_until: "Aufbewahren bis",
   personnel_delete: "Löschen",
   personnel_delete_title: "Dokument nach Fristablauf löschen",
-  personnel_delete_description: "Die Datei {name} wird endgültig gelöscht. Im Archiv bleiben ein Eintrag mit Hash und die Begründung.",
+  personnel_delete_description: "Die Datei {name} wird endgültig gelöscht.",
   personnel_deleted_toast: "Dokument gelöscht",
   personnel_deleted: "Gelöscht",
   personnel_reason: "Begründung",
@@ -679,10 +618,8 @@ export const personnelDe: PersonnelTranslations = {
   personnel_reason_required: "Bitte eine Begründung angeben.",
   personnel_upload: "Dokument hochladen",
   personnel_upload_title: "Dokument in die Personalakte laden",
-  personnel_upload_hint: "Der Archiv-Dateiname entsteht automatisch aus Kategorie, Zeitraum und Name (Namensschema einschließlich „_“ wird mit dem Steuerbüro abgestimmt). Nach dem Speichern kann das Dokument nicht mehr geändert werden.",
   personnel_upload_correction: "Korrigieren (neue Version)",
   personnel_correction_title: "Korrektur: neue Version des Dokuments",
-  personnel_correction_hint: "Die korrigierte Datei wird als neue Version gespeichert; die bisherige bleibt im Archiv und in der Historie sichtbar. Eine Begründung ist Pflicht.",
   personnel_correction_of: "Korrigiert Dokument",
   personnel_correction_none: "Nein, neues Dokument",
   personnel_correction_reason: "Korrekturgrund",
@@ -700,7 +637,6 @@ export const personnelDe: PersonnelTranslations = {
   personnel_immutable_hint: "Nach der Archivierung ist die Datei unveränderbar; Korrekturen nur als neue Version.",
   personnel_archive_action: "Archivieren",
   personnel_archived_toast: "Archiviert: {name}",
-  personnel_immutable_notice: "Archivierte Dokumente können nicht geändert oder ersetzt werden. Fehler werden durch eine neue Version mit Begründung korrigiert; alle Versionen und Vorgänge bleiben im Protokoll. Monatsdokumente, die später als {days} Tage nach Monatsende archiviert werden, und datierte Dokumente (z. B. AU-Bescheinigung oder Vertrag), die später als {days} Tage nach ihrem Datum archiviert werden, gelten als verspätet.",
   personnel_immutable: "Unveränderbare Archivdatei",
   personnel_health_hidden: "Dokumente mit Gesundheitsdaten sind ausgeblendet: keine Berechtigung.",
   personnel_health_badge: "Gesundheitsdaten",
@@ -713,7 +649,6 @@ export const personnelDe: PersonnelTranslations = {
   personnel_legal_hold: "Löschsperre",
   personnel_legal_hold_set: "Löschsperre setzen",
   personnel_legal_hold_release: "Löschsperre aufheben",
-  personnel_legal_hold_hint: "Ein gesperrtes Dokument wird auch nach Fristablauf nicht gelöscht (z. B. bei Rechtsstreit oder Prüfung).",
   personnel_preview: "Ansehen",
   personnel_download: "Herunterladen",
   personnel_open_new_tab: "In neuem Tab öffnen",
@@ -756,7 +691,6 @@ export const personnelDe: PersonnelTranslations = {
   personnel_category_schriftverkehr: "Schriftverkehr",
   personnel_category_sonstiges: "Sonstiges",
   personnel_my_file_missing: "Mit Ihrem Konto ist keine Personalakte verknüpft.",
-  personnel_my_file_notice: "Nur Ansehen und Herunterladen; jeder Zugriff wird protokolliert. Ist ein Dokument fehlerhaft, wenden Sie sich an den CEO.",
   personnel_notification_intake_title: "Personalakten: neuer Scan zur Zuordnung",
   personnel_notification_intake_body: "Ein gescanntes Dokument wartet auf die Zuordnung zu einer Personalakte.",
   personnel_notification_missing_title: "Personalakten: Dokumente fehlen für {month}",

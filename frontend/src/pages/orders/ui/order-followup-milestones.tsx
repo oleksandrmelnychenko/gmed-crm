@@ -185,12 +185,6 @@ export function OrderFollowupMilestones({
       data-testid="order-followup-milestones"
     >
       <h3><SectionHeading icon={PhoneCall}>{tx("Контрольные контакты после лечения", "Nachsorgekontakte nach der Behandlung")}</SectionHeading></h3>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {tx(
-          "Статус «Запланировано» с датой засчитывается для перехода в наблюдение. Напоминание или визит можно создать сразу — дата подставлена от даты закрытия.",
-          "„Geplant“ mit Datum zählt für den Übergang in die Nachsorge. Erinnerung oder Termin lassen sich direkt anlegen – das Datum ist ab dem Abschlussdatum vorbelegt.",
-        )}
-      </p>
       <div className="mt-4 divide-y divide-border/60">
         {FOLLOWUP_MILESTONES.map((milestone) => {
           const keys = followupMilestoneKeys(milestone);

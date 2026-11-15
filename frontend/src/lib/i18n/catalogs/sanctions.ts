@@ -65,24 +65,19 @@ export interface SanctionsTranslations {
   sanctions_reason_hint: string;
   sanctions_reason_too_short: string;
   sanctions_decide_false_positive_title: string;
-  sanctions_decide_false_positive_hint: string;
   sanctions_decide_confirm_title: string;
   sanctions_decide_confirm_hint: string;
   sanctions_decided_by: string;
   sanctions_no_hits: string;
   sanctions_open_lead: string;
   sanctions_open_patient: string;
-  sanctions_country_hint: string;
   sanctions_country_none: string;
   sanctions_country_lift: string;
   sanctions_country_lift_title: string;
-  sanctions_country_lift_hint: string;
   sanctions_country_leads: string;
   sanctions_country_patients: string;
-  sanctions_country_patients_hint: string;
   sanctions_country_lift_patient: string;
   sanctions_country_lift_patient_title: string;
-  sanctions_country_lift_patient_hint: string;
   sanctions_country_revoke: string;
   sanctions_country_revoke_title: string;
   sanctions_list_title: string;
@@ -142,11 +137,9 @@ export interface SanctionsTranslations {
   // Lead risk assessment (trigger flow 2026-10-07): the tab /sanctions?tab=risk.
   sanctions_tab_risk: string;
   risk_config_title: string;
-  risk_config_hint: string;
   risk_config_version: string;
   risk_list_1: string;
   risk_list_2: string;
-  risk_lists_hint: string;
   risk_points: string;
   risk_points_list_1: string;
   risk_points_list_2: string;
@@ -155,7 +148,6 @@ export interface SanctionsTranslations {
   risk_level_3_from: string;
   risk_level_2_blocks_automatic: string;
   risk_reviewers: string;
-  risk_reviewers_hint: string;
   /** "{ceo}" active CEO accounts and "{deputies}" named deputies who may decide. */
   risk_reviewers_count: string;
   risk_reviewers_none: string;
@@ -165,7 +157,6 @@ export interface SanctionsTranslations {
   risk_config_error_points: string;
   risk_config_error_levels: string;
   risk_queue_title: string;
-  risk_queue_hint: string;
   risk_queue_empty: string;
   risk_queue_since: string;
   risk_queue_proposal: string;
@@ -236,30 +227,19 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_reason_hint: "Обязательно, минимум 10 символов. Сохраняется в журнале аудита.",
   sanctions_reason_too_short: "Укажите причину (минимум 10 символов).",
   sanctions_decide_false_positive_title: "Отметить как ложное совпадение",
-  sanctions_decide_false_positive_hint:
-    "Блокировка снимается. При изменении данных человека или записи в списке совпадение будет проверено заново.",
   sanctions_decide_confirm_title: "Подтвердить совпадение с санкционным списком",
-  sanctions_decide_confirm_hint:
-    "Окончательное решение: лид нельзя квалифицировать или конвертировать, агентство не подписывает заказ, работа по заказам и договорам блокируется. Отменить подтверждение нельзя.",
+  sanctions_decide_confirm_hint: "Подтверждение окончательно: работа с лицом блокируется.",
   sanctions_decided_by: "Решение: {name}, {date}",
   sanctions_no_hits: "Совпадений нет",
   sanctions_open_lead: "Открыть лид",
   sanctions_open_patient: "Открыть пациента",
-  sanctions_country_hint:
-    "Лиды и пациенты, у которых гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего, плательщика или получателя счёта входит в список заблокированных стран.",
   sanctions_country_none: "Нет лидов и пациентов с заблокированной страной",
   sanctions_country_lift: "Снять блокировку для лида",
   sanctions_country_lift_title: "Снять блокировку по стране для этого лида",
-  sanctions_country_lift_hint:
-    "Снятие действует только для этого лида и для стран, заблокированных сейчас. Решение и причина сохраняются в журнале аудита.",
   sanctions_country_leads: "Лиды",
   sanctions_country_patients: "Пациенты",
-  sanctions_country_patients_hint:
-    "Страна самого пациента, его связей, которые оплачивают или получают счета, и плательщиков, указанных в заказах и счетах. Блокировка удерживает подпись агентства.",
   sanctions_country_lift_patient: "Снять блокировку для пациента",
   sanctions_country_lift_patient_title: "Снять блокировку по стране для этого пациента",
-  sanctions_country_lift_patient_hint:
-    "Снятие действует только для этого пациента и для стран, заблокированных сейчас. Решение и причина сохраняются в журнале аудита.",
   sanctions_country_revoke: "Вернуть блокировку",
   sanctions_country_revoke_title: "Вернуть блокировку по стране",
   sanctions_list_title: "Санкционный список ЕС",
@@ -320,13 +300,9 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_notification_body: "Проверьте совпадение на странице санкционных проверок.",
   sanctions_tab_risk: "Оценка риска",
   risk_config_title: "Настройки оценки риска",
-  risk_config_hint:
-    "Баллы за триггеры, списки стран, пороги и границы уровней. Система только считает и показывает — решения принимают сотрудники. Изменение не понижает уже сохранённые оценки; повышение действует при следующем пересчёте.",
   risk_config_version: "Версия {version}",
   risk_list_1: "Список 1 (повышенный риск)",
   risk_list_2: "Список 2 (высокий риск)",
-  risk_lists_hint:
-    "Страна стоит только в одном списке: при добавлении в список 2 она убирается из списка 1. Страна — повод для проверки, никогда не для отказа.",
   risk_points: "Баллы за триггеры",
   risk_points_list_1: "список 1",
   risk_points_list_2: "список 2",
@@ -335,8 +311,6 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_level_3_from: "Уровень 3 от, баллов",
   risk_level_2_blocks_automatic: "На уровне 2 дополнительные вопросы задаются автоматически",
   risk_reviewers: "Проверяющие — заместители CEO",
-  risk_reviewers_hint:
-    "Каждый аккаунт CEO проверяет всегда, заместители — по назначению. Решение одного проверяющего действует сразу на любом уровне, причина обязательна.",
   risk_reviewers_count: "Сейчас решают: аккаунты CEO — {ceo}, назначенные заместители — {deputies}.",
   risk_reviewers_none: "Нет подходящих сотрудников",
   risk_config_saved: "Настройки оценки риска сохранены",
@@ -345,7 +319,6 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_config_error_points: "Баллы — целые числа от 0 до 20.",
   risk_config_error_levels: "Уровень 2 начинается раньше уровня 3 и больше 0 (целые баллы).",
   risk_queue_title: "Очередь проверки",
-  risk_queue_hint: "Обращения, которые ждут решения или сведений — сначала самые старые.",
   risk_queue_empty: "Нет обращений на проверке",
   risk_queue_since: "с {date}",
   risk_queue_proposal: "Старое предложение: {decision} — {name}, {date}",
@@ -416,30 +389,19 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_reason_hint: "Pflichtfeld, mindestens 10 Zeichen. Wird im Audit-Protokoll gespeichert.",
   sanctions_reason_too_short: "Bitte eine Begründung angeben (mindestens 10 Zeichen).",
   sanctions_decide_false_positive_title: "Als falsch positiv markieren",
-  sanctions_decide_false_positive_hint:
-    "Die Sperre wird aufgehoben. Ändern sich die Daten der Person oder der Listeneintrag, wird erneut geprüft.",
   sanctions_decide_confirm_title: "Treffer der Sanktionsliste bestätigen",
-  sanctions_decide_confirm_hint:
-    "Endgültige Entscheidung: Der Lead kann nicht qualifiziert oder konvertiert werden, die Agentur unterzeichnet keinen Auftrag, Arbeit an Aufträgen und Verträgen wird gesperrt. Die Bestätigung kann nicht zurückgenommen werden.",
+  sanctions_decide_confirm_hint: "Die Bestätigung ist endgültig: Die Arbeit mit der Person wird gesperrt.",
   sanctions_decided_by: "Entscheidung: {name}, {date}",
   sanctions_no_hits: "Keine Treffer",
   sanctions_open_lead: "Lead öffnen",
   sanctions_open_patient: "Patient öffnen",
-  sanctions_country_hint:
-    "Leads und Patienten, bei denen Staatsangehörigkeit oder Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen, des Zahlers oder des Rechnungsempfängers auf der Liste der gesperrten Länder stehen.",
   sanctions_country_none: "Keine Leads oder Patienten mit gesperrtem Land",
   sanctions_country_lift: "Sperre für diesen Lead aufheben",
   sanctions_country_lift_title: "Länder-Sperre für diesen Lead aufheben",
-  sanctions_country_lift_hint:
-    "Die Aufhebung gilt nur für diesen Lead und die jetzt gesperrten Länder. Entscheidung und Begründung werden im Audit-Protokoll gespeichert.",
   sanctions_country_leads: "Leads",
   sanctions_country_patients: "Patienten",
-  sanctions_country_patients_hint:
-    "Land des Patienten selbst, seiner Bezugspersonen, die Rechnungen zahlen oder erhalten, und der in Aufträgen und Rechnungen genannten Zahler. Die Sperre hält die Unterschrift der Agentur an.",
   sanctions_country_lift_patient: "Sperre für diesen Patienten aufheben",
   sanctions_country_lift_patient_title: "Länder-Sperre für diesen Patienten aufheben",
-  sanctions_country_lift_patient_hint:
-    "Die Aufhebung gilt nur für diesen Patienten und die jetzt gesperrten Länder. Entscheidung und Begründung werden im Audit-Protokoll gespeichert.",
   sanctions_country_revoke: "Sperre wiederherstellen",
   sanctions_country_revoke_title: "Länder-Sperre wiederherstellen",
   sanctions_list_title: "EU-Sanktionsliste",
@@ -500,13 +462,9 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_notification_body: "Bitte den Treffer auf der Seite Sanktionsprüfung prüfen.",
   sanctions_tab_risk: "Risikobewertung",
   risk_config_title: "Einstellungen der Risikobewertung",
-  risk_config_hint:
-    "Punkte je Auslöser, Länderlisten, Schwellen und Stufengrenzen. Das System rechnet und zeigt nur – entscheiden die Mitarbeitenden. Eine Änderung senkt gespeicherte Bewertungen nicht; eine Erhöhung gilt bei der nächsten Neuberechnung.",
   risk_config_version: "Version {version}",
   risk_list_1: "Liste 1 (erhöhtes Risiko)",
   risk_list_2: "Liste 2 (hohes Risiko)",
-  risk_lists_hint:
-    "Ein Land steht nur in einer Liste: Beim Hinzufügen zu Liste 2 wird es aus Liste 1 entfernt. Ein Land ist Anlass zur Prüfung, nie zur Ablehnung.",
   risk_points: "Punkte je Auslöser",
   risk_points_list_1: "Liste 1",
   risk_points_list_2: "Liste 2",
@@ -515,8 +473,6 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_level_3_from: "Stufe 3 ab Punkten",
   risk_level_2_blocks_automatic: "Auf Stufe 2 werden ergänzende Angaben automatisch abgefragt",
   risk_reviewers: "Prüfende – Vertretung des CEO",
-  risk_reviewers_hint:
-    "Jedes CEO-Konto prüft immer, Vertretungen nach Benennung. Die Entscheidung einer prüfenden Person gilt auf jeder Stufe sofort; eine Begründung ist Pflicht.",
   risk_reviewers_count: "Derzeit entscheiden: CEO-Konten – {ceo}, benannte Vertretungen – {deputies}.",
   risk_reviewers_none: "Keine geeigneten Mitarbeitenden",
   risk_config_saved: "Einstellungen der Risikobewertung gespeichert",
@@ -525,7 +481,6 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_config_error_points: "Punkte sind ganze Zahlen von 0 bis 20.",
   risk_config_error_levels: "Stufe 2 beginnt vor Stufe 3 und über 0 (ganze Punkte).",
   risk_queue_title: "Prüfwarteschlange",
-  risk_queue_hint: "Anfragen, die auf eine Entscheidung oder Angaben warten – die ältesten zuerst.",
   risk_queue_empty: "Keine Anfragen in Prüfung",
   risk_queue_since: "seit {date}",
   risk_queue_proposal: "Alter Vorschlag: {decision} – {name}, {date}",

@@ -312,7 +312,6 @@ export function ArchiveDialog({
               <FormSection
                 icon={FileText}
                 title={t.personnel_section_document}
-                hint={isCorrection ? t.personnel_correction_hint : t.personnel_upload_hint}
               >
                 {mode?.kind === "profile" ? (
                   <p className="text-xs text-muted-foreground">

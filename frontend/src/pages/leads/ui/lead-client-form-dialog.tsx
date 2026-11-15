@@ -2,7 +2,7 @@ import { Suspense, createContext, lazy, useCallback, useContext, useRef, useStat
 import { LoaderCircle, Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { StepId } from "@/pages/patient-lead/lead-request-steps";
 
@@ -96,11 +96,8 @@ export function LeadClientFormDialog({
         data-testid="lead-client-form-dialog"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3 sm:px-5">
-          <div className="min-w-0 space-y-0.5">
+          <div className="min-w-0">
             <DialogTitle>{tx("Анкета клиента", "Formular des Kunden")}</DialogTitle>
-            <DialogDescription className="text-xs">
-              {tx("Изменения сохраняются автоматически.", "Änderungen werden automatisch gespeichert.")}
-            </DialogDescription>
           </div>
           <Button
             type="button"

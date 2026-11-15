@@ -280,8 +280,8 @@ export function PatientPortalAccessDetail({
             <DialogTitle><SectionHeading icon={KeyRound}>{de ? "Neues Passwort ausgeben?" : "Выдать новый пароль?"}</SectionHeading></DialogTitle>
             <DialogDescription>
               {de
-                ? "Das bisherige Passwort funktioniert danach nicht mehr, offene Sitzungen des Patienten werden beendet."
-                : "Старый пароль перестанет работать, открытые сессии пациента будут завершены."}
+                ? "Das bisherige Passwort funktioniert danach nicht mehr."
+                : "Старый пароль перестанет работать."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -311,11 +311,11 @@ export function PatientPortalAccessDetail({
                   : "Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail»; пока передайте доступ сообщением."
                 : canReset
                   ? de
-                    ? `Der Patient erhält ein neues Passwort: Das bisherige funktioniert danach nicht mehr, offene Sitzungen des Patienten werden beendet. Die E-Mail mit Anmeldeadresse, Login und Passwort geht an ${loginEmail}.`
-                    : `Пациент получит новый пароль: старый перестанет работать, открытые сессии пациента будут завершены. Письмо с адресом входа, логином и паролем уйдёт на ${loginEmail}.`
+                    ? `Das bisherige Passwort funktioniert danach nicht mehr. E-Mail an ${loginEmail}.`
+                    : `Старый пароль перестанет работать. Письмо уйдёт на ${loginEmail}.`
                   : de
-                    ? `Der Zugang wird angelegt. Die E-Mail mit Anmeldeadresse, Login und Passwort geht an ${loginEmail}.`
-                    : `Доступ будет создан. Письмо с адресом входа, логином и паролем уйдёт на ${loginEmail}.`}
+                    ? `E-Mail an ${loginEmail}.`
+                    : `Письмо уйдёт на ${loginEmail}.`}
             </DialogDescription>
           </DialogHeader>
           {mailReady ? (

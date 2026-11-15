@@ -1326,11 +1326,7 @@ function useAdminUsersPageContent() {
                         </Button>
                       </div>
                     </>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {t.users_one_time_password_mode_hint}
-                    </p>
-                  )}
+                  ) : null}
                 </AdminFormSection>
               </AdminDialogScaffold>
           )}
@@ -1407,9 +1403,6 @@ function useAdminUsersPageContent() {
                       <option key={key} value={key}>{roleLabel(key)}</option>
                     ))}
                   </NativeComboboxSelect>
-                  {editUser?.role === "patient" ? (
-                    <p className="text-xs text-muted-foreground">{t.users_portal_role_locked}</p>
-                  ) : null}
                 </div>
               </AdminFormSection>
               <AdminFormSection icon={Monitor} title={t.users_sessions}>
@@ -1447,9 +1440,6 @@ function useAdminUsersPageContent() {
                     </>
                   ) : null}
                 </dl>
-                {editUser && isAdminUserLoginPaused(editUser) ? (
-                  <p className="text-xs text-muted-foreground">{t.users_login_paused_hint}</p>
-                ) : null}
                 <div className="flex flex-wrap justify-end gap-2">
                   {editActions?.canUnlock ? (
                     <Button
@@ -1476,11 +1466,10 @@ function useAdminUsersPageContent() {
                 </div>
               </AdminFormSection>
               <AdminFormSection icon={Fingerprint} title={t.uiText.twofactor_admin_reset}>
-                <p className="text-xs text-muted-foreground">{t.uiText.twofactor_admin_reset_hint}</p>
                 <Button
                   type="button"
                   variant="outline"
-                  className="mt-2 h-9 rounded-lg px-3.5"
+                  className="h-9 rounded-lg px-3.5"
                   disabled={euSaving || !editActions?.canResetTotp || !editUser?.totp_enrolled}
                   onClick={() => setAdminUsersField("confirmTotpReset", true)}
                 >
@@ -1488,8 +1477,7 @@ function useAdminUsersPageContent() {
                 </Button>
               </AdminFormSection>
               <AdminFormSection icon={KeyRound} title={t.users_reset_password}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs text-muted-foreground">{t.users_one_time_password_mode_hint}</p>
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button
                     type="button"
                     className="h-9 gap-1.5 rounded-lg px-3.5"

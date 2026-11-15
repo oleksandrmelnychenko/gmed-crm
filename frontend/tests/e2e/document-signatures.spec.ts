@@ -840,7 +840,6 @@ test("view-only permissions show history without mutation controls", async ({ pa
   await expect(page.getByText("Unterschriften ausstehend", { exact: true })).toBeVisible();
   for (const name of ["Zur Unterschrift senden", "Status prüfen", "Anfrage zurückziehen"]) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Skribble anmelden / verbinden", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Der Status ist sichtbar. Zum Versand werden Bearbeitungs- und Downloadrechte benötigt.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Prüfen und verbinden", exact: true })).toHaveCount(0);
   expect(fixture.submissions).toHaveLength(0);
 });

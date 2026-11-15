@@ -51,7 +51,6 @@ import {
   useContext,
   useDeferredValue,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -3489,8 +3488,6 @@ function ToggleRow({
   onChange,
   disabled,
   withDivider = true,
-  hint,
-  hintTestId,
 }: {
   id?: string;
   checked: boolean;
@@ -3498,21 +3495,16 @@ function ToggleRow({
   onChange: (checked: boolean) => void;
   disabled?: boolean;
   withDivider?: boolean;
-  /** Why the box cannot be ticked yet, under the label. */
-  hint?: string;
-  hintTestId?: string;
 }) {
-  const hintId = useId();
   return (
     <label className={cn(
       "flex min-h-10 items-center gap-2 py-2",
       disabled ? "cursor-not-allowed" : "cursor-pointer",
       withDivider && "border-b border-border/70 last:border-b-0",
     )}>
-      <input id={id} type="checkbox" aria-label={label} aria-describedby={hint ? hintId : undefined} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
+      <input id={id} type="checkbox" aria-label={label} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
       <span className="min-w-0">
         <span className="block text-sm text-foreground">{label}</span>
-        {hint ? <span id={hintId} data-testid={hintTestId} className="mt-0.5 block text-xs text-muted-foreground">{hint}</span> : null}
       </span>
     </label>
   );
@@ -9731,7 +9723,7 @@ ${serviceCommentLines.join("\n")}`
               {step1Portal.patientUpdatedAt ? (
                 <PatientUpdatedBanner at={step1Portal.patientUpdatedAt} onClose={step1Portal.dismissPatientUpdate} tx={tx} />
               ) : null}
-              {isRepeatIntake ? null : <Step1PortalSummary intake={step1Portal.intake} mode={step1Portal.mode} minor={draft ? minorEmailOptional(draft) : false} tx={tx} />}
+              {isRepeatIntake ? null : <Step1PortalSummary intake={step1Portal.intake} tx={tx} />}
               {masterOpenIssues.length > 0 && validationContext?.kind !== "master" && !masterValidationAttempted ? (
                 // The fields the stepper counts as open, named here (A-4); "Показать
                 // поля" marks each of them and leads to the first.
@@ -9824,18 +9816,14 @@ ${serviceCommentLines.join("\n")}`
                           </option>
                         ))}
                       </NativeComboboxSelect>
-                      <p className={cn(
-                        "mt-1.5 text-[11.5px] leading-tight",
-                        referrerPatientsError ? "text-destructive" : "text-muted-foreground",
-                      )}>
-                        {referrerPatientsError
-                          || (referrerPatientsLoading
-                            ? tx("Загрузка клиентов…", "Kunden werden geladen…")
-                            : tx(
-                                "Связь сохранится для статистики клиентских рекомендаций.",
-                                "Die Verknüpfung wird für die Statistik der Kundenempfehlungen gespeichert.",
-                              ))}
-                      </p>
+                      {referrerPatientsError || referrerPatientsLoading ? (
+                        <p className={cn(
+                          "mt-1.5 text-[11.5px] leading-tight",
+                          referrerPatientsError ? "text-destructive" : "text-muted-foreground",
+                        )}>
+                          {referrerPatientsError || tx("Загрузка клиентов…", "Kunden werden geladen…")}
+                        </p>
+                      ) : null}
                     </Field>
                   ) : null}
                   {draft.discoverySource === "other" ? (
@@ -9989,7 +9977,6 @@ ${serviceCommentLines.join("\n")}`
                     aria-invalid={Boolean(visibleMasterError("email"))}
                     aria-describedby={[
                       visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : "",
-                      minorEmailOptional(draft) ? `${MASTER_FIELD_IDS.email}-minor-hint` : "",
                     ].filter(Boolean).join(" ") || undefined}
                     className={inputClass}
                     value={draft.email}
@@ -9997,20 +9984,6 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("email", event.target.value)}
                   />
                   {visibleMasterError("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
-                  {minorEmailOptional(draft) ? (
-                    // Read as the field's description, not as part of its name.
-                    <span
-                      id={`${MASTER_FIELD_IDS.email}-minor-hint`}
-                      aria-hidden="true"
-                      className="block text-[11px] leading-4 text-muted-foreground"
-                      data-testid="lead-wizard-minor-email-hint"
-                    >
-                      {tx(
-                        "Для несовершеннолетнего необязательно: у ребёнка нет своего доступа, родители получают свой",
-                        "Für Minderjährige optional: Das Kind hat keinen eigenen Zugang, die Eltern erhalten ihren",
-                      )}
-                    </span>
-                  ) : null}
                 </Field>
                 <Field
                   label={tx("Телефон", "Telefon")}
@@ -10153,12 +10126,6 @@ ${serviceCommentLines.join("\n")}`
                   title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
                   accessory={(
                     <div className="flex items-center gap-1.5">
-                      <InfoHint label={tx("О представителе ребёнка", "Zur Vertretung des Kindes")}>
-                        {tx(
-                          "Для ребёнка контакт и электронную подпись оформляет мать, отец или законный представитель. Можно выбрать существующего пациента или внести данные вручную.",
-                          "Bei Minderjährigen werden Kontakt und elektronische Unterschrift durch einen Elternteil oder gesetzlichen Vertreter angegeben. Eine bestehende Patientenakte kann verknüpft oder der Kontakt manuell erfasst werden.",
-                        )}
-                      </InfoHint>
                       <Button type="button" size="sm" variant="default" onClick={() => openNewTrustedContact(true)}>
                         <Plus aria-hidden="true" className="size-3.5" />
                         {tx("Добавить", "Hinzufügen")}
@@ -11040,20 +11007,17 @@ ${serviceCommentLines.join("\n")}`
                 >
                 {/* For a minor the child's consent form carries the release (owner decision 2026-10-12);
                     the adult form in the child's name is refused (QA 2026-10-12, A2-06). */}
-                <StatusChip tone="info" className="wizard-notice w-fit max-w-full items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-wizard-confidentiality-release-note">
-                  <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                  <span>
-                  {isMinor(draft.birthDate, new Date())
-                    ? tx(
-                      "Для несовершеннолетнего освобождение от медицинской тайны входит в согласие для ребёнка ниже: его подписывают родители или опекун.",
-                      "Bei Minderjährigen ist die Schweigepflichtsentbindung Teil der Einverständniserklärung für das Kind unten; sie unterschreiben die Sorgeberechtigten bzw. der Vormund.",
-                    )
-                    : tx(
-                      "Разрешение лечащим врачам и медицинским учреждениям раскрывать сведения, составляющие медицинскую тайну.",
-                      "Entbindung der behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
-                    )}
-                  </span>
-                </StatusChip>
+                {isMinor(draft.birthDate, new Date()) ? (
+                  <StatusChip tone="info" className="wizard-notice w-fit max-w-full items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-wizard-confidentiality-release-note">
+                    <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                    <span>
+                      {tx(
+                        "Для несовершеннолетнего освобождение от медицинской тайны входит в согласие для ребёнка ниже: его подписывают родители или опекун.",
+                        "Bei Minderjährigen ist die Schweigepflichtsentbindung Teil der Einverständniserklärung für das Kind unten; sie unterschreiben die Sorgeberechtigten bzw. der Vormund.",
+                      )}
+                    </span>
+                  </StatusChip>
+                ) : null}
                 <WizardDocumentRows
                   documents={wizardDocuments.confidentiality_release}
                   complianceKind="confidentiality_release"
@@ -11100,7 +11064,7 @@ ${serviceCommentLines.join("\n")}`
                       itself records only a consent obtained outside the cabinet (paper). */}
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={privacyConsentToggleLabel(cabinetConsents, tx)} />
                   {/* Sales cannot change the Art. 9 consent (server 403), and is told who does (QA 2026-11-01). */}
-                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare || lead?.medical_fields_hidden === true} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={healthcareConsentToggleLabel(cabinetConsents, tx)} hint={lead?.medical_fields_hidden === true && !healthcareConsentGiven ? tx("Отмечает менеджер пациента или клиент в кабинете.", "Tragen das Patientenmanagement oder der Kunde im Portal ein.") : undefined} hintTestId="lead-wizard-healthcare-consent-hint" />
+                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare || lead?.medical_fields_hidden === true} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={healthcareConsentToggleLabel(cabinetConsents, tx)} />
                   {/* A consent staff recorded in the client's form names that way, never the
                       cabinet nor paper (owner 2026-10-30). */}
                   {cabinetConsentsNote(cabinetConsents, tx) ? (
@@ -12191,8 +12155,8 @@ ${serviceCommentLines.join("\n")}`
                             <CircleAlert aria-hidden="true" className="mt-0.5" />
                             <span className="min-w-0 leading-5">
                               {tx(
-                                "Сначала создайте документ заказа. Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра.",
-                                "Erstellen Sie zuerst den Einzelauftrag. Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars.",
+                                "Сначала создайте документ заказа.",
+                                "Erstellen Sie zuerst den Einzelauftrag.",
                               )}
                               <button
                                 type="button"
@@ -12203,7 +12167,7 @@ ${serviceCommentLines.join("\n")}`
                               </button>
                             </span>
                           </StatusChip>
-                        ) : (
+                        ) : demoSignatureChecks.includes("order_signed_patient") || manualOnly || signedPatient ? (
                         <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
                           <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                           {demoSignatureChecks.includes("order_signed_patient")
@@ -12213,14 +12177,9 @@ ${serviceCommentLines.join("\n")}`
                                 "Отмечено вручную, подписанный документ заказа отсутствует. Отметка продолжает действовать; загрузите скан подписанного экземпляра.",
                                 "Manuell markiert, kein unterschriebener Einzelauftrag vorhanden. Die Markierung zählt weiterhin; laden Sie den Scan des unterschriebenen Exemplars hoch.",
                               )
-                            : signedPatient
-                              ? tx("По подписанному документу заказа.", "Laut unterschriebenem Einzelauftrag.")
-                              : tx(
-                                    "Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра («Подписано на бумаге»). Тестовая подпись (DEMO) подписью заказа не считается.",
-                                    "Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“). Eine Testunterschrift (DEMO) gilt nicht als Auftragsunterschrift.",
-                                  )}
+                            : tx("По подписанному документу заказа.", "Laut unterschriebenem Einzelauftrag.")}
                         </p>
-                        )}
+                        ) : null}
                         {signedVersionNote ? (
                           <p
                             data-testid="lead-order-signed-version"
@@ -12368,20 +12327,18 @@ ${serviceCommentLines.join("\n")}`
                       >
                         <Trash2 aria-hidden="true" className="size-4" />
                       </Button>
-                      <StatusChip tone="neutral" className="mb-0.5 max-w-full whitespace-normal">
-                        <Info aria-hidden="true" />
-                        <span>
-                        {tx(
-                          "Будет добавлено последней строкой сметы без НДС и войдёт в сумму заказа.",
-                          "Wird als letzte Position des Kostenvoranschlags ohne MwSt. ausgewiesen und zählt zur Auftragssumme.",
-                        )}
-                        {/* The same as the confirmation before the save says (QA F-C3). */}
-                        {signedPatient ? ` ${tx(
-                          "Заказ уже подписан клиентом: изменение суммы сбросит подпись клиента и подтверждение GMED.",
-                          "Der Kunde hat den Auftrag bereits unterschrieben: Eine Änderung des Betrags setzt die Unterschrift des Kunden und die Bestätigung durch GMED zurück.",
-                        )}` : null}
-                        </span>
-                      </StatusChip>
+                      {/* The same as the confirmation before the save says (QA F-C3). */}
+                      {signedPatient ? (
+                        <StatusChip tone="neutral" className="mb-0.5 max-w-full whitespace-normal">
+                          <Info aria-hidden="true" />
+                          <span>
+                          {tx(
+                            "Заказ уже подписан клиентом: изменение суммы сбросит подпись клиента и подтверждение GMED.",
+                            "Der Kunde hat den Auftrag bereits unterschrieben: Eine Änderung des Betrags setzt die Unterschrift des Kunden und die Bestätigung durch GMED zurück.",
+                          )}
+                          </span>
+                        </StatusChip>
+                      ) : null}
                     </div>
                   ) : (
                     <Button
@@ -12577,18 +12534,10 @@ ${serviceCommentLines.join("\n")}`
                       </div>
                     ) : null}
                   </div>
-                  {estimateStep === "sign" || estimateStep === "needs_document" ? (
+                  {estimateStep === "needs_document" ? (
                     <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground" data-testid="lead-wizard-estimate-signature-hint">
                       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                      {estimateStep === "sign"
-                        ? tx(
-                            "Смета подтверждается подписью клиента: завершённое электронное подписание пакета или скан подписанного экземпляра («Смета подписана на бумаге»).",
-                            "Der Kostenvoranschlag wird durch die Unterschrift des Kunden angenommen: abgeschlossene elektronische Paketunterzeichnung oder Scan des unterschriebenen Exemplars („Kostenvoranschlag auf Papier unterschrieben“).",
-                          )
-                        : tx(
-                            "Сначала создайте документ сметы к заказу: смета подтверждается подписью клиента на нём — электронно или сканом подписанного экземпляра.",
-                            "Erstellen Sie zuerst den Kostenvoranschlag zum Einzelauftrag: Er wird durch die Unterschrift des Kunden darauf angenommen – elektronisch oder per Scan des unterschriebenen Exemplars.",
-                          )}
+                      {tx("Сначала создайте документ сметы к заказу.", "Erstellen Sie zuerst den Kostenvoranschlag zum Einzelauftrag.")}
                     </p>
                   ) : null}
 
@@ -12762,11 +12711,6 @@ ${serviceCommentLines.join("\n")}`
               {patientDocumentReview}
               {patientContractReview}
               <Section icon={isRepeatIntake ? CircleCheckBig : ClipboardPlus} title={isRepeatIntake ? tx("Завершение обращения", "Anfrage abschließen") : tx("Создание пациента", "Patient anlegen")}>
-                <p className="max-w-3xl text-sm text-muted-foreground">
-                  {isRepeatIntake
-                    ? tx("Проверьте все этапы. После подтверждения обращение и заказ будут связаны с существующей карточкой пациента.", "Prüfen Sie alle Schritte. Nach der Bestätigung werden Anfrage und Auftrag der bestehenden Patientenakte zugeordnet.")
-                    : tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
-                </p>
                 <div className="wizard-review-list">
                   {/* The wizard's own steps: the server knows no "order" step
                       and its "service" readiness is the order step's specialties. */}
@@ -12859,11 +12803,11 @@ ${serviceCommentLines.join("\n")}`
                 />
                 <span className="text-sm leading-5 text-foreground">
                   {isRepeatIntake ? tx(
-                    "Я проверил данные повторного обращения. Документы, медицинские данные и заказ будут связаны с существующей карточкой пациента.",
-                    "Ich habe die erneute Anfrage geprüft. Unterlagen, medizinische Daten und Auftrag werden der bestehenden Patientenakte zugeordnet.",
+                    "Я проверил данные повторного обращения.",
+                    "Ich habe die erneute Anfrage geprüft.",
                   ) : tx(
-                    "Я проверил данные обращения и подтверждаю, что пациента можно создать. Данные, документы, медицинская характеристика, услуги и заказ будут перенесены в карточку пациента.",
-                    "Ich habe die Angaben geprüft und bestätige, dass der Patient angelegt werden kann. Daten, Dokumente, medizinische Merkmale, Leistungen und Auftrag werden in die Patientenakte übernommen.",
+                    "Я проверил данные обращения и подтверждаю, что пациента можно создать.",
+                    "Ich habe die Angaben geprüft und bestätige, dass der Patient angelegt werden kann.",
                   )}
                 </span>
               </label>
@@ -13279,24 +13223,12 @@ ${serviceCommentLines.join("\n")}`
                   />
                 )}
               >
-                <p className="text-xs leading-5 text-muted-foreground">
-                  {trustedContactEditorGuardian
-                    ? tx(
-                        "Мать, отец или законный представитель ребёнка: получает свой доступ к заявке и подписывает за ребёнка.",
-                        "Mutter, Vater oder gesetzliche Vertretung des Kindes: erhält einen eigenen Zugang zur Anfrage und unterschreibt für das Kind.",
-                      )
-                    : tx(
-                        "Контакт будет сохранён в обращении и перенесён в карточку пациента при конвертации.",
-                        "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
-                      )}
-                </p>
                 <AdminFormSection icon={ContactRound} title={tx("Данные представителя", "Angaben zur Person")} className="trusted-contact-person-section">
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 [&>div]:min-w-0">
                   <Field
                     className="min-w-0"
                     label={tx("Выбрать из пациентов или лидов", "Aus Patienten oder Leads auswählen")}
                     htmlFor="trusted-contact-candidate"
-                    note={<InfoHint label={tx("О выборе человека", "Zur Personenauswahl")}>{tx("Данные выбранного человека заполнятся автоматически. Доступ к заявке выдаётся отдельно.", "Die Angaben der ausgewählten Person werden übernommen. Der Zugang zur Anfrage wird separat vergeben.")}</InfoHint>}
                   >
                     <NativeComboboxSelect
                       id="trusted-contact-candidate"
@@ -13451,12 +13383,6 @@ ${serviceCommentLines.join("\n")}`
                           <option key={role} value={role}>{parentBillingRoleLabel(role, tx)}</option>
                         ))}
                       </NativeComboboxSelect>
-                      <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-billing-role-hint">
-                        {tx(
-                          "Получатель счёта и плательщик заявки — по одному. По санкционным спискам проверяются все законные представители; получатель счёта и плательщик ещё и учитываются в триггерах риска.",
-                          "Rechnungsempfänger und Zahler gibt es je einmal pro Anfrage. Alle gesetzlichen Vertreter werden gegen die Sanktionslisten geprüft; Rechnungsempfänger und Zahler zählen zusätzlich für die Risikotrigger.",
-                        )}
-                      </p>
                     </Field>
                   ) : null}
                   {/* `htmlFor`: inside a wrapping <label> a click on the day opened the calendar instead of the typing field. */}
@@ -13505,12 +13431,12 @@ ${serviceCommentLines.join("\n")}`
                           <p id="trusted-contact-address-cabinet" className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-address-cabinet">
                             {fromCabinet
                               ? tx(
-                                  "Из кабинета: так адрес стоит в анкете GwG и в документах. Исправить его можно в блоке «Адрес и данные для анкеты GwG» ниже.",
-                                  "Aus dem Kundenkabinett: so steht sie im GwG-Bogen und in den Unterlagen. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
+                                  "Из кабинета. Исправить можно в блоке «Адрес и данные для анкеты GwG» ниже.",
+                                  "Aus dem Kundenkabinett. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
                                 )
                               : tx(
-                                  "Внесено сотрудниками GMED: так адрес стоит в анкете GwG и в документах. Исправить его можно в блоке «Адрес и данные для анкеты GwG» ниже.",
-                                  "Von GMED erfasst: so steht sie im GwG-Bogen und in den Unterlagen. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
+                                  "Внесено сотрудниками GMED. Исправить можно в блоке «Адрес и данные для анкеты GwG» ниже.",
+                                  "Von GMED erfasst. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
                                 )}
                           </p>
                         ) : null}
@@ -13527,12 +13453,6 @@ ${serviceCommentLines.join("\n")}`
                   <legend className="sr-only">
                     {tx("Объём информации (для формы согласия)", "Umfang der Auskunft (für die Einverständniserklärung)")}
                   </legend>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {tx(
-                      "Печатается в форме согласия рядом с этим лицом, если клиент не выбрал получателей сам в кабинете. Выбор клиента всегда важнее.",
-                      "Wird in der Einverständniserklärung neben dieser Person gedruckt, wenn der Kunde im Kundenkabinett keine Empfänger selbst gewählt hat. Die Wahl des Kunden geht immer vor.",
-                    )}
-                  </p>
                   <div className="grid gap-x-3 sm:grid-cols-2">
                   {CONSENT_RECIPIENT_SCOPES.map((code) => (
                     <ToggleRow
@@ -14212,8 +14132,8 @@ ${serviceCommentLines.join("\n")}`
           `„${trustedContactRemoval?.name ?? ""}“ aus der Anfrage entfernen?`,
         )}
         description={tx(
-          "Контакт и его данные представителя будут удалены из обращения. Доступ к этой заявке будет отозван. Если контакт был получателем счёта или плательщиком, это снимется, и другой родитель укажет их заново. Аккаунт, доступ к другим детям и сохранённые документы останутся.",
-          "Der Kontakt und seine Vertretungsdaten werden aus der Anfrage entfernt. Der Zugang zu dieser Anfrage wird widerrufen. War der Kontakt Rechnungsempfänger oder Zahler, entfällt das, und der andere Elternteil gibt es neu an. Das Konto, der Zugang zu anderen Kindern und gespeicherte Dokumente bleiben erhalten.",
+          "Доступ этого контакта к заявке будет отозван.",
+          "Der Zugang dieses Kontakts zur Anfrage wird widerrufen.",
         )}
         confirmLabel={tx("Удалить", "Entfernen")}
         cancelLabel={tx("Отмена", "Abbrechen")}
@@ -14232,8 +14152,8 @@ ${serviceCommentLines.join("\n")}`
           `GwG-Angaben von „${gwgDataRemoval?.name ?? ""}“ entfernen?`,
         )}
         description={tx(
-          "Сведения, внесённые в кабинете (адрес, гражданство, документ), и привязка загруженных файлов будут удалены. Сам контакт и документы останутся.",
-          "Die im Portal erfassten Angaben (Anschrift, Staatsangehörigkeit, Ausweis) und die Zuordnung der hochgeladenen Dateien werden gelöscht. Der Kontakt und die Dokumente bleiben erhalten.",
+          "Сам контакт и документы останутся.",
+          "Der Kontakt und die Dokumente bleiben erhalten.",
         )}
         confirmLabel={tx("Убрать данные GwG", "GwG-Angaben entfernen")}
         cancelLabel={tx("Отмена", "Abbrechen")}
@@ -14270,12 +14190,6 @@ ${serviceCommentLines.join("\n")}`
         <DialogContent className="max-w-md" data-testid="lead-not-qualified-dialog">
           <DialogHeader>
             <DialogTitle>{tx("Обращение не подходит?", "Lead nicht geeignet?")}</DialogTitle>
-            <DialogDescription>
-              {tx(
-                "Обращение получит статус «Не подходит». Причина сохранится и будет указана при архивировании.",
-                "Der Lead erhält den Status „Nicht geeignet“. Der Grund wird gespeichert und beim Archivieren übernommen.",
-              )}
-            </DialogDescription>
           </DialogHeader>
           {notQualifiedReason ? (
             <div className="space-y-3">
@@ -14344,17 +14258,11 @@ ${serviceCommentLines.join("\n")}`
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{tx("Переместить обращение в архив?", "Lead archivieren?")}</DialogTitle>
-            <DialogDescription>
-              {tx(
-                "Обращение исчезнет из активного списка, но останется доступным в архиве.",
-                "Der Lead wird aus der aktiven Liste entfernt und bleibt im Archiv verfügbar.",
-              )}
-              {leadFailureReasonLabel(lead?.failed_outcome?.reason, tx) ? (
-                <span className="mt-2 block" data-testid="lead-archive-reason">
-                  {`${tx("Причина", "Grund")}: ${leadFailureReasonLabel(lead?.failed_outcome?.reason, tx)}`}
-                </span>
-              ) : null}
-            </DialogDescription>
+            {leadFailureReasonLabel(lead?.failed_outcome?.reason, tx) ? (
+              <DialogDescription data-testid="lead-archive-reason">
+                {`${tx("Причина", "Grund")}: ${leadFailureReasonLabel(lead?.failed_outcome?.reason, tx)}`}
+              </DialogDescription>
+            ) : null}
           </DialogHeader>
           <DialogFooter>
             <Button

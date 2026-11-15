@@ -137,7 +137,6 @@ export function OwnInterpreterReportsPanel({
         title={t.appointments_own_reports_title}
         accessory={reports ? <CountBadge>{reports.length}</CountBadge> : null}
       >
-        <p className="text-sm text-muted-foreground">{t.appointments_own_reports_hint}</p>
         {loadError ? (
           <Banner tone="error">{t.appointments_own_reports_load_error}</Banner>
         ) : reports === null ? (

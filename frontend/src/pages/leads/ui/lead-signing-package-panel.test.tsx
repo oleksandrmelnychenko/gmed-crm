@@ -43,7 +43,6 @@ describe("lead signing package source", () => {
     const html = render(document("contract-v1", false), document("order-v1", false));
     expect(html).toContain('data-document-signature-id="contract-v1"');
     expect(html).toContain('data-signed="false"');
-    expect(html).toContain("Проверьте состав пакета в окне подписи.");
   });
 
   it("starts from a new unsigned order when the current contract is already signed", () => {
@@ -115,7 +114,6 @@ for (const lang of ["ru", "de"]) {
       const html = render(contract, document("new-order", false), true);
       expect(html).toContain(lang === "ru" ? "Рамочный договор: подписан на бумаге" : "Rahmenvertrag: auf Papier unterzeichnet");
       expect(html).toContain(lang === "ru" ? "Заказ: не подписан" : "Auftrag: nicht unterzeichnet");
-      expect(html).toContain(lang === "ru" ? "Проверьте состав пакета в окне подписи." : "Prüfen Sie den Paketinhalt im Unterschriftsfenster.");
       expect(html).toContain('data-document-signature-id="new-order"');
       expect(html).not.toMatch(/DSGVO|анкета|Patientenformular/);
     });

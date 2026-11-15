@@ -68,7 +68,6 @@ export function InternalNoteEditor({
   return (
     <div className="space-y-2.5" data-testid={testId}>
       <h2><SectionHeading icon={Lock}>{t.finance_internal_note}</SectionHeading></h2>
-      <p className="text-xs leading-5 text-muted-foreground">{t.finance_internal_note_hint}</p>
       {canEdit ? (
         <>
           <textarea

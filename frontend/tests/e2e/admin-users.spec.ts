@@ -194,7 +194,7 @@ test("IT admin creates a user with a one-time password that is shown once", asyn
   const panel = sheet.getByTestId("one-time-password-panel");
   await expect(panel).toBeVisible();
   await expect(sheet.getByTestId("one-time-password")).toHaveText(ONE_TIME_PASSWORD);
-  await expect(panel).toContainText("Показывается только сейчас");
+  await expect(panel).toContainText("показывается только сейчас");
   await sheet.getByRole("button", { name: "Скопировать", exact: true }).click();
   await expect(sheet.getByRole("button", { name: "Скопировано", exact: true })).toBeVisible();
 

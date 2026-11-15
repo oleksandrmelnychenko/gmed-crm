@@ -352,7 +352,7 @@ export function HitCard({
         icon={Scale}
         open={decision !== null}
         title={decision === "confirmed" ? t.sanctions_decide_confirm_title : t.sanctions_decide_false_positive_title}
-        description={decision === "confirmed" ? t.sanctions_decide_confirm_hint : t.sanctions_decide_false_positive_hint}
+        description={decision === "confirmed" ? t.sanctions_decide_confirm_hint : undefined}
         confirmLabel={decision === "confirmed" ? t.sanctions_button_confirm : t.sanctions_button_false_positive}
         destructive={decision === "confirmed"}
         onConfirm={async (reason) => {
@@ -556,7 +556,6 @@ function CountriesTab() {
   const liftingPatient = lifting?.kind === "patient";
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t.sanctions_country_hint}</p>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
       {leads.length === 0 && patients.length === 0 ? (
@@ -571,7 +570,6 @@ function CountriesTab() {
       {patients.length > 0 ? (
         <section className="space-y-2" aria-label={t.sanctions_country_patients}>
           <AdminSectionTitle icon={HeartPulse}>{t.sanctions_country_patients}</AdminSectionTitle>
-          <p className="text-xs text-muted-foreground">{t.sanctions_country_patients_hint}</p>
           <ul className="space-y-2">{patients.map(renderItem)}</ul>
         </section>
       ) : null}
@@ -579,7 +577,6 @@ function CountriesTab() {
         icon={ShieldCheck}
         open={lifting !== null}
         title={liftingPatient ? t.sanctions_country_lift_patient_title : t.sanctions_country_lift_title}
-        description={liftingPatient ? t.sanctions_country_lift_patient_hint : t.sanctions_country_lift_hint}
         confirmLabel={liftingPatient ? t.sanctions_country_lift_patient : t.sanctions_country_lift}
         onConfirm={async (reason) => {
           if (!lifting) return;

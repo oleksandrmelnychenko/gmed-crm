@@ -18,7 +18,6 @@ export interface AdminSystemTranslations {
   admin_system_access_locked_hint: string;
   admin_system_access_reset_title: string;
   admin_system_access_reset_body: string;
-  admin_system_access_cycle_hint: string;
   admin_system_access_reset_confirm_title: string;
   admin_system_access_reset_confirm_message: string;
   admin_system_access_reset_done: string;
@@ -50,12 +49,8 @@ export interface AdminSystemTranslations {
   cf_field_type_boolean: string;
   cf_field_type_select: string;
   cf_edit: string;
-  cf_required_hint: string;
   cf_key_hint: string;
-  cf_key_locked_hint: string;
-  cf_options_hint: string;
   cf_delete_confirm: string;
-  cf_not_on_forms: string;
   cf_error_key_invalid: string;
   cf_error_key_exists: string;
   cf_error_label_invalid: string;
@@ -65,8 +60,6 @@ export interface AdminSystemTranslations {
   cf_error_options_invalid: string;
   cf_error_not_found: string;
   cf_medical: string;
-  cf_medical_hint: string;
-  cf_medical_locked_hint: string;
   cf_error_medical_unset_forbidden: string;
   notif_edit: string;
   notif_test_dry_run: string;
@@ -495,11 +488,8 @@ export const adminSystemRu: AdminSystemTranslations = {
   admin_system_access_reset_title: "Сброс",
   admin_system_access_reset_body:
     "Кнопка сброса возвращает все уровни к стандартной конфигурации.",
-  admin_system_access_cycle_hint:
-    "Уровень переключается по циклу: полный → маска → скрыто → условно → полный. Каждое нажатие сохраняется сразу.",
   admin_system_access_reset_confirm_title: "Сбросить матрицу доступа?",
-  admin_system_access_reset_confirm_message:
-    "Все настраиваемые уровни доступа к полям пациента для всех ролей вернутся к значениям по умолчанию. Ваши изменения матрицы будут потеряны, отменить сброс нельзя. Системные правила не меняются. Сброс записывается в журнал активности.",
+  admin_system_access_reset_confirm_message: "Все уровни доступа вернутся к значениям по умолчанию. Отменить сброс нельзя.",
   admin_system_access_reset_done: "Матрица доступа сброшена по умолчанию",
   admin_system_users_guide_create_title: "Новый пользователь",
   admin_system_users_guide_create_body:
@@ -533,14 +523,8 @@ export const adminSystemRu: AdminSystemTranslations = {
   cf_field_type_boolean: "Да/нет",
   cf_field_type_select: "Список",
   cf_edit: "Изменить поле",
-  cf_required_hint: "Поле нужно заполнить",
   cf_key_hint: "Латинские строчные буквы, цифры и «_», первая — буква, до 63 символов.",
-  cf_key_locked_hint: "Тип сущности и ключ после создания не меняются.",
-  cf_options_hint: "Только для типа «Список»: варианты через запятую.",
-  cf_delete_confirm:
-    "Удалить поле «{label}»? Оно исчезнет из списка; уже сохранённые значения останутся в базе, но показываться не будут. Ключ можно будет использовать снова.",
-  cf_not_on_forms:
-    "Поля лида и пациента показываются в карточке лида и в карточке пациента (раздел «Дополнительные поля»). Поля заказов и провайдеров пока нигде не показываются.",
+  cf_delete_confirm: "Удалить поле «{label}»? Сохранённые значения больше не будут показываться.",
   cf_error_key_invalid:
     "Ключ поля: только латинские строчные буквы, цифры и «_», первая — буква, до 63 символов.",
   cf_error_key_exists: "Поле с таким ключом для этого типа сущности уже есть.",
@@ -551,9 +535,6 @@ export const adminSystemRu: AdminSystemTranslations = {
   cf_error_options_invalid: "Каждый вариант списка — текст до 200 символов.",
   cf_error_not_found: "Поле не найдено — возможно, его уже удалили. Обновите страницу.",
   cf_medical: "Медицинское поле",
-  cf_medical_hint:
-    "Значение видят только сотрудники с доступом к медицинским данным (CEO, ассистент CEO, менеджер пациента), меняют — CEO и менеджер пациента. Продажи, консьерж, бухгалтерия и переводчики его не видят.",
-  cf_medical_locked_hint: "Снять отметку может только CEO.",
   cf_error_medical_unset_forbidden: "Снять отметку «Медицинское поле» может только CEO.",
   notif_edit: "Изменить канал",
   notif_test_dry_run:
@@ -561,8 +542,7 @@ export const adminSystemRu: AdminSystemTranslations = {
   notif_delete_confirm: "Удалить канал «{name}»? Это нельзя отменить.",
   notif_not_used_notice:
     "Каналы пока только хранятся: GMED не отправляет через них уведомления, кнопка «Тест» ничего не отправляет.",
-  notif_secret_hint:
-    "Пароли, токены и ключи показываются как ******** и не возвращаются после сохранения. Оставьте ******** без изменений, чтобы сохранить прежнее значение.",
+  notif_secret_hint: "Оставьте ********, чтобы сохранить прежнее значение.",
   notif_saved: "Канал сохранён.",
   notif_deleted: "Канал удалён.",
   notif_error_type_invalid: "Неизвестный тип канала.",
@@ -1008,11 +988,8 @@ export const adminSystemDe: AdminSystemTranslations = {
   admin_system_access_reset_title: "Zurücksetzen",
   admin_system_access_reset_body:
     "Die Reset-Schaltfläche setzt alle Stufen auf die Standardkonfiguration zurück.",
-  admin_system_access_cycle_hint:
-    "Die Stufe wechselt im Zyklus: Voll → Maskiert → Ausgeblendet → Bedingt → Voll. Jeder Klick wird sofort gespeichert.",
   admin_system_access_reset_confirm_title: "Zugriffsmatrix zurücksetzen?",
-  admin_system_access_reset_confirm_message:
-    "Alle einstellbaren Zugriffsstufen auf Patientenfelder werden für alle Rollen auf die Standardwerte zurückgesetzt. Ihre Änderungen an der Matrix gehen verloren, das Zurücksetzen lässt sich nicht rückgängig machen. Systemregeln bleiben unverändert. Das Zurücksetzen wird im Aktivitätsprotokoll erfasst.",
+  admin_system_access_reset_confirm_message: "Alle Zugriffsstufen werden auf die Standardwerte zurückgesetzt. Das lässt sich nicht rückgängig machen.",
   admin_system_access_reset_done: "Zugriffsmatrix auf Standard zurückgesetzt",
   admin_system_users_guide_create_title: "Neuer Benutzer",
   admin_system_users_guide_create_body:
@@ -1046,14 +1023,8 @@ export const adminSystemDe: AdminSystemTranslations = {
   cf_field_type_boolean: "Ja/Nein",
   cf_field_type_select: "Auswahl",
   cf_edit: "Feld bearbeiten",
-  cf_required_hint: "Feld muss ausgefüllt werden",
   cf_key_hint: "Kleine lateinische Buchstaben, Ziffern und „_“, zuerst ein Buchstabe, höchstens 63 Zeichen.",
-  cf_key_locked_hint: "Objekttyp und Schlüssel ändern sich nach dem Anlegen nicht.",
-  cf_options_hint: "Nur für den Typ „Auswahl“: Werte durch Kommas getrennt.",
-  cf_delete_confirm:
-    "Feld „{label}“ löschen? Es verschwindet aus der Liste; bereits gespeicherte Werte bleiben in der Datenbank, werden aber nicht mehr angezeigt. Der Schlüssel kann wieder verwendet werden.",
-  cf_not_on_forms:
-    "Felder für Leads und Patienten erscheinen in der Lead-Karte und in der Patientenkarte (Bereich „Zusätzliche Felder“). Felder für Aufträge und Anbieter werden noch nirgends angezeigt.",
+  cf_delete_confirm: "Feld „{label}“ löschen? Gespeicherte Werte werden nicht mehr angezeigt.",
   cf_error_key_invalid:
     "Feldschlüssel: nur kleine lateinische Buchstaben, Ziffern und „_“, zuerst ein Buchstabe, höchstens 63 Zeichen.",
   cf_error_key_exists: "Für diesen Objekttyp gibt es bereits ein Feld mit diesem Schlüssel.",
@@ -1064,9 +1035,6 @@ export const adminSystemDe: AdminSystemTranslations = {
   cf_error_options_invalid: "Jeder Auswahlwert ist ein Text mit höchstens 200 Zeichen.",
   cf_error_not_found: "Feld nicht gefunden – vielleicht wurde es schon gelöscht. Bitte die Seite neu laden.",
   cf_medical: "Medizinisches Feld",
-  cf_medical_hint:
-    "Den Wert sehen nur Mitarbeitende mit Zugriff auf medizinische Daten (CEO, CEO-Assistenz, Patientenmanager), ändern dürfen ihn CEO und Patientenmanager. Vertrieb, Concierge, Buchhaltung und Dolmetscher sehen ihn nicht.",
-  cf_medical_locked_hint: "Die Markierung kann nur der CEO entfernen.",
   cf_error_medical_unset_forbidden: "Die Markierung „Medizinisches Feld“ kann nur der CEO entfernen.",
   notif_edit: "Kanal bearbeiten",
   notif_test_dry_run:
@@ -1074,8 +1042,7 @@ export const adminSystemDe: AdminSystemTranslations = {
   notif_delete_confirm: "Kanal „{name}“ löschen? Das kann nicht rückgängig gemacht werden.",
   notif_not_used_notice:
     "Die Kanäle werden bisher nur gespeichert: GMED versendet darüber keine Benachrichtigungen, und „Test“ sendet nichts.",
-  notif_secret_hint:
-    "Passwörter, Tokens und Schlüssel werden als ******** angezeigt und nach dem Speichern nicht mehr ausgegeben. Lassen Sie ******** unverändert, um den bisherigen Wert zu behalten.",
+  notif_secret_hint: "Lassen Sie ******** stehen, um den bisherigen Wert zu behalten.",
   notif_saved: "Kanal gespeichert.",
   notif_deleted: "Kanal gelöscht.",
   notif_error_type_invalid: "Unbekannter Kanaltyp.",

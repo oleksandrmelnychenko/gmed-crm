@@ -1133,18 +1133,9 @@ function AdminActivityViewSelector({
     { icon: KeyRound, label: t.activity_view_access, value: "access" },
     { icon: Settings2, label: t.activity_view_technical, value: "technical" },
   ];
-  const hint =
-    view === "technical"
-      ? t.activity_view_technical_hint
-      : view === "security"
-        ? t.activity_view_security_hint
-        : view === "access"
-          ? t.activity_view_access_hint
-          : t.activity_view_activity_hint;
-
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
-      <div className="min-w-0 space-y-2">
+      <div className="min-w-0">
         <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted p-1 sm:inline-flex">
           {options.map((option) => {
             const Icon = option.icon;
@@ -1163,7 +1154,6 @@ function AdminActivityViewSelector({
             );
           })}
         </div>
-        <p className="text-xs text-muted-foreground">{hint}</p>
       </div>
 
       <div className="min-w-0 rounded-lg border border-border/50 bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground lg:max-w-[300px]">

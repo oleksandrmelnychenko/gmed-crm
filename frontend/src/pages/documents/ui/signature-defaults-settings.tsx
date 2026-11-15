@@ -53,7 +53,6 @@ export function SignatureDefaultsSettings() {
     </div>
     <form onSubmit={event => void save(event)}>
       <div className="space-y-3 p-3.5">
-        <p className="text-xs leading-5 text-muted-foreground">{tx("Настройте подписантов со стороны GMED один раз — они будут подставляться в новые запросы. Клиент подставляется из связанной карточки. Перед отправкой всех подписантов можно изменить.", "Hinterlegen Sie die GMED-Vertretungen einmal für neue Signaturanfragen. Kundendaten werden aus der verknüpften Karte übernommen. Vor dem Versand können Sie alle Personen anpassen.")}</p>
         {loading ? <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</p>
           : editing ? <>
             {draft.map((signer, index) => <SignatureSignerFields key={index} signer={signer} index={index} agencyOnly disabled={busy} onChange={patch => setDraft(current => current.map((item, n) => n === index ? { ...item, ...patch } : item))} onRemove={() => setDraft(current => current.filter((_, n) => n !== index))} />)}

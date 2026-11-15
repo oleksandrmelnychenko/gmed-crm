@@ -68,7 +68,7 @@ test("concierge creates, edits and deletes own project after ownership was trans
   expect(state.writes[0].expected_updated_at).toBe("2026-09-10T10:00:00Z");
   await page.getByRole("button", { name: "Удалить проект", exact: true }).filter({ visible: true }).click();
   dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("Связанные задачи и их история сохранятся");
+  await expect(dialog).toContainText("Проект будет удалён из списка.");
   await dialog.getByRole("button", { name: "Отмена", exact: true }).click();
   expect(state.deleted).toHaveLength(0);
   await page.getByRole("button", { name: "Удалить проект", exact: true }).filter({ visible: true }).click();

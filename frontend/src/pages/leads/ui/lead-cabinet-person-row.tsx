@@ -196,8 +196,8 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
             </DialogTitle>
             {mode === "delete" ? <DialogDescription className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
               <Info aria-hidden="true" className="mt-1 size-4 shrink-0" />
-              <span>{tx("Клиент отзывает согласие на передачу информации этому человеку. Форма согласия получит новую версию.",
-                "Der Kunde widerruft die Einwilligung zur Auskunft an diese Person. Die Einverständniserklärung erhält eine neue Version.")}</span>
+              <span>{tx("Согласие на передачу информации этому человеку будет отозвано.",
+                "Die Einwilligung zur Auskunft an diese Person wird widerrufen.")}</span>
             </DialogDescription> : null}
           </DialogHeader>
           <div className="grid gap-4 rounded-xl border border-border/60 bg-card p-4 sm:grid-cols-2">

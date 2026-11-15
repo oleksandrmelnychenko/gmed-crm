@@ -15,7 +15,6 @@ import {
 const copy = {
   ru: {
     title: "Услуги и пакеты GMED",
-    hint: "Только для просмотра. Цены ведёт бухгалтерия.",
     services: "Услуги агентства",
     packages: "Пакеты услуг",
     loading: "Загрузка каталога GMED...",
@@ -26,7 +25,6 @@ const copy = {
   },
   de: {
     title: "GMED-Leistungen und -Pakete",
-    hint: "Nur zur Ansicht. Preise pflegt die Buchhaltung.",
     services: "Agenturleistungen",
     packages: "Leistungspakete",
     loading: "GMED-Katalog wird geladen...",
@@ -77,10 +75,7 @@ export function AgencyCatalogReadOnly() {
       data-testid="agency-catalog-read-only"
       className="space-y-3 rounded-lg border border-border/70 bg-card p-4 shadow-sm"
     >
-      <div className="space-y-1">
-        <SectionHeading icon={Tags}>{text.title}</SectionHeading>
-        <p className="text-xs text-muted-foreground">{text.hint}</p>
-      </div>
+      <SectionHeading icon={Tags}>{text.title}</SectionHeading>
 
       {failed ? (
         <p className="text-sm text-rose-700">{text.failed}</p>

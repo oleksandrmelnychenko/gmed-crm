@@ -109,10 +109,7 @@ function ReviewQueue({ rows, tx }: { rows: RiskReviewRow[]; tx: (ru: string, de:
   const { t } = useLang();
   return (
     <section className={cn("space-y-3 rounded-xl p-4", tokens.surface.card)} data-testid="risk-review-queue">
-      <div className="space-y-1">
-        <AdminSectionTitle icon={ClipboardList}>{t.risk_queue_title}</AdminSectionTitle>
-        <p className="text-xs text-muted-foreground">{t.risk_queue_hint}</p>
-      </div>
+      <AdminSectionTitle icon={ClipboardList}>{t.risk_queue_title}</AdminSectionTitle>
       {rows.length === 0 ? (
         <p className="py-4 text-center text-sm text-muted-foreground">{t.risk_queue_empty}</p>
       ) : (
@@ -250,9 +247,8 @@ export function RiskSettingsTab({
       {config ? (
         <section className="space-y-4" data-testid="risk-config">
           <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-4">
-            <div className="min-w-0 space-y-1">
+            <div className="min-w-0">
               <AdminSectionTitle icon={SlidersHorizontal}>{t.risk_config_title}</AdminSectionTitle>
-              <p className="text-xs leading-5 text-muted-foreground">{t.risk_config_hint}</p>
             </div>
             <span className="rounded-full border border-border/50 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground" data-testid="risk-config-version">
               {formatUiText(t.risk_config_version, { version: config.version })}
@@ -279,7 +275,6 @@ export function RiskSettingsTab({
               />
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">{t.risk_lists_hint}</p>
 
           <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-4">
             <AdminSectionTitle icon={Calculator}>{t.risk_points}</AdminSectionTitle>
@@ -359,7 +354,6 @@ export function RiskSettingsTab({
 
           <div className="space-y-3 rounded-xl border border-border/50 bg-card p-4" data-testid="risk-reviewers">
             <AdminSectionTitle icon={UserCheck}>{t.risk_reviewers}</AdminSectionTitle>
-            <p className="text-xs leading-5 text-muted-foreground">{t.risk_reviewers_hint}</p>
             {reviewerCounts ? (
               <p className="text-xs leading-5 text-foreground" data-testid="risk-reviewers-count">
                 {formatUiText(t.risk_reviewers_count, { ceo: reviewerCounts.ceo, deputies: reviewerCounts.deputies })}

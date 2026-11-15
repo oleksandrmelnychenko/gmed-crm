@@ -1124,21 +1124,13 @@ function useAdminSecurityPageContent() {
                   </p>
                 </div>
               </div>
-              {maintEnabled ? (
-                <Banner tone="warning" withIcon>
-                  {t.security_maintenance_hint}
-                </Banner>
-              ) : null}
             </SecuritySection>
 
             <div className="min-w-0 space-y-3">
-              <div className="space-y-1 px-1">
+              <div className="px-1">
                 <AdminSectionTitle icon={ChartNoAxesCombined}>
                   {t.security_audit_analytics}
                 </AdminSectionTitle>
-                <p className="max-w-4xl text-xs leading-5 text-muted-foreground">
-                  {t.security_audit_hint}
-                </p>
               </div>
               <div className="grid min-w-0 grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-5">
                 <SecurityMetric
@@ -1245,7 +1237,6 @@ function useAdminSecurityPageContent() {
             <SecuritySection
               icon={Network}
               title={t.security_ip_whitelist}
-              description={t.security_ip_add_hint}
               count={ips.length}
               actions={
                 <Button
@@ -1372,9 +1363,6 @@ function useAdminSecurityPageContent() {
         }
       >
         {maintError ? <Banner tone="error">{maintError}</Banner> : null}
-        <Banner tone="warning" withIcon>
-          {t.security_maintenance_hint}
-        </Banner>
         <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <AdminSectionTitle icon={Wrench}>{t.security_maintenance}</AdminSectionTitle>
@@ -1403,7 +1391,6 @@ function useAdminSecurityPageContent() {
         open={ipOpen}
         onOpenChange={closeIpSheet}
         title={t.security_ip_add}
-        description={t.security_ip_add_hint}
         onSubmit={addIp}
         footer={
           <>

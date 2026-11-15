@@ -680,10 +680,6 @@ function useStaffInvoicesPageContent() {
     linkedContextDescription: t.invoices_workspace_linked_context_description,
     quotes: t.invoices_workspace_quotes,
     documents: t.invoices_workspace_documents,
-    linkedPatientCardDescription: t.revenue_invoices_linked_patient_card_description,
-    linkedOrderCardDescription: t.revenue_invoices_linked_order_card_description,
-    linkedQuoteCardDescription: t.revenue_invoices_linked_quote_card_description,
-    linkedDocumentsCardDescription: t.revenue_invoices_linked_documents_card_description,
     saveInvoice: t.invoices_workspace_save_invoice,
     dunningTitle: t.invoices_workspace_dunning_title,
     dunningDescription: t.invoices_workspace_dunning_description,
@@ -751,10 +747,6 @@ function useStaffInvoicesPageContent() {
       lang === "de" ? "Verfügbare Vorauszahlung" : "Доступная предоплата",
     amountToApply: lang === "de" ? "Anzurechnender Bruttobetrag" : "Сумма зачета брутто",
     payments: lang === "de" ? "Zahlungseingänge" : "Поступления по счёту",
-    paymentsDescription:
-      lang === "de"
-        ? "Unveränderbares Journal einzelner Zahlungen und Stornierungen."
-        : "Неизменяемый журнал отдельных платежей и их сторнирований.",
     recordPayment: lang === "de" ? "Zahlung erfassen" : "Записать платёж",
     draftHiddenFromPortal:
       lang === "de" ? "Erst nach dem Ausstellen sichtbar" : "Появится после выпуска счёта",
@@ -776,10 +768,6 @@ function useStaffInvoicesPageContent() {
         ? "Rechnungsanschrift (keine Kostenübernahme)"
         : "Адрес для счёта (без принятия расходов)",
     payerRoleUnset: lang === "de" ? "Bei Ausstellung prüfen" : "Проверить при выпуске",
-    payerRoleHint:
-      lang === "de"
-        ? "Die Rechnung nennt den Leistungsempfänger. Geht sie an eine zahlende dritte Person, druckt sie den Vertragspartner zusätzlich als Leistungsempfänger. „Rechnungsanschrift“: der Vertragspartner unter einer anderen Anschrift, z. B. aus dem Patientenformular – keine Kostenübernahme."
-        : "Счёт называет получателя услуг. Если счёт выставлен стороннему плательщику, в нём дополнительно указывается сторона договора как получатель услуг. «Адрес для счёта»: сторона договора по другому адресу, например из анкеты пациента, — без принятия расходов.",
     // Owner 2026-11-10 (QA D-02): another name at that address is a third party.
     payerRoleInvoiceAddressHint:
       lang === "de"
@@ -795,10 +783,6 @@ function useStaffInvoicesPageContent() {
     payerPatientPid: lang === "de" ? "Zahler ist Patient (Patientennummer)" : "Плательщик — пациент (номер пациента)",
     payerPatient: lang === "de" ? "Zahler (Patient)" : "Плательщик (пациент)",
     serviceRecipient: lang === "de" ? "Leistungsempfänger" : "Получатель услуг",
-    recipientFrozen:
-      lang === "de"
-        ? "Mit der Ausstellung festgeschrieben"
-        : "Зафиксирован при выпуске счёта",
     releaseChecks: lang === "de" ? "Vor der Ausstellung prüfen" : "Проверить перед выпуском",
     confirmAndRelease: lang === "de" ? "Bestätigen und fortfahren" : "Подтвердить и продолжить",
     paymentEntry: lang === "de" ? "Zahlungseingang" : "Поступление",
@@ -3192,22 +3176,17 @@ function useStaffInvoicesPageContent() {
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {invoiceTypeLabel(detail.invoice_type)} · PDF
                           </p>
-                          <p
-                            className="mt-0.5 text-xs text-muted-foreground"
-                            data-testid="invoice-document-state"
-                          >
-                            {(() => {
-                              const state = invoiceDocumentState(detail);
-                              if (state === "draft_preview") return t.revenue_invoices_document_draft_preview;
-                              if (state === "archived_on_first_download") {
-                                return t.revenue_invoices_document_archived_on_first_download;
-                              }
-                              return t.revenue_invoices_document_archived.replace(
+                          {invoiceDocumentState(detail) === "archived" ? (
+                            <p
+                              className="mt-0.5 text-xs text-muted-foreground"
+                              data-testid="invoice-document-state"
+                            >
+                              {t.revenue_invoices_document_archived.replace(
                                 "{date}",
                                 formatDateTime(detail.stored_document?.generated_at, locale),
-                              );
-                            })()}
-                          </p>
+                              )}
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <Button
@@ -3348,15 +3327,6 @@ function useStaffInvoicesPageContent() {
                   }
                 >
                   <div className="space-y-4">
-                    {detail.status === "draft" && !isInvoiceReleased(detail) ? (
-                      <ShellBanner tone="warning">
-                        <span data-testid="invoice-draft-explainer">
-                          {lang === "de"
-                            ? "Entwurf ohne Nummer: Positionen, Fälligkeit, Anmerkung und Empfänger lassen sich noch ändern, der Entwurf kann gelöscht werden. „Ausstellen“ vergibt die Rechnungsnummer und das Rechnungsdatum (heute), archiviert das PDF unverändert und zeigt die Rechnung dem Patienten im Portal (sofern sichtbar) mit einer Benachrichtigung. Danach ist sie nur noch per Stornorechnung zu korrigieren."
-                            : "Черновик без номера: позиции, срок оплаты, примечание и получателя ещё можно изменить, черновик можно удалить. «Выставить» присваивает номер и дату счёта (сегодня), сохраняет PDF в архив без изменений и показывает счёт пациенту в кабинете (если он видим) с уведомлением. После этого счёт исправляется только документом сторно."}
-                        </span>
-                      </ShellBanner>
-                    ) : null}
                     <div className="grid gap-x-5 sm:grid-cols-2">
                       <SummaryLine label={t.invoices_patient} value={detail.patient_pid} />
                       <SummaryLine label={t.orders_title} value={detail.order_number ?? text.noOrder} />
@@ -3438,10 +3408,6 @@ function useStaffInvoicesPageContent() {
 
                 <SectionCard icon={CreditCard} title={text.payments}>
                   <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      {text.paymentsDescription}
-                    </p>
-
                     {detail.invoice_type === "advance" && detail.advance_settlement ? (
                       <ShellBanner tone="warning">
                         {lang === "de"
@@ -3814,9 +3780,6 @@ function useStaffInvoicesPageContent() {
 
                 <SectionCard icon={FileMinus} title={t.finance_credit_note_section_title}>
                   <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      {t.finance_credit_note_section_description}
-                    </p>
                     {access.canManage && !["draft", "cancelled"].includes(detail.status) && Number(detail.adjusted_total_gross ?? detail.total_gross) > 0 ? (
                       <CreditNoteForm
                         lines={detail.creditable_lines}
@@ -4336,25 +4299,21 @@ function useStaffInvoicesPageContent() {
                       {
                         key: "patient",
                         label: t.invoices_patient,
-                        description: text.linkedPatientCardDescription,
                         href: `/patients?patient=${detail.patient_id}`,
                       },
                       ...(detail.order_id ? [{
                         key: "order",
                         label: text.linkedOrder,
-                        description: text.linkedOrderCardDescription,
                         href: `/orders?order=${detail.order_id}&patient=${detail.patient_id}`,
                       }] : []),
                       ...(detail.order_id && detail.quote_id ? [{
                         key: "quotes",
                         label: text.quotes,
-                        description: text.linkedQuoteCardDescription,
                         href: `/contracts?quote=${detail.quote_id}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`,
                       }] : []),
                       {
                         key: "documents",
                         label: t.nav_documents,
-                        description: text.linkedDocumentsCardDescription ?? text.linkedOrderDocument,
                         href: detail.order_id
                           ? `/documents?order=${detail.order_id}&patient=${detail.patient_id}`
                           : `/documents?patient=${detail.patient_id}`,
@@ -4366,11 +4325,8 @@ function useStaffInvoicesPageContent() {
                         className="group flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-muted/20"
                         onClick={() => window.open(link.href, "_blank", "noopener,noreferrer")}
                       >
-                        <span className="min-w-0 shrink-0 truncate text-xs font-semibold text-foreground">
+                        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
                           {link.label}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
-                          {link.description}
                         </span>
                         <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground group-hover:text-orange-700" />
                       </button>
@@ -4462,9 +4418,6 @@ function useStaffInvoicesPageContent() {
                       >
                         <Pencil className="size-3.5" />
                       </Button>
-                      {isInvoiceReleased(detail) && access.canEditPayer ? (
-                        <p className="mt-2 text-xs text-muted-foreground">{text.payerLockedAfterRelease}</p>
-                      ) : null}
                       <div className="mt-5 grid gap-1.5 md:grid-cols-2">
                         <MiniMetric
                           label={t.revenue_invoices_contact_name}
@@ -4538,9 +4491,6 @@ function useStaffInvoicesPageContent() {
                             <p className="text-xs text-muted-foreground">
                               {text.serviceRecipient}: {detail.recipient.service_recipient_name}
                             </p>
-                          ) : null}
-                          {detail.recipient.frozen ? (
-                            <p className="text-xs text-muted-foreground">{text.recipientFrozen}</p>
                           ) : null}
                           {!detail.recipient.has_postal_address ? (
                             <StatusBadge tone="warning">
@@ -5185,9 +5135,7 @@ function useStaffInvoicesPageContent() {
               </DialogTitle>
               <DialogDescription>
                 {detail
-                  ? lang === "de"
-                    ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} · ${detail.patient_name ?? detail.patient_pid ?? ""} · ${invoiceTypeLabel(detail.invoice_type)} · ${formatMoney(detail.total_gross, detail.currency)}. Der Entwurf verschwindet aus der Liste; die Positionen, Leistungen und Lieferantenrechnungen, die er gebunden hat, sind wieder abrechenbar. Er hat keine Nummer, daher entsteht keine Stornorechnung; im Protokoll bleibt er erhalten.`
-                    : `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} · ${detail.patient_name ?? detail.patient_pid ?? ""} · ${invoiceTypeLabel(detail.invoice_type)} · ${formatMoney(detail.total_gross, detail.currency)}. Черновик пропадёт из списка; позиции сметы, услуги и счета поставщиков, которые он занимал, снова можно выставить. Номера у него нет, поэтому документ сторно не создаётся; в журнале изменений он остаётся.`
+                  ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} · ${detail.patient_name ?? detail.patient_pid ?? ""} · ${invoiceTypeLabel(detail.invoice_type)} · ${formatMoney(detail.total_gross, detail.currency)}`
                   : null}
               </DialogDescription>
             </DialogHeader>
@@ -5227,8 +5175,8 @@ function useStaffInvoicesPageContent() {
                 >
                   <p>
                     {lang === "de"
-                      ? `Rechnung ${detail?.invoice_number ?? ""} wirklich stornieren? Es wird eine Stornorechnung mit eigener Nummer ausgestellt; die Stornierung lässt sich nicht zurücknehmen.`
-                      : `Отменить счёт ${detail?.invoice_number ?? ""}? Будет выпущен документ сторно с собственным номером; отмену нельзя отозвать.`}
+                      ? `Rechnung ${detail?.invoice_number ?? ""} wirklich stornieren? Das lässt sich nicht zurücknehmen.`
+                      : `Отменить счёт ${detail?.invoice_number ?? ""}? Это нельзя отменить.`}
                   </p>
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button
@@ -5330,11 +5278,6 @@ function useStaffInvoicesPageContent() {
                 ) : null}
                 {detail && statusChangeReasonKind(detail, statusForm.status) ? (
                   <Field label={t.revenue_invoices_status_reason} className="lg:col-span-2">
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {statusChangeReasonKind(detail, statusForm.status) === "storno"
-                        ? t.revenue_invoices_storno_reason_hint
-                        : t.revenue_invoices_unblock_overdue_hint}
-                    </p>
                     <Input
                       className={shellInputClassName}
                       value={statusForm.reason}
@@ -5555,7 +5498,6 @@ function useStaffInvoicesPageContent() {
                     <option value="cost_bearer">{text.payerRoleCostBearer}</option>
                     <option value="invoice_address">{text.payerRoleInvoiceAddress}</option>
                   </NativeComboboxSelect>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.payerRoleHint}</p>
                   {payerForm.payerRole === "invoice_address" ? (
                     <p
                       className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200"
@@ -5644,9 +5586,6 @@ function useStaffInvoicesPageContent() {
                     disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
-                <p className="text-xs text-muted-foreground sm:col-span-2">
-                  {t.revenue_invoices_payer_address_hint}
-                </p>
                 <Field label={t.revenue_invoices_payer_address_street} className="sm:col-span-2">
                   <Input
                     className={shellInputClassName}

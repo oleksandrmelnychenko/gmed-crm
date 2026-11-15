@@ -1277,9 +1277,6 @@ function useEditAppointmentSectionContentContent({
               <span className="block font-medium text-foreground">
                 {appointmentText("appointments_interpreter_needed")}
               </span>
-              <span className="block text-xs text-muted-foreground">
-                {appointmentText("appointments_interpreter_needed_hint")}
-              </span>
             </span>
           </label>
         ) : null}
@@ -1337,11 +1334,6 @@ function useEditAppointmentSectionContentContent({
             }
             className={inputClassName}
           />
-          <span className="text-xs text-muted-foreground">
-            {lang === "de"
-              ? "Ohne Arzt und Klinik, z. B. «Präoperative Untersuchung beim Kardiologen (EKG)». Leer: Fachrichtung des Arztes."
-              : "Без врача и клиники, например «Предоперационное обследование кардиолога (ЭКГ)». Пусто — по специализации врача."}
-          </span>
         </Field>
         <Field compact label={lang === "de" ? "Hinweis für den Patienten zum Tag" : "Указание пациенту на этот день"}>
           <Input
@@ -1355,11 +1347,6 @@ function useEditAppointmentSectionContentContent({
             }
             className={inputClassName}
           />
-          <span className="text-xs text-muted-foreground">
-            {lang === "de"
-              ? "Steht fett unter dem Tag im Behandlungsplan, z. B. «Bitte nicht frühstücken!»."
-              : "Печатается жирным под днём в плане лечения, например «Пожалуйста, не завтракайте!»."}
-          </span>
         </Field>
         </section>
         {detail.recurrence_frequency ? (
@@ -1383,9 +1370,6 @@ function useEditAppointmentSectionContentContent({
                 <option value="series">{t.appointments_scope_series}</option>
               </NativeComboboxSelect>
             </Field>
-            <p className="text-xs text-muted-foreground">
-              {t.appointments_scope_following_hint}
-            </p>
             <div className="grid gap-4 @sm:grid-cols-2 @2xl:grid-cols-4">
               <Field
                 compact
@@ -1500,9 +1484,6 @@ function useEditAppointmentSectionContentContent({
                 </Field>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {t.appointments_edit_recurrence_rule_guidance}
-            </p>
           </div>
           </section>
         ) : null}

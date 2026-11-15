@@ -523,13 +523,10 @@ function InvoiceManagerDialog({
           ) : null
         }
       >
-        <p className="text-xs leading-5 text-muted-foreground">
-          {l("patients_track_sent_reminders_and_escalate_overdue_invoices")}
-        </p>
         {canManageInvoices && dunningDeadline ? (
           // The next level waits for the previous letter's deadline (QA D2-06);
           // the CEO sends it earlier from the invoice card, with a reason.
-          <p id="patient-dunning-deadline" className="mt-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+          <p id="patient-dunning-deadline" className="text-xs leading-5 text-amber-800 dark:text-amber-200">
             {dunningDeadlineHint(dunningDeadline, lang, false)}
           </p>
         ) : null}

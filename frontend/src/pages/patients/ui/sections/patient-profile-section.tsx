@@ -474,14 +474,12 @@ function PatientEmergencyContactSummary({
 function ProfileActionCard({
   icon,
   title,
-  description,
   disabled = false,
   busy = false,
   onClick,
 }: {
   icon: LucideIcon;
   title: ReactNode;
-  description: ReactNode;
   disabled?: boolean;
   busy?: boolean;
   onClick: () => void;
@@ -494,10 +492,7 @@ function ProfileActionCard({
       onClick={onClick}
     >
       <SectionHeading icon={icon}>{title}</SectionHeading>
-      <p className="col-start-1 row-start-2 min-w-0 text-xs leading-5 text-muted-foreground">
-        {description}
-      </p>
-      <span className="col-start-2 row-span-2 row-start-1 flex size-5 items-center justify-center text-foreground">
+      <span className="col-start-2 row-start-1 flex size-5 items-center justify-center text-foreground">
         {busy ? (
           <LoaderCircle className="size-4 animate-spin" />
         ) : (
@@ -1294,11 +1289,8 @@ function usePatientProfileTabContent({
         ) : <>
         {patientHasDemoOnboarding(detail.legal_status) ? (
           <Banner tone="warning">
-            <div data-testid="patient-demo-onboarding" className="space-y-1">
+            <div data-testid="patient-demo-onboarding">
               <p className="font-medium">{lang === "de" ? "DEV · Aufnahme mit DEMO-Unterschriften abgeschlossen" : "DEV · Оформление завершено с DEMO-подписями"}</p>
-              <p>{lang === "de"
-                ? "Bei der Patientenanlage wurden Testunterschriften angerechnet. Originale, signiertes Testpaket und Signaturbericht sind unter Dokumente verfügbar. Die rechtlichen Bestätigungen werden separat geführt."
-                : "При создании пациента зачтены тестовые подписи. Оригиналы, подписанный тестовый пакет и отчёт о подписях доступны в разделе «Документы». Юридические подтверждения учитываются отдельно."}</p>
             </div>
           </Banner>
         ) : null}
@@ -1439,7 +1431,6 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               icon={ListTodo}
               title={l("patients_create_task_for_this_patient")}
-              description={l("patients_create_internal_or_external_task_linked_to_this_patient")}
               onClick={() => window.dispatchEvent(new CustomEvent(OPEN_PATIENT_TASK_CREATOR_EVENT, { detail: { patientId: id } }))}
             />
           ) : null}
@@ -1447,7 +1438,6 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               icon={FileDown}
               title={t.patient_profile_dsgvo_export}
-              description={l("patients_generate_a_dsgvo_export_for_this_patient")}
               disabled={complianceExportBusy}
               busy={complianceExportBusy}
               onClick={() => void handleExportPatientCompliance()}
@@ -1457,7 +1447,6 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               icon={ShieldCheck}
               title={t.patient_profile_open_dsgvo_workspace}
-              description={l("patients_open_the_compliance_workspace_for_this_patient")}
               onClick={() => window.open(`/admin/compliance?patient=${id}`, "_blank", "noopener,noreferrer")}
             />
           ) : null}
@@ -1465,7 +1454,6 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               icon={FolderOpen}
               title={t.patient_profile_open_documents}
-              description={l("patients_review_documents_linked_to_this_patient")}
               onClick={() => onOpenTab("documents")}
             />
           ) : null}
@@ -1473,7 +1461,6 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               icon={FileSignature}
               title={t.patient_profile_open_contracts}
-              description={l("patients_open_this_patient_s_contracts_and_confirmations")}
               onClick={() => onOpenTab("contracts")}
             />
           ) : null}
@@ -1481,7 +1468,6 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               icon={ReceiptText}
               title={t.patient_profile_open_invoices}
-              description={l("patients_review_invoices_and_payments_for_this_patient")}
               onClick={() => onOpenTab("invoices")}
             />
           ) : null}

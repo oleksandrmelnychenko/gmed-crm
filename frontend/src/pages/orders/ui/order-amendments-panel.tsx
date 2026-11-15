@@ -402,12 +402,6 @@ export function OrderAmendmentsPanel({
               {tx("Предложить", "Vorschlagen")}
             </Button>
           </div>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            {tx(
-              "Сумма указывается с НДС. После одобрения другим сотрудником в услуги заказа добавится строка «Корректировка»: она войдёт в сумму заказа, следующее предложение (смету) и счёт. Уменьшение суммы — через изменение или отмену услуги либо кредит-ноту к счёту.",
-              "Betrag brutto angeben. Nach Genehmigung durch eine andere Person wird die Zeile „Anpassung“ den Auftragsleistungen hinzugefügt: Sie zählt zur Auftragssumme und erscheint im nächsten Angebot und in der Rechnung. Verringerungen über Änderung oder Storno der Leistung bzw. eine Gutschrift.",
-            )}
-          </p>
         </div>
       ) : null}
 

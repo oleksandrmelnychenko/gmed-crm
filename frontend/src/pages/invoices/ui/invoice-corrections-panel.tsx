@@ -66,7 +66,6 @@ export function StornoDocumentCard({ invoice }: { invoice: InvoiceItem }) {
           {t.revenue_invoices_storno_download}
         </Button>
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">{t.revenue_invoices_storno_description}</p>
       <p className="text-xs text-foreground">
         {t.revenue_invoices_status_reason}: {storno.reason}
       </p>
@@ -131,7 +130,6 @@ export function DunningBlockPanel({ invoice, canManage, onChanged }: DunningBloc
       {active?.blocked_at ? (
         <p className="text-xs text-muted-foreground">{formatDateTime(active.blocked_at, locale)}</p>
       ) : null}
-      <p className="text-xs leading-5 text-muted-foreground">{t.revenue_invoices_dunning_block_hint}</p>
       {canManage ? (
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex min-w-[240px] flex-1 flex-col gap-1.5">

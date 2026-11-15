@@ -369,7 +369,6 @@ function PatientAppointmentScheduleSection({
               checked={form.skipMedicalProviderBinding}
               disabled={Boolean(form.providerId)}
               aria-labelledby="patient-appointment-skip-provider-binding-label"
-              aria-describedby="patient-appointment-skip-provider-binding-hint"
               onChange={(event) =>
                 setForm((current) => ({
                   ...current,
@@ -378,19 +377,11 @@ function PatientAppointmentScheduleSection({
               }
               className={cn(checkboxClass, "mt-0.5")}
             />
-            <span>
-              <span
-                id="patient-appointment-skip-provider-binding-label"
-                className="block font-medium text-foreground"
-              >
-                {l("appointments_medical_provider_opt_out")}
-              </span>
-              <span
-                id="patient-appointment-skip-provider-binding-hint"
-                className="block text-xs text-muted-foreground"
-              >
-                {l("appointments_medical_provider_opt_out_hint")}
-              </span>
+            <span
+              id="patient-appointment-skip-provider-binding-label"
+              className="block font-medium text-foreground"
+            >
+              {l("appointments_medical_provider_opt_out")}
             </span>
           </div>
           {!form.providerId && !form.skipMedicalProviderBinding ? (

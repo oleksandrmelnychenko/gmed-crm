@@ -55,7 +55,6 @@ export function PatientRecipientsSection({ patientId }: { patientId: string }) {
 
   return (
     <ComplianceSection icon={Share2} title={l("recipients_title")}>
-      <p className="text-xs text-muted-foreground">{l("recipients_intro")}</p>
       {error ? <Banner tone="error">{error}</Banner> : null}
       <div className="space-y-2" data-testid="patient-recipients">
         {recipients.length === 0 ? (

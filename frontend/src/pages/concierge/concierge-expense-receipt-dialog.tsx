@@ -58,13 +58,11 @@ const copy = {
     chooseFile: "Foto oder PDF wählen",
     fileHint: "PDF, JPEG, PNG oder WEBP · maximal 25 MB",
     documentMissing: "Kein Dokument vorhanden",
-    documentMissingHint: "Die Ausgabe wird ohne Beleg zur Finanzprüfung eingereicht.",
     fileRequired: "Bitte einen Beleg auswählen.",
     fileTooLarge: "Die Datei ist leer oder größer als 25 MB.",
     fileUnsupported: "Nur PDF-, JPEG-, PNG- oder WEBP-Dateien sind erlaubt.",
     expense: "Ausgabedaten",
     vendor: "Partner oder Leistungserbringer",
-    vendorInternalHint: "Interne GMED-Benutzer können ebenfalls als Ausführende ausgewählt werden.",
     vendorPlaceholder: "Partner oder Ausführenden auswählen",
     vendorSearch: "Partner oder Ausführenden suchen",
     vendorSuggestions: "Partner und interne Benutzer",
@@ -83,7 +81,6 @@ const copy = {
     note: "Notiz (optional)",
     notePlaceholder: "Operative Angaben zum Beleg oder zur Leistung",
     consequence: "Voraussichtliche Auswirkung nach Finanzfreigabe",
-    pendingWarning: "Die Einreichung bleibt bis zur Prüfung im Status „Ausstehend“. Es wird jetzt noch kein Saldo verändert.",
     patientReceivable: "Forderung an Patient",
     afterDelivery: "wird nach Erbringung der Leistung gebucht",
     providerLiability: "Verbindlichkeit gegenüber Partner",
@@ -114,13 +111,11 @@ const copy = {
     chooseFile: "Выбрать фото или PDF",
     fileHint: "PDF, JPEG, PNG или WEBP · не более 25 МБ",
     documentMissing: "Документа нет",
-    documentMissingHint: "Расход будет отправлен на финансовую проверку без подтверждающего документа.",
     fileRequired: "Выберите подтверждающий документ.",
     fileTooLarge: "Файл пустой или превышает 25 МБ.",
     fileUnsupported: "Разрешены только PDF, JPEG, PNG и WEBP.",
     expense: "Данные расхода",
     vendor: "Партнёр или исполнитель",
-    vendorInternalHint: "Можно выбрать внутреннего пользователя GMED или указать внешнего исполнителя вручную.",
     vendorPlaceholder: "Выберите партнёра или исполнителя",
     vendorSearch: "Поиск партнёра или исполнителя",
     vendorSuggestions: "Партнёры и внутренние пользователи",
@@ -139,7 +134,6 @@ const copy = {
     note: "Комментарий (необязательно)",
     notePlaceholder: "Рабочие данные о документе или оказанной услуге",
     consequence: "Ожидаемое влияние после финансового подтверждения",
-    pendingWarning: "Заявка останется в статусе «На проверке». Сейчас баланс не изменяется.",
     patientReceivable: "К оплате пациентом",
     afterDelivery: "начисляется после оказания услуги",
     providerLiability: "Обязательство перед партнёром",
@@ -464,10 +458,7 @@ export function ConciergeExpenseReceiptDialog({
                           }
                         }}
                       />
-                      <span>
-                        <span className="block font-medium text-foreground">{labels.documentMissing}</span>
-                        <span className="mt-0.5 block text-[11px] text-muted-foreground">{labels.documentMissingHint}</span>
-                      </span>
+                      <span className="font-medium text-foreground">{labels.documentMissing}</span>
                     </label>
                     {file && previewUrl ? (
                       <div className="mt-2 overflow-hidden rounded-lg bg-muted/20">
@@ -569,7 +560,6 @@ export function ConciergeExpenseReceiptDialog({
                             }}
                           />
                         ) : null}
-                        <p className="mt-1 text-[11px] text-muted-foreground">{labels.vendorInternalHint}</p>
                       </ConciergeField>
                       <ConciergeField label={labels.expenseDate}><Input type="date" value={expenseDate} max={todayInputValue()} required onChange={(event) => setExpenseDate(event.target.value)} /></ConciergeField>
                       <ConciergeField label={labels.currency}><Input readOnly value={currency} /></ConciergeField>
@@ -597,8 +587,7 @@ export function ConciergeExpenseReceiptDialog({
                   </ConciergeProfileDialogSection>
 
                   <ConciergeProfileDialogSection icon={Scale} title={labels.consequence}>
-                    <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">{labels.pendingWarning}</p>
-                    <dl className="mt-2 divide-y divide-border/60">
+                    <dl className="divide-y divide-border/60">
                       {([
                         [labels.patientReceivable, consequence.patientReceivableGross],
                         [labels.providerLiability, consequence.providerLiabilityGross],

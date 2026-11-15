@@ -134,17 +134,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     interim: t.revenue_invoice_type_interim,
     final: t.revenue_invoice_type_final,
   };
-  const typeHints = {
-    advance: de
-      ? "Vorauszahlung in Höhe der erforderlichen Vorauszahlung des Auftrags oder für ausgewählte Positionen. Der Bruttobetrag kann später auf Folgerechnungen angerechnet werden."
-      : "Предоплата на требуемую по заказу сумму или по выбранным позициям. Сумму с НДС можно будет зачесть в следующих счетах.",
-    interim: de
-      ? "Wählen Sie die Positionen und Mengen für diese Teilrechnung aus."
-      : "Выберите позиции и количество для частичного выставления счёта.",
-    final: de
-      ? "Alle noch nicht abgerechneten Mengen sind enthalten. Für eine Teilauswahl verwenden Sie eine Zwischenrechnung."
-      : "Включён весь остаток по предложению. Для выбора отдельных позиций используйте промежуточный счёт.",
-  };
   const quantityLabel = de ? "Menge" : "Количество";
   const availableLabel = de ? "Verfügbar" : "Доступно";
   const descriptionLabel = de ? "Leistungsbeschreibung" : "Описание услуги";
@@ -200,8 +189,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 </FormField>
                 {!optionsError && !optionsBusy && !selectableQuotes.length ? (
                   <p role="status" className="text-sm text-muted-foreground">
-                    {de ? "Keine abrechenbaren Angebote für diese Auswahl. Bereits abgerechnete, abgelehnte und abgelaufene Angebote werden nicht angezeigt." : "Для текущего выбора нет доступных предложений. Уже выставленные, отклонённые и просроченные предложения скрыты."}
-                    {" "}{partlyCreditedHint(lang)}
+                    {de ? "Keine abrechenbaren Angebote für diese Auswahl." : "Для текущего выбора нет доступных предложений."}
                   </p>
                 ) : null}
                 {interimOnlyQuotes.length ? (
@@ -234,7 +222,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       onChange={(event) => onFormChange((current) => ({ ...current, dueDate: event.target.value }))} />
                   </FormField>
                 </div>
-                <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">{typeHints[form.invoiceType]}</p>
                 {final && servicesOutsideQuote.length ? (
                   <p role="status" data-testid="invoice-services-outside-quote" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
                     {de
@@ -247,11 +234,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     {transitRebilledWarning}
                   </p>
                 ) : null}
-                <p className="text-xs leading-5 text-muted-foreground" data-testid="invoice-draft-numbering-hint">
-                  {de
-                    ? "Die Rechnung wird als Entwurf ohne Nummer angelegt. Nummer und Rechnungsdatum erhält sie erst bei der Ausstellung; das Fälligkeitsdatum darf dann nicht vor dem Rechnungsdatum liegen."
-                    : "Счёт создаётся черновиком без номера. Номер и дату счёта он получает только при выпуске; срок оплаты тогда не может быть раньше даты счёта."}
-                </p>
                 </section>
 
                 {form.invoiceType === "advance" && selectedQuote && requiredPrepayment != null ? (
@@ -283,11 +265,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   <section aria-label={de ? "Anzahlung" : "Предоплата"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card" data-testid="invoice-prepayment-advance">
                     <div className="border-b border-border px-3 py-2.5">
                       <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={Banknote}>{de ? "Anzahlung" : "Предоплата"}</SectionHeading></h3>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        {de
-                          ? `Anzahlung gemäß Angebot ${selectedQuote?.quote_number ?? ""}. Die Umsatzsteuer wird wie im Angebot anteilig aufgeteilt.`
-                          : `Предоплата по предложению ${selectedQuote?.quote_number ?? ""}. НДС распределяется пропорционально позициям предложения.`}
-                      </p>
                     </div>
                     <div className="divide-y divide-border">
                       {prepaymentSplit.lines.map((line) => (
@@ -329,7 +306,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-5 py-8 text-center text-muted-foreground">
                       <FileText className="size-6" />
                       <p className="text-sm">{t.invoices_workspace_choose_quote}</p>
-                      <p className="max-w-xs text-xs leading-5">{de ? "Die Leistungen, Preise und Steuersätze werden aus dem Angebot übernommen." : "Позиции, цены и ставки НДС будут взяты из предложения."}</p>
                     </div>
                   ) : (
                     <div className="divide-y divide-border">
@@ -412,7 +388,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     maxLength={INTERNAL_NOTE_MAX_LENGTH}
                     onChange={(event) => onFormChange((current) => ({ ...current, internalNote: event.target.value }))} />
                   {/* Staff only: never printed, never in the portal (owner 2026-10-12). */}
-                  <p className="text-xs text-muted-foreground">{t.finance_internal_note_hint}</p>
                 </FormField>
                 </section>
               </fieldset>
@@ -427,14 +402,13 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       <SummaryField label={t.orders_title} value={selectedQuote.order_number} />
                       <SummaryField label={t.revenue_invoices_section_quote} value={selectedQuote.quote_number} />
                     </dl>
-                  ) : <p className="text-xs leading-5 text-muted-foreground">{de ? "Patient und Auftrag erscheinen nach der Angebotsauswahl." : "Пациент и заказ появятся после выбора предложения."}</p>}
+                  ) : null}
                   <dl className="space-y-3 border-t border-border pt-4 text-sm tabular-nums [&_dd]:whitespace-nowrap [&_dd]:font-mono">
                     {packageOverage.gross > 0 ? <div className="flex justify-between gap-3" data-testid="invoice-package-overage"><dt className="text-muted-foreground">{de ? "Darin Mehrverbrauch aus dem Tarif" : "В том числе превышение по тарифу"}</dt><dd>{money(packageOverage.gross)}</dd></div> : null}
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{de ? "Netto" : "Без НДС"}</dt><dd>{money(totals.net)}</dd></div>
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t.invoices_vat}</dt><dd>{money(totals.vat)}</dd></div>
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
-                  <p className="text-xs leading-5 text-muted-foreground">{de ? "Die Rechnung wird als Entwurf erstellt. Bereits geleistete Vorauszahlungen können nach dem Versand der Rechnung angerechnet werden." : "Счёт будет создан как черновик. Полученные предоплаты можно зачесть после отправки счёта."}</p>
                   {selectedQuote && !prepaymentSplit && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowUpRight, CheckCircle2, ChevronDown, Clock3, Info, WalletCards } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, Clock3, WalletCards } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +31,6 @@ import {
   normalizePatientPayerSummary,
   openLeadLabel,
   openRequestNote,
-  payerChangedElsewhereNote,
   payerDisplayName,
   payerInformedLabel,
   payerRelationshipLabel,
@@ -369,28 +368,14 @@ function LoadedCard({
           </ul>
         </div>
       ) : null}
-      <div className="space-y-2 px-3.5 py-2.5" data-testid={`${TEST_ID}-footer`}>
-        {source ? (
+      {source ? (
+        <div className="space-y-2 px-3.5 py-2.5" data-testid={`${TEST_ID}-footer`}>
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
             <span className="break-words">{conversionNote(source, tx)}</span>
             {canOpenLead ? <OpenLeadLink leadId={source.lead_id} onOpenLead={onOpenLead} tx={tx} /> : null}
           </p>
-        ) : null}
-        <details className="group text-xs text-muted-foreground">
-          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 [&::-webkit-details-marker]:hidden">
-            <Info className="size-3.5" aria-hidden="true" />
-            {tx("О данных плательщика", "Hinweise zu den Zahlerdaten")}
-            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
-          </summary>
-          <div className="mt-2 space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2 leading-5">
-            {identification ? <p>{tx(
-              "Отдельно от проверки удостоверения личности в правовом статусе.",
-              "Unabhängig von der Prüfung des Ausweisdokuments im Rechtsstatus.",
-            )}</p> : null}
-            <p>{payerChangedElsewhereNote(tx)}</p>
-          </div>
-        </details>
-      </div>
+        </div>
+      ) : null}
     </SummaryCard>
   );
 }

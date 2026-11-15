@@ -80,17 +80,7 @@ export function OrderInterpreterCallout({
       ? de
         ? `Ohne Dolmetscher: ${missing} Arzttermin(e). Jeder Arzttermin braucht einen Dolmetscher.`
         : `Без переводчика: ${missing} мед. приём(а). Переводчик нужен на каждом медицинском приёме.`
-      : state === "unassigned"
-      ? de
-        ? "Der Dolmetscher wird einem konkreten Termin dieses Auftrags zugewiesen."
-        : "Переводчик назначается на конкретный приём этого заказа."
-      : state === "awaiting_acceptance"
-        ? de
-          ? "Öffnen Sie den Termin, um Zuweisung und Rückmeldung des Dolmetschers zu prüfen."
-          : "Откройте приём, чтобы проверить назначение и ответ переводчика."
-        : de
-          ? "Der Termin mit dem Dolmetscher lässt sich hier öffnen."
-          : "Приём с переводчиком можно открыть отсюда.";
+      : null;
   const actionLabel =
     state === "unassigned"
       ? de ? "Termin öffnen" : "Открыть приёмы"
@@ -113,14 +103,16 @@ export function OrderInterpreterCallout({
           <p className={cn("text-[13px] font-semibold", accepted ? "text-foreground" : "text-orange-950")}>
             {title}
           </p>
-          <p
-            className={cn(
-              "mt-0.5 text-xs leading-5",
-              accepted ? "text-muted-foreground" : "text-orange-900/75",
-            )}
-          >
-            {description}
-          </p>
+          {description ? (
+            <p
+              className={cn(
+                "mt-0.5 text-xs leading-5",
+                accepted ? "text-muted-foreground" : "text-orange-900/75",
+              )}
+            >
+              {description}
+            </p>
+          ) : null}
         </div>
       </div>
       <Button

@@ -52,12 +52,6 @@ export function LeadPayerQuestionnairePreview({ state, tx }: { state: LeadPayerL
           {summary.map((row) => <PreviewFact key={row.key} label={row.label} value={row.key === "email" ? questionnaire.email ?? "" : row.value} />)}
           {method ? <PreviewFact label={tx("Способ оплаты", "Zahlungsart")} value={method.value} /> : null}
         </dl>
-        <p className="border-t border-border/50 pt-2 text-xs leading-5 text-muted-foreground">
-          {tx(
-            "Подписание документов — отдельный шаг «Договор и смета».",
-            "Die Dokumente werden separat im Schritt „Vertrag & Angebot“ unterschrieben.",
-          )}
-        </p>
       </div>
       <div className="border-t border-border/60 px-3 py-2">
       <Button

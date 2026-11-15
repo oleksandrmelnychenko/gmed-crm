@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -105,12 +104,6 @@ export function ClinicalReportPdfAction({ patientId, className }: { patientId: s
           <DialogTitle className="flex min-w-0 items-start gap-2 pr-0 text-base leading-snug sm:leading-snug">
             <SectionHeading icon={FileHeart}>{tx("Состав медицинской сводки", "Inhalt der medizinischen Zusammenfassung")}</SectionHeading>
           </DialogTitle>
-          <DialogDescription className="text-xs leading-5">
-            {tx(
-              "Выберите разделы, которые должны войти в PDF.",
-              "Wählen Sie die Abschnitte aus, die in das PDF aufgenommen werden sollen.",
-            )}
-          </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">

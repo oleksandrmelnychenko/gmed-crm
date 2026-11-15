@@ -129,7 +129,7 @@ test("resume accepts a signed open-ended contract and stops autosave after confl
   await expect(sheet.getByText("20.12.2026 – 15.01.2027", { exact: true })).toBeVisible();
   await sheet.getByRole("combobox", { name: "Рамочный договор", exact: true }).click();
   await page.getByRole("option", { name: /FC-OLD/ }).click();
-  await expect(sheet.getByText("Договор подписан и действует бессрочно, пока не расторгнут.")).toBeVisible();
+  await expect(sheet.getByText("Договор подписан.", { exact: true })).toBeVisible();
   await expect.poll(() => state.actions.length).toBe(1);
   expect(state.creates).toBe(0);
   state.failSave = true;

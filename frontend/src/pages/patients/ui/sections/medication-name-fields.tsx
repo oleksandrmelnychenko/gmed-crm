@@ -238,14 +238,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
           onChoose={(field, name) => { changeName(field, name); void commitName(field, name, true); }}
           lang={lang}
         />
-      ) : (
-        <p className="md:col-span-2 text-xs text-muted-foreground">
-          {tx(
-            "Введите названия вручную — медикамент сохранится у пациента. Подсказки из справочника названий для вашей роли не показываются.",
-            "Namen bitte manuell eingeben – das Medikament wird beim Patienten gespeichert. Vorschläge aus dem Namensverzeichnis gibt es für Ihre Rolle nicht.",
-          )}
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

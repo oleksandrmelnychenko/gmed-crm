@@ -183,11 +183,8 @@ export interface OperationsTranslations {
   staff_services_form_patient_visible_note: string;
   staff_services_form_patient_request_note: string;
   staff_services_form_patient_budget: string;
-  staff_services_patient_budget_hint: string;
-  staff_services_patient_budget_hint_concierge: string;
   staff_services_visible_to_patient: string;
   staff_services_hidden_from_patient: string;
-  staff_services_patient_request_note_hint: string;
   staff_services_form_billing_notes: string;
   staff_services_select: string;
   staff_services_optional: string;
@@ -209,7 +206,6 @@ export interface OperationsTranslations {
   orders_services_approved_label: string;
   orders_services_approved_description: string;
   orders_services_gross_description: string;
-  orders_services_section_description: string;
   orders_add_service: string;
   orders_services_empty_description: string;
   orders_approve: string;
@@ -297,7 +293,6 @@ export interface OperationsTranslations {
   lead_compliance_documents_sent: string;
   lead_compliance_signed: string;
   lead_compliance_rejected: string;
-  lead_compliance_signed_by_signature_hint: string;
   lead_compliance_signed_without_document: string;
   lead_failed_outcome: string;
   lead_failed_outcome_none: string;
@@ -360,18 +355,13 @@ export interface OperationsTranslations {
   lead_missing: string;
   lead_blocking_reasons: string;
   lead_workflow_title: string;
-  lead_workflow_description: string;
   lead_workflow_progress: string;
   lead_workflow_ready_count: string;
   lead_workflow_missing_count: string;
   lead_workflow_complete_gate_title: string;
-  lead_workflow_complete_gate_description: string;
   lead_workflow_qualify_title: string;
-  lead_workflow_qualify_description: string;
   lead_workflow_convert_title: string;
-  lead_workflow_convert_description: string;
   lead_workflow_failed_title: string;
-  lead_workflow_failed_description: string;
   lead_workflow_open_gate: string;
   lead_workflow_mark_qualified: string;
   lead_workflow_open_failed: string;
@@ -455,11 +445,9 @@ export interface OperationsTranslations {
   lead_readiness_reason_cost_assumption_terms_outdated: string;
   lead_readiness_reason_cost_assumption_unsigned: string;
   lead_section_lifecycle: string;
-  lead_lifecycle_description: string;
   lead_current_stage: string;
   lead_entered_at: string;
   lead_qualification_gate_data: string;
-  lead_qualification_gate_description: string;
   lead_full_name: string;
   lead_primary_language: string;
   lead_language_ar: string;
@@ -488,11 +476,9 @@ export interface OperationsTranslations {
   lead_promote_to_console_success: string;
   lead_console_promoted_at: string;
   lead_healthcare_consent_available: string;
-  lead_healthcare_consent_recorded_by_manager: string;
   lead_privacy_practices_accepted: string;
   lead_save_gate_data: string;
   lead_failed_resolution_title: string;
-  lead_failed_resolution_description: string;
   lead_resolution: string;
   lead_processed_at: string;
   lead_failed_from: string;
@@ -582,7 +568,6 @@ export interface OperationsTranslations {
   lead_attachments: string;
   lead_identity_documents: string;
   lead_no_files_uploaded: string;
-  lead_medical_fields_hidden: string;
   lead_attachments_medical_only: string;
   lead_select_from_queue: string;
   lead_download_attachment: string;
@@ -801,11 +786,8 @@ export const operationsRu: OperationsTranslations = {
   staff_services_form_patient_visible_note: "Заметка для пациента",
   staff_services_form_patient_request_note: "Текст пациента из запроса",
   staff_services_form_patient_budget: "Бюджет пациента из запроса",
-  staff_services_patient_budget_hint: "Указал пациент в портале и видит его как «Ваш бюджет»; сотрудники его не меняют. Внутренняя оценка — отдельное поле.",
-  staff_services_patient_budget_hint_concierge: "Указал пациент в портале и видит его как «Ваш бюджет»; сотрудники его не меняют. Внутренняя оценка — поле «Оценка стоимости», пациент её не видит; цену партнёра переносит кнопка «Забронировать у партнёра».",
   staff_services_visible_to_patient: "Видно пациенту в портале",
   staff_services_hidden_from_patient: "Пациенту не видно",
-  staff_services_patient_request_note_hint: "Написал пациент в портале; сотрудники этот текст не меняют.",
   staff_services_form_billing_notes: "Заметки по расчётам",
   staff_services_select: "Выбрать",
   staff_services_optional: "Опционально",
@@ -834,8 +816,6 @@ export const operationsRu: OperationsTranslations = {
     "Позиции услуг, уже утверждённые в текущем заказе.",
   orders_services_gross_description:
     "Количество x цена по всем видимым позициям услуг.",
-  orders_services_section_description:
-    "Привязанные к провайдеру и врачу услуги внутри текущего заказа.",
   orders_add_service: "Добавить услугу",
   orders_services_empty_description:
     "Используйте позиции, привязанные к провайдеру, чтобы собрать объём исполнения заказа и дать бухгалтерии достаточный контекст.",
@@ -933,7 +913,6 @@ export const operationsRu: OperationsTranslations = {
   lead_compliance_documents_sent: "Документы отправлены",
   lead_compliance_signed: "Подписано",
   lead_compliance_rejected: "Отклонено",
-  lead_compliance_signed_by_signature_hint: "«Подписано» ставится автоматически, когда документ DSGVO отмечен подписанным.",
   lead_compliance_signed_without_document: "Подписано вручную: подписанного документа DSGVO нет",
   lead_failed_outcome: "Исход неуспешного лида",
   lead_failed_outcome_none: "Нет",
@@ -997,23 +976,13 @@ export const operationsRu: OperationsTranslations = {
   lead_missing: "Не хватает",
   lead_blocking_reasons: "Причины блокировки",
   lead_workflow_title: "Процесс лида",
-  lead_workflow_description:
-    "Соберите недостающие данные, затем квалифицируйте лид и создайте пациента.",
   lead_workflow_progress: "{completed}/{total} готово",
   lead_workflow_ready_count: "Готово",
   lead_workflow_missing_count: "Нужно сделать",
   lead_workflow_complete_gate_title: "Данные для квалификации",
-  lead_workflow_complete_gate_description:
-    "Проверьте контакт, дату рождения, пол по документам, согласия и документы DSGVO.",
   lead_workflow_qualify_title: "Квалифицировать",
-  lead_workflow_qualify_description:
-    "Доступно только когда все проверки квалификации закрыты.",
   lead_workflow_convert_title: "Создать пациента",
-  lead_workflow_convert_description:
-    "После квалификации система создаст карточку пациента и стандартный процесс.",
   lead_workflow_failed_title: "Закрыть как неуспешный лид",
-  lead_workflow_failed_description:
-    "Лид не подходит: заархивировать или удалить с анонимизацией.",
   lead_workflow_open_gate: "Открыть данные",
   lead_workflow_mark_qualified: "Отметить квалифицированным",
   lead_workflow_open_failed: "Закрыть лид",
@@ -1112,13 +1081,9 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_cost_assumption_terms_outdated: "Заявление о принятии расходов устарело: заказ или его условия изменились",
   lead_readiness_reason_cost_assumption_unsigned: "Заявление о принятии расходов не подписано",
   lead_section_lifecycle: "Жизненный цикл лида",
-  lead_lifecycle_description:
-    "Последовательная история квалификации, обработки неуспешного лида и конверсии.",
   lead_current_stage: "Текущий этап",
   lead_entered_at: "Вошёл в этап",
   lead_qualification_gate_data: "Данные для квалификации",
-  lead_qualification_gate_description:
-    "Контакт, дата рождения, пол, согласия и документы DSGVO — то, что проверяет квалификация.",
   lead_full_name: "Полное имя",
   lead_primary_language: "Предпочитаемый язык",
   lead_language_ar: "Арабский",
@@ -1149,12 +1114,9 @@ export const operationsRu: OperationsTranslations = {
   lead_promote_to_console_success: "Лид переведён в консольный формат.",
   lead_console_promoted_at: "Переведён в консоль",
   lead_healthcare_consent_available: "Получено согласие на обработку медицинских данных",
-  lead_healthcare_consent_recorded_by_manager: "Отмечает менеджер пациента или клиент в кабинете.",
   lead_privacy_practices_accepted: "Согласие на обработку запроса получено на бумаге",
   lead_save_gate_data: "Сохранить данные",
   lead_failed_resolution_title: "Закрыть лид",
-  lead_failed_resolution_description:
-    "Лид не подходит: заархивируйте его или удалите с анонимизацией. Причина обязательна.",
   lead_resolution: "Решение",
   lead_processed_at: "Обработано",
   lead_failed_from: "Закрыт на этапе",
@@ -1245,8 +1207,6 @@ export const operationsRu: OperationsTranslations = {
   lead_attachments: "Вложения",
   lead_identity_documents: "Документы, удостоверяющие личность",
   lead_no_files_uploaded: "Файлы не загружены.",
-  lead_medical_fields_hidden:
-    "Медицинские данные обращения (запрос, специализации, заметки, анкета, страховка) видят только сотрудники с медицинским доступом.",
   lead_attachments_medical_only: "Файлы анкеты — медицинские документы, их открывают сотрудники с медицинским доступом.",
   lead_select_from_queue: "Выберите лид из очереди.",
   lead_download_attachment: "Скачать",
@@ -1471,11 +1431,8 @@ export const operationsDe: OperationsTranslations = {
   staff_services_form_patient_visible_note: "Notiz für den Patienten",
   staff_services_form_patient_request_note: "Text des Patienten aus der Anfrage",
   staff_services_form_patient_budget: "Budget des Patienten aus der Anfrage",
-  staff_services_patient_budget_hint: "Vom Patienten im Portal angegeben und dort als «Ihr Budget» sichtbar; das Team ändert es nicht. Die interne Schätzung ist ein eigenes Feld.",
-  staff_services_patient_budget_hint_concierge: "Vom Patienten im Portal angegeben und dort als «Ihr Budget» sichtbar; das Team ändert es nicht. Die interne Schätzung steht im Feld «Kostenschätzung» und ist für den Patienten nicht sichtbar; den Partnerpreis übernimmt «Beim Partner buchen».",
   staff_services_visible_to_patient: "Für den Patienten im Portal sichtbar",
   staff_services_hidden_from_patient: "Für den Patienten nicht sichtbar",
-  staff_services_patient_request_note_hint: "Vom Patienten im Portal geschrieben; das Team ändert diesen Text nicht.",
   staff_services_form_billing_notes: "Abrechnungsnotizen",
   staff_services_select: "Auswählen",
   staff_services_optional: "Optional",
@@ -1504,8 +1461,6 @@ export const operationsDe: OperationsTranslations = {
     "Bereits freigegebene Leistungspositionen in diesem Auftrag.",
   orders_services_gross_description:
     "Menge x Preis über alle sichtbaren Leistungspositionen.",
-  orders_services_section_description:
-    "Provider- und arztbezogene Leistungen innerhalb dieses Auftrags.",
   orders_add_service: "Leistung hinzufügen",
   orders_services_empty_description:
     "Mit providerbezogenen Positionen den Leistungsumfang des Auftrags aufbauen und der Abrechnung genug Kontext geben.",
@@ -1603,7 +1558,6 @@ export const operationsDe: OperationsTranslations = {
   lead_compliance_documents_sent: "Dokumente gesendet",
   lead_compliance_signed: "Unterzeichnet",
   lead_compliance_rejected: "Abgelehnt",
-  lead_compliance_signed_by_signature_hint: "„Unterzeichnet“ wird automatisch gesetzt, sobald das DSGVO-Dokument als unterschrieben markiert ist.",
   lead_compliance_signed_without_document: "Manuell als unterzeichnet markiert: kein unterschriebenes DSGVO-Dokument",
   lead_failed_outcome: "Ergebnis des nicht erfolgreichen Leads",
   lead_failed_outcome_none: "Keines",
@@ -1667,23 +1621,13 @@ export const operationsDe: OperationsTranslations = {
   lead_missing: "Fehlt",
   lead_blocking_reasons: "Blockierende Gründe",
   lead_workflow_title: "Lead-Workflow",
-  lead_workflow_description:
-    "Fehlende Daten erfassen, Lead qualifizieren und danach als Patient anlegen.",
   lead_workflow_progress: "{completed}/{total} bereit",
   lead_workflow_ready_count: "Bereit",
   lead_workflow_missing_count: "Offen",
   lead_workflow_complete_gate_title: "Daten für die Qualifizierung",
-  lead_workflow_complete_gate_description:
-    "Kontakt, Geburtsdatum, Geschlecht laut Ausweis, Einwilligungen und DSGVO-Unterlagen prüfen.",
   lead_workflow_qualify_title: "Qualifizieren",
-  lead_workflow_qualify_description:
-    "Verfügbar, sobald alle Qualifikationsprüfungen erfüllt sind.",
   lead_workflow_convert_title: "Patient anlegen",
-  lead_workflow_convert_description:
-    "Nach der Qualifizierung legt das System die Patientenakte und den Standardablauf an.",
   lead_workflow_failed_title: "Als nicht erfolgreichen Lead schließen",
-  lead_workflow_failed_description:
-    "Der Lead passt nicht: archivieren oder löschen und anonymisieren.",
   lead_workflow_open_gate: "Daten öffnen",
   lead_workflow_mark_qualified: "Als qualifiziert markieren",
   lead_workflow_open_failed: "Lead schließen",
@@ -1790,13 +1734,9 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_cost_assumption_terms_outdated: "Kostenübernahmeerklärung veraltet: Auftrag oder Konditionen haben sich geändert",
   lead_readiness_reason_cost_assumption_unsigned: "Kostenübernahmeerklärung nicht unterschrieben",
   lead_section_lifecycle: "Lead-Lebenszyklus",
-  lead_lifecycle_description:
-    "Sequenzielle Historie für Qualifikation, Bearbeitung nicht erfolgreicher Leads und Konvertierung.",
   lead_current_stage: "Aktuelle Stufe",
   lead_entered_at: "Eingetreten am",
   lead_qualification_gate_data: "Daten für die Qualifizierung",
-  lead_qualification_gate_description:
-    "Kontakt, Geburtsdatum, Geschlecht, Einwilligungen und DSGVO-Unterlagen – was die Qualifizierung prüft.",
   lead_full_name: "Vollständiger Name",
   lead_primary_language: "Bevorzugte Sprache",
   lead_language_ar: "Arabisch",
@@ -1827,12 +1767,9 @@ export const operationsDe: OperationsTranslations = {
   lead_promote_to_console_success: "Lead wurde in den Konsolenmodus übernommen.",
   lead_console_promoted_at: "In Konsole übernommen",
   lead_healthcare_consent_available: "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor",
-  lead_healthcare_consent_recorded_by_manager: "Tragen das Patientenmanagement oder der Kunde im Portal ein.",
   lead_privacy_practices_accepted: "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten",
   lead_save_gate_data: "Daten speichern",
   lead_failed_resolution_title: "Lead schließen",
-  lead_failed_resolution_description:
-    "Der Lead passt nicht: archivieren oder löschen und anonymisieren. Ein Grund ist Pflicht.",
   lead_resolution: "Entscheidung",
   lead_processed_at: "Bearbeitet am",
   lead_failed_from: "Geschlossen in der Phase",
@@ -1923,8 +1860,6 @@ export const operationsDe: OperationsTranslations = {
   lead_attachments: "Anhänge",
   lead_identity_documents: "Ausweisdokumente",
   lead_no_files_uploaded: "Keine Dateien hochgeladen.",
-  lead_medical_fields_hidden:
-    "Die medizinischen Angaben der Anfrage (Anliegen, Fachrichtungen, Notizen, Fragebogen, Versicherung) sehen nur Mitarbeitende mit medizinischem Zugriff.",
   lead_attachments_medical_only: "Die Dateien des Fragebogens sind medizinische Dokumente und werden von Mitarbeitenden mit medizinischem Zugriff geöffnet.",
   lead_select_from_queue: "Lead aus der Warteschlange auswählen.",
   lead_download_attachment: "Herunterladen",

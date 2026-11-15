@@ -570,7 +570,7 @@ export function ProjectsPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle><SectionHeading icon={Trash2}>{lang === "de" ? "Projekt löschen" : "Удалить проект"}</SectionHeading></DialogTitle></DialogHeader>
           <p className="break-words text-sm font-medium">{deleteCandidate?.name}</p>
-          <p className="text-sm text-muted-foreground">{lang === "de" ? "Das Projekt wird aus der Liste entfernt. Verknüpfte Aufgaben und ihr Verlauf bleiben erhalten." : "Проект будет удалён из списка. Связанные задачи и их история сохранятся."}</p>
+          <p className="text-sm text-muted-foreground">{lang === "de" ? "Das Projekt wird aus der Liste entfernt." : "Проект будет удалён из списка."}</p>
           {deleteError ? <p role="alert" className="text-sm text-destructive">{deleteError}</p> : null}
           <DialogFooter>
             <Button variant="outline" disabled={deleting} onClick={() => setDeleteCandidate(null)}>{labels.cancel}</Button>

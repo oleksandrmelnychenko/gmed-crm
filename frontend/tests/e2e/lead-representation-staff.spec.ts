@@ -817,7 +817,6 @@ test("staff who fill the data in create the patient form from the data they reco
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveCount(0);
   await expect(section).not.toContainText("Пациент ещё не отправил заявку");
   await expect(section.getByTestId("lead-wizard-self-disclosure-source")).toContainText("«Angaben aufgenommen durch GMED»");
-  await expect(section.getByTestId("lead-wizard-self-disclosure-source")).toContainText("на бумаге или КЭП");
   await section.getByRole("button", { name: "Создать документ", exact: true }).click();
   await expect.poll(() => calls.generated.length).toBe(1);
   expect(calls.generated[0]).toMatchObject({ template_id: "lead_self_disclosure", lead_id: leadId });
@@ -1010,7 +1009,6 @@ test("staff say whether a parent receives the invoice and pays (owner 2026-11-02
   const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
   const role = editor.getByLabel("Роль в оплате заявки");
   await expect(role).toContainText("Не получает счёт и не платит");
-  await expect(editor.getByTestId("trusted-contact-billing-role-hint")).toContainText("проверяются все законные представители");
   await editor.getByLabel("Кем приходится ребёнку").click();
   await page.getByRole("option", { name: "Отец (родитель)", exact: true }).click();
   // The fixture father has no e-mail or phone yet; a parent needs one.
@@ -1208,7 +1206,6 @@ test("staff correct a parent's address and birth data for the GwG sheet (owner 2
   await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
   // One save for the whole dialog (QA 2026-10-25, V-A4): no own button in the details block.
   await expect(form.getByRole("button", { name: "Сохранить адрес и данные" })).toHaveCount(0);
-  await expect(form).toContainText("Сохраняются кнопкой «Сохранить» вместе с карточкой.");
   // A city too long for the shared rule is refused before saving.
   await form.locator('input[name="city"]').evaluate((input: HTMLInputElement) => input.removeAttribute("maxlength"));
   await form.locator('input[name="city"]').fill("y".repeat(121));

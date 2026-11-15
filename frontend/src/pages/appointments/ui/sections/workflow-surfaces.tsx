@@ -1130,9 +1130,6 @@ function InterpreterResponseControls({
           onChange={(event) => setComment(event.target.value)}
           placeholder={appointmentText("appointments_interpreter_response_comment_placeholder")}
         />
-        <span className="block text-xs text-muted-foreground">
-          {appointmentText("appointments_interpreter_response_comment_hint")}
-        </span>
       </label>
     </Section>
   );
@@ -2173,10 +2170,7 @@ function AppointmentStatusToggleControl({
   return (
     <div className={cn("space-y-4", className)}>
       {detail.recurrence_frequency ? (
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <p className={tokens.text.muted}>
-            {t.appointments_scope_bulk_status_hint}
-          </p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-end">
           <div className="w-full md:w-[240px]">
             <Field label={t.appointments_scope_apply_status}>
               <NativeComboboxSelect

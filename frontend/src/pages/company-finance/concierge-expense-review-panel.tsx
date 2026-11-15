@@ -31,7 +31,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -111,7 +110,6 @@ const emptyForm: ExpensePostForm = {
 const textByLanguage = {
   ru: {
     title: "Расходы по задачам",
-    subtitle: "Проверка чеков и отражение подтвержденных расходов в финансовом учете.",
     search: "Пациент, задача, партнёр или заказ",
     all: "Все",
     pending: "На проверке",
@@ -135,13 +133,9 @@ const textByLanguage = {
     incomplete: (loaded: number, total: number) =>
       `Загружено ${loaded} из ${total} расходов. Проведение, отклонение и отмена заблокированы до полного обновления.`,
     detailTitle: "Проверка расхода",
-    detailDescription: "Сверьте чек и финансовые последствия до проведения.",
     postedDetailTitle: "Проведенный расход",
-    postedDetailDescription: "Расход отражён в финансовом учёте. Проверьте документ, назначение и историю операции.",
     rejectedDetailTitle: "Отклоненный расход",
-    rejectedDetailDescription: "Расход не был проведён. Проверьте чек, причину отклонения и историю операции.",
     reversedDetailTitle: "Сторнированный расход",
-    reversedDetailDescription: "Проведение отменено. Проверьте чек, восстановленные балансы и историю сторнирования.",
     contextLoading: "Загрузка финансового контекста…",
     contextFailed: "Не удалось загрузить финансовый контекст. Решение заблокировано.",
     receipt: "Чек",
@@ -184,7 +178,7 @@ const textByLanguage = {
     rejectPlaceholder: "Что необходимо исправить",
     reject: "Отклонить",
     reverseTitle: "Отменить проведение",
-    reverseDescription: "Отмена вернёт баланс пациента, расход GMED и расчёт с партнёром в исходное состояние. Операция останется в истории.",
+    reverseDescription: "Отмена вернёт балансы в исходное состояние.",
     reverseDate: "Дата отмены",
     reverseReason: "Причина отмены",
     reverseReasonRequired: "Укажите причину отмены (не более 2000 символов).",
@@ -230,7 +224,6 @@ const textByLanguage = {
   },
   de: {
     title: "Aufgabenausgaben",
-    subtitle: "Belege prüfen und bestätigte Auslagen in die Finanzbuchhaltung übernehmen.",
     search: "Patient, Aufgabe, Partner oder Auftrag",
     all: "Alle",
     pending: "Zur Prüfung",
@@ -254,13 +247,9 @@ const textByLanguage = {
     incomplete: (loaded: number, total: number) =>
       `${loaded} von ${total} Auslagen wurden geladen. Buchen, Ablehnen und Stornieren bleiben bis zur vollständigen Aktualisierung gesperrt.`,
     detailTitle: "Auslage prüfen",
-    detailDescription: "Beleg und finanzielle Auswirkungen vor der Buchung abgleichen.",
     postedDetailTitle: "Gebuchte Auslage",
-    postedDetailDescription: "Die Auslage wurde verbucht. Dokument, Zuordnung und Vorgangshistorie prüfen.",
     rejectedDetailTitle: "Abgelehnte Auslage",
-    rejectedDetailDescription: "Die Auslage wurde nicht verbucht. Beleg, Ablehnungsgrund und Vorgangshistorie prüfen.",
     reversedDetailTitle: "Stornierte Auslage",
-    reversedDetailDescription: "Die Buchung wurde storniert. Beleg, zurückgesetzte Salden und Stornohistorie prüfen.",
     contextLoading: "Finanzkontext wird geladen…",
     contextFailed: "Der Finanzkontext konnte nicht geladen werden. Die Entscheidung ist gesperrt.",
     receipt: "Beleg",
@@ -303,7 +292,7 @@ const textByLanguage = {
     rejectPlaceholder: "Was muss korrigiert werden?",
     reject: "Ablehnen",
     reverseTitle: "Buchung stornieren",
-    reverseDescription: "Die Stornierung setzt Patientensaldo, GMED-Auslage und Partnerabrechnung zurück. Der Vorgang bleibt in der Historie erhalten.",
+    reverseDescription: "Die Stornierung setzt die Salden zurück.",
     reverseDate: "Stornodatum",
     reverseReason: "Stornogrund",
     reverseReasonRequired: "Bitte einen Stornogrund mit höchstens 2000 Zeichen angeben.",
@@ -487,10 +476,10 @@ export function ConciergeExpenseReviewPanel({
   ), [statusLabel]);
 
   const selectedDetailCopy = selected ? ({
-    pending_review: { title: text.detailTitle, description: text.detailDescription },
-    posted: { title: text.postedDetailTitle, description: text.postedDetailDescription },
-    rejected: { title: text.rejectedDetailTitle, description: text.rejectedDetailDescription },
-    reversed: { title: text.reversedDetailTitle, description: text.reversedDetailDescription },
+    pending_review: { title: text.detailTitle },
+    posted: { title: text.postedDetailTitle },
+    rejected: { title: text.rejectedDetailTitle },
+    reversed: { title: text.reversedDetailTitle },
   } as const)[selected.status] : null;
 
   const columns = useMemo<ColumnDef<CompanyConciergeExpenseReviewRow>[]>(() => [
@@ -866,7 +855,6 @@ export function ConciergeExpenseReviewPanel({
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <SectionHeading icon={ReceiptText}>{text.title}</SectionHeading>
           </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{text.subtitle}</p>
         </div>
       </div>
 
@@ -974,7 +962,6 @@ export function ConciergeExpenseReviewPanel({
                       <DialogTitle><SectionHeading icon={ClipboardCheck}>{selectedDetailCopy?.title}</SectionHeading></DialogTitle>
                       {statusBadge(selected)}
                     </div>
-                    <DialogDescription className="mt-1 max-w-3xl">{selectedDetailCopy?.description}</DialogDescription>
                   </div>
                 </div>
               </DialogHeader>

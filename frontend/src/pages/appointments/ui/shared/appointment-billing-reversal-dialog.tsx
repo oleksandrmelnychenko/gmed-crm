@@ -123,8 +123,8 @@ export function AppointmentBillingReversalDialog() {
             </DialogTitle>
             <DialogDescription>
               {tx(
-                `У приёма есть утверждённый отчёт переводчика (${request.interpreterName}, ${request.hours} ч). Отчёт остаётся утверждённым, а его начисление сторнируется вместе с отменой приёма.`,
-                `Der Termin hat einen freigegebenen Dolmetscherbericht (${request.interpreterName}, ${request.hours} Std.). Der Bericht bleibt freigegeben; seine Abrechnung wird mit der Absage storniert.`,
+                `Начисление по отчёту (${request.interpreterName}, ${request.hours} ч) будет сторнировано.`,
+                `Die Abrechnung des Berichts (${request.interpreterName}, ${request.hours} Std.) wird storniert.`,
               )}
             </DialogDescription>
           </DialogHeader>

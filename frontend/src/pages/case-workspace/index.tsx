@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -135,9 +134,6 @@ function RecordUnavailableHint() {
     <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center">
       <p className="text-sm font-medium text-foreground">
         {t.cases_workspace_record_hint_title}
-      </p>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-        {t.cases_workspace_record_hint_description}
       </p>
     </div>
   );
@@ -309,9 +305,6 @@ function CaseWorkspaceContent() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle><SectionHeading icon={Archive}>{tri(lang, "case_ws_status_close")}</SectionHeading></DialogTitle>
-            <DialogDescription>
-              {tri(lang, "case_ws_close_description")}
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">

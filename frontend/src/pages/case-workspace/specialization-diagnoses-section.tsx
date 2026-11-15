@@ -17,7 +17,6 @@ import { useCaseSpecializations } from "./subject-store";
 
 const LABELS = {
   de: {
-    description: "Klinische Einträge dieses Falls für die ausgewählte Spezialisierung.",
     empty: "Für diesen Fall sind noch keine passenden klinischen Einträge erfasst.",
     diagnoses: "Diagnosen",
     examinations: "Befunde",
@@ -28,7 +27,6 @@ const LABELS = {
     diagnosedOn: "Diagnosedatum",
   },
   ru: {
-    description: "Клинические записи этого кейса по выбранной специализации.",
     empty: "В этом кейсе пока нет подходящих клинических записей.",
     diagnoses: "Диагнозы",
     examinations: "Обследования",
@@ -76,7 +74,6 @@ export function SpecializationDiagnosesSection({
     <Panel
       icon={specializationIcons.get(specialization.code)}
       title={specializationLabelForItem(specialization, labelLang)}
-      description={labels.description}
     >
       {!hasEntries ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">

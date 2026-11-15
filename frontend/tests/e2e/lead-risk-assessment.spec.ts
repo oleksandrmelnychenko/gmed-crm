@@ -360,7 +360,6 @@ test("level 3: one reviewer releases at once with a mandatory reason (four-eyes 
   await expect(panel.getByTestId("lead-risk-level")).toHaveText("Уровень 3");
   await expect(panel.getByTestId("lead-risk-knockout")).toHaveText("K.o.");
   await expect(panel.getByTestId("lead-risk-level3-stop")).toContainText("K.o.: уровень 3 независимо от баллов");
-  await expect(panel.getByTestId("lead-risk-actions")).toContainText("Решение вступает в силу сразу, на любом уровне. Причина обязательна (минимум 10 символов).");
   await expect(panel).not.toContainText("второго проверяющего");
   await expect(panel.getByTestId("lead-risk-decide-release")).toHaveText("Разрешить");
   await expect(panel.getByTestId("lead-risk-decide-reject")).toHaveText("Отклонить");

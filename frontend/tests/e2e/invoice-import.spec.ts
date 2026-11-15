@@ -574,7 +574,6 @@ test("review links corrected invoice and original to selected patient, retry reu
   await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await dialog.screenshot({ path: "../artifacts/design-qa/invoice-import-desktop.png" });
   await save.click();
-  await expect(dialog.getByText(/Оригинал уже сохранён|Das Original ist beim/)).toBeVisible();
   await expect(dialog.getByRole("combobox", { name: /^(Клиент|Patient)$/ })).toBeDisabled();
   await save.click();
   await expect(dialog).toHaveCount(0);

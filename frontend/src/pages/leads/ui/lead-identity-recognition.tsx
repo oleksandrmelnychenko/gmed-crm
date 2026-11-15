@@ -401,9 +401,7 @@ export function LeadIdentityRecognition({
           ? `${tx("Читаем машиночитаемую зону файла", "Die maschinenlesbare Zone wird gelesen, Datei")} «${stateFile}»…`
           : state.kind === "applied"
             ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}». ${documentFields ? tx("Проверьте поля.", "Bitte prüfen.") : tx("Проверьте поля; «Кем выдан» и дату выдачи сверьте со сканом.", "Bitte prüfen; Behörde und Ausstellungsdatum mit dem Scan vergleichen.")}`
-            : state.kind === "idle" && readable.length > 0
-              ? tx("Заполняет поля из машиночитаемой зоны; ничего не сохраняется без вашего подтверждения.", "Füllt die Felder aus der maschinenlesbaren Zone; nichts wird ohne Ihre Bestätigung gespeichert.")
-              : null}
+            : null}
       </p>
       {state.kind === "error" ? (
         <p role="alert" className="text-xs font-medium text-destructive" data-testid={`${testId}-error`}>

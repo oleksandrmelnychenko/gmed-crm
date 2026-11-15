@@ -462,9 +462,12 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
           >
             {greeting}
           </h1>
-          <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
-            {definition.subtitle}
-          </p>
+          {/* Only the role without a cabinet says why the page is empty (fix-67: no role blurbs). */}
+          {definition.metrics.length === 0 ? (
+            <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
+              {definition.subtitle}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <OpenTaskQueueLink />

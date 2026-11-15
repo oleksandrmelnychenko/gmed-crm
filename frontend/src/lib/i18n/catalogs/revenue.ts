@@ -50,7 +50,6 @@ export interface RevenueTranslations {
   finance_catalog_price_active: string;
   finance_catalog_price_future: string;
   finance_catalog_price_past: string;
-  finance_catalog_price_history_hint: string;
   finance_catalog_confirm_delete_price_version: string;
   finance_catalog_delete_price_version_title: string;
   finance_catalog_error_price_period: string;
@@ -65,7 +64,6 @@ export interface RevenueTranslations {
   finance_catalog_no_vat_profile: string;
   finance_catalog_currency: string;
   finance_catalog_included_items: string;
-  finance_catalog_included_items_hint: string;
   finance_catalog_add_item: string;
   finance_catalog_add_existing_item: string;
   finance_catalog_service_key: string;
@@ -276,10 +274,6 @@ export interface RevenueTranslations {
   revenue_invoices_create_description: string;
   revenue_invoices_section_quote: string;
   revenue_invoices_section_invoice_settings: string;
-  revenue_invoices_linked_patient_card_description: string;
-  revenue_invoices_linked_order_card_description: string;
-  revenue_invoices_linked_quote_card_description: string;
-  revenue_invoices_linked_documents_card_description: string;
   revenue_invoices_pdf_fallback_filename: string;
   revenue_invoices_ledger_date: string;
   revenue_invoices_ledger_direction: string;
@@ -313,7 +307,6 @@ export interface RevenueTranslations {
   revenue_invoices_phone: string;
   revenue_invoices_relationship: string;
   revenue_invoices_payer_notes: string;
-  revenue_invoices_payer_address_hint: string;
   revenue_invoices_payer_address_street: string;
   revenue_invoices_payer_address_zip: string;
   revenue_invoices_payer_address_city: string;
@@ -327,9 +320,7 @@ export interface RevenueTranslations {
   revenue_invoices_due_date_before_invoice_date: string;
   revenue_invoices_due_date_locked: string;
   revenue_invoices_notes_locked: string;
-  revenue_invoices_document_draft_preview: string;
   revenue_invoices_document_archived: string;
-  revenue_invoices_document_archived_on_first_download: string;
   revenue_invoices_dunning_new_deadline: string;
   revenue_invoices_dunning_letter: string;
   revenue_invoices_dunning_letter_download: string;
@@ -345,15 +336,11 @@ export interface RevenueTranslations {
   revenue_invoice_status_cancelled: string;
   revenue_invoice_status_credited: string;
   revenue_invoices_storno_title: string;
-  revenue_invoices_storno_description: string;
   revenue_invoices_storno_download: string;
   revenue_invoices_status_reason: string;
-  revenue_invoices_storno_reason_hint: string;
-  revenue_invoices_unblock_overdue_hint: string;
   revenue_invoices_reason_required: string;
   revenue_invoices_dunning_block: string;
   revenue_invoices_dunning_block_active: string;
-  revenue_invoices_dunning_block_hint: string;
   revenue_invoices_dunning_block_set: string;
   revenue_invoices_dunning_block_clear: string;
   revenue_invoices_dunning_block_reason: string;
@@ -948,8 +935,6 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_price_active: "Активна",
   finance_catalog_price_future: "Будущая",
   finance_catalog_price_past: "Предыдущая",
-  finance_catalog_price_history_hint:
-    "Периоды выстраиваются по датам автоматически. Предыдущая цена сохраняется в истории и применяется к услугам за соответствующий период.",
   finance_catalog_confirm_delete_price_version:
     "Удалить эту версию цены? Последнюю единственную версию удалить нельзя.",
   finance_catalog_delete_price_version_title: "Удалить версию цены?",
@@ -966,8 +951,6 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_no_vat_profile: "Без профиля НДС",
   finance_catalog_currency: "Валюта",
   finance_catalog_included_items: "Включенные позиции",
-  finance_catalog_included_items_hint:
-    "Количество определяет списание объема и согласование превышений.",
   finance_catalog_add_item: "Добавить позицию",
   finance_catalog_add_existing_item: "Добавить из каталога",
   finance_catalog_service_key: "Ключ услуги",
@@ -1223,14 +1206,6 @@ export const revenueRu: RevenueTranslations = {
     "Создайте счет из снимка предложения. Позиции и суммы фиксируются при создании.",
   revenue_invoices_section_quote: "Предложение",
   revenue_invoices_section_invoice_settings: "Параметры счёта",
-  revenue_invoices_linked_patient_card_description:
-    "Откройте карточку пациента, связанного с этим счётом.",
-  revenue_invoices_linked_order_card_description:
-    "Проверьте заказ, на основании которого выставлен счёт.",
-  revenue_invoices_linked_quote_card_description:
-    "Откройте предложение, связанное с этим счётом.",
-  revenue_invoices_linked_documents_card_description:
-    "Проверьте документы заказа и пациента по этому счёту.",
   revenue_invoices_pdf_fallback_filename: "счет.pdf",
   revenue_invoices_ledger_date: "Дата",
   revenue_invoices_ledger_direction: "Направление",
@@ -1265,8 +1240,6 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoices_phone: "Телефон",
   revenue_invoices_relationship: "Отношение",
   revenue_invoices_payer_notes: "Примечания по плательщику",
-  revenue_invoices_payer_address_hint:
-    "Адрес плательщика печатается в счёте. Если плательщик — пациент из связей, берётся адрес из его карточки, пока поля ниже пусты.",
   revenue_invoices_payer_address_street: "Улица и дом",
   revenue_invoices_payer_address_zip: "Индекс",
   revenue_invoices_payer_address_city: "Город",
@@ -1282,11 +1255,7 @@ export const revenueRu: RevenueTranslations = {
     "Срок оплаты выпущенного счёта не меняется. Новый срок задаётся напоминанием об оплате.",
   revenue_invoices_notes_locked:
     "Примечание напечатано в выпущенном счёте и не меняется. Для исправления отмените счёт и выпустите новый.",
-  revenue_invoices_document_draft_preview:
-    "Предпросмотр черновика. PDF сохраняется в архив при выпуске счёта.",
   revenue_invoices_document_archived: "Архивный PDF от {date}: выдаётся без изменений.",
-  revenue_invoices_document_archived_on_first_download:
-    "Счёт выпущен до архивирования PDF: копия сохранится при первом открытии и дальше не изменится.",
   revenue_invoices_dunning_new_deadline: "Новый срок оплаты",
   revenue_invoices_dunning_letter: "Письмо",
   revenue_invoices_dunning_letter_download: "PDF письма",
@@ -1302,15 +1271,11 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoice_status_cancelled: "Отменён",
   revenue_invoice_status_credited: "Сторнирован",
   revenue_invoices_storno_title: "Документ сторно",
-  revenue_invoices_storno_description: "Счёт отменён после выпуска. Документ сторно с собственным номером отменяет его полностью; оба документа хранятся в архиве.",
   revenue_invoices_storno_download: "Сторно (PDF)",
   revenue_invoices_status_reason: "Причина",
-  revenue_invoices_storno_reason_hint: "Отмена выпущенного счёта создаёт документ сторно с собственным номером. Причина печатается в документе.",
-  revenue_invoices_unblock_overdue_hint: "Возврат в «Отправлен» ставит блокировку напоминаний с этой причиной: автоматические напоминания и просрочка не применяются, пока блокировка не снята.",
   revenue_invoices_reason_required: "Укажите причину (от 3 символов).",
   revenue_invoices_dunning_block: "Блокировка напоминаний",
   revenue_invoices_dunning_block_active: "Напоминания заблокированы: {reason}",
-  revenue_invoices_dunning_block_hint: "Пока действует блокировка, напоминания не создаются (ни автоматически, ни вручную) и счёт автоматически не становится просроченным.",
   revenue_invoices_dunning_block_set: "Заблокировать напоминания",
   revenue_invoices_dunning_block_clear: "Снять блокировку",
   revenue_invoices_dunning_block_reason: "Причина блокировки",
@@ -1381,8 +1346,6 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_price_active: "Aktiv",
   finance_catalog_price_future: "Zukünftig",
   finance_catalog_price_past: "Vorherige",
-  finance_catalog_price_history_hint:
-    "Die Zeiträume werden automatisch nach Datum geordnet. Frühere Preise bleiben erhalten und gelten für Leistungen im jeweiligen Zeitraum.",
   finance_catalog_confirm_delete_price_version:
     "Diese Preisversion löschen? Die einzige verbleibende Version kann nicht gelöscht werden.",
   finance_catalog_delete_price_version_title: "Preisversion löschen?",
@@ -1399,8 +1362,6 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_no_vat_profile: "Kein USt.-Profil",
   finance_catalog_currency: "Währung",
   finance_catalog_included_items: "Enthaltene Positionen",
-  finance_catalog_included_items_hint:
-    "Mengen steuern Verbrauch und Freigabe von Mehrleistungen.",
   finance_catalog_add_item: "Position hinzufügen",
   finance_catalog_add_existing_item: "Aus Katalog hinzufügen",
   finance_catalog_service_key: "Leistungsschlüssel",
@@ -1658,14 +1619,6 @@ export const revenueDe: RevenueTranslations = {
     "Erstellen Sie eine Rechnung aus einem Angebots-Snapshot. Positionen und Summen werden beim Erstellen fixiert.",
   revenue_invoices_section_quote: "Angebot",
   revenue_invoices_section_invoice_settings: "Rechnungsparameter",
-  revenue_invoices_linked_patient_card_description:
-    "Patientenakte öffnen, die mit dieser Rechnung verknüpft ist.",
-  revenue_invoices_linked_order_card_description:
-    "Auftrag prüfen, auf dessen Grundlage die Rechnung erstellt wurde.",
-  revenue_invoices_linked_quote_card_description:
-    "Angebot öffnen, das mit dieser Rechnung verknüpft ist.",
-  revenue_invoices_linked_documents_card_description:
-    "Auftrags- und Patientendokumente zu dieser Rechnung prüfen.",
   revenue_invoices_pdf_fallback_filename: "rechnung.pdf",
   revenue_invoices_ledger_date: "Datum",
   revenue_invoices_ledger_direction: "Richtung",
@@ -1700,8 +1653,6 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoices_phone: "Telefon",
   revenue_invoices_relationship: "Beziehung",
   revenue_invoices_payer_notes: "Zahlernotizen",
-  revenue_invoices_payer_address_hint:
-    "Die Zahleranschrift wird auf die Rechnung gedruckt. Ist der Zahler ein Patient aus den Beziehungen, gilt dessen Anschrift, solange die Felder unten leer sind.",
   revenue_invoices_payer_address_street: "Straße und Hausnummer",
   revenue_invoices_payer_address_zip: "PLZ",
   revenue_invoices_payer_address_city: "Ort",
@@ -1717,11 +1668,7 @@ export const revenueDe: RevenueTranslations = {
     "Das Fälligkeitsdatum einer ausgestellten Rechnung bleibt unverändert. Eine neue Frist setzt die Zahlungserinnerung.",
   revenue_invoices_notes_locked:
     "Die Bemerkung steht auf der ausgestellten Rechnung und bleibt unverändert. Zur Korrektur die Rechnung stornieren und neu ausstellen.",
-  revenue_invoices_document_draft_preview:
-    "Entwurfsvorschau. Das PDF wird bei der Ausstellung archiviert.",
   revenue_invoices_document_archived: "Archiviertes PDF vom {date}: wird unverändert ausgegeben.",
-  revenue_invoices_document_archived_on_first_download:
-    "Vor der PDF-Archivierung ausgestellt: die Kopie wird beim ersten Abruf archiviert und bleibt dann unverändert.",
   revenue_invoices_dunning_new_deadline: "Neue Zahlungsfrist",
   revenue_invoices_dunning_letter: "Schreiben",
   revenue_invoices_dunning_letter_download: "Schreiben (PDF)",
@@ -1737,15 +1684,11 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoice_status_cancelled: "Storniert",
   revenue_invoice_status_credited: "Gutgeschrieben",
   revenue_invoices_storno_title: "Stornorechnung",
-  revenue_invoices_storno_description: "Die Rechnung wurde nach der Ausstellung storniert. Die Stornorechnung mit eigener Nummer hebt sie vollständig auf; beide Dokumente bleiben archiviert.",
   revenue_invoices_storno_download: "Stornorechnung (PDF)",
   revenue_invoices_status_reason: "Grund",
-  revenue_invoices_storno_reason_hint: "Die Stornierung einer ausgestellten Rechnung erzeugt eine Stornorechnung mit eigener Nummer. Der Grund wird darauf gedruckt.",
-  revenue_invoices_unblock_overdue_hint: "Zurück auf „Versendet“ setzt eine Mahnsperre mit diesem Grund: keine automatischen Mahnungen und keine automatische Überfälligkeit, bis sie aufgehoben wird.",
   revenue_invoices_reason_required: "Bitte einen Grund angeben (mindestens 3 Zeichen).",
   revenue_invoices_dunning_block: "Mahnsperre",
   revenue_invoices_dunning_block_active: "Mahnsperre aktiv: {reason}",
-  revenue_invoices_dunning_block_hint: "Solange die Mahnsperre gilt, werden keine Mahnungen erstellt (weder automatisch noch manuell) und die Rechnung wird nicht automatisch überfällig.",
   revenue_invoices_dunning_block_set: "Mahnsperre setzen",
   revenue_invoices_dunning_block_clear: "Mahnsperre aufheben",
   revenue_invoices_dunning_block_reason: "Grund der Mahnsperre",

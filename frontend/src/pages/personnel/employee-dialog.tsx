@@ -125,7 +125,7 @@ export function EmployeeDialog({
                 />
               }
             >
-              <FormSection icon={UserRound} title={t.personnel_section_person} hint={t.personnel_employee_dialog_hint}>
+              <FormSection icon={UserRound} title={t.personnel_section_person}>
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2">
                   <Field label={t.personnel_salutation}>
                     <SelectField
@@ -157,7 +157,6 @@ export function EmployeeDialog({
                     />
                   </Field>
                 </div>
-                <p className="text-xs text-muted-foreground">{t.personnel_name_file_hint}</p>
               </FormSection>
               <FormSection icon={BriefcaseBusiness} title={t.personnel_section_employment}>
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-3">
@@ -191,7 +190,7 @@ export function EmployeeDialog({
                   <p className="text-xs text-destructive">{t.personnel_employment_range_invalid}</p>
                 ) : null}
               </FormSection>
-              <FormSection icon={Link2} title={t.personnel_user_link} hint={t.personnel_user_link_hint}>
+              <FormSection icon={Link2} title={t.personnel_user_link}>
                 {/* Hundreds of accounts: a picker with a search box (QA 2026-11-12 D-9). */}
                 <NativeComboboxSelect
                   value={form.user_id}

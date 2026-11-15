@@ -230,17 +230,6 @@ export function PayerRepresentativeCard({ person, lang, tx }: { person: PayerRep
           <PayerReadOnlyStatement key={key} label={label} value={value} testId={`lead-payer-representative-${key}`} />
         ))}
       </dl>
-      <p className="text-xs leading-5 text-muted-foreground">
-        {person.guardian
-          ? tx(
-              "Данные меняются в блоке законных представителей. Отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно: опекун подписывает договор за ребёнка.",
-              "Die Angaben werden im Block der gesetzlichen Vertreter geändert. Eine Kostenübernahmeerklärung ist nicht nötig: der Vormund unterschreibt den Vertrag für das Kind.",
-            )
-          : tx(
-              "Данные меняются в блоке законных представителей. Отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно: родитель подписывает договор сам.",
-              "Die Angaben werden im Block der gesetzlichen Vertreter geändert. Eine Kostenübernahmeerklärung ist nicht nötig: der Elternteil unterschreibt den Vertrag selbst.",
-            )}
-      </p>
     </div>
   );
 }
@@ -1030,8 +1019,8 @@ export function LeadPayerDeclarationSection({
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2" data-testid="lead-payer-prefill-note">
             <p className="min-w-0 flex-1 text-xs leading-5 text-sky-800">
               {tx(
-                "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные: внесённые изменения сохраняются автоматически.",
-                "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen: Änderungen werden automatisch gespeichert.",
+                "Заполнено по декларации плательщика из прошлого обращения. Проверьте данные.",
+                "Aus der Zahlererklärung der letzten Anfrage übernommen. Bitte prüfen.",
               )}
             </p>
             {/* Untouched prefill is not written (QA B-18); data that need no
@@ -1085,8 +1074,8 @@ export function LeadPayerDeclarationSection({
         {payingParent ? (
           <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800" data-testid="lead-payer-paying-parent">
             {tx(
-              "Платит один из родителей — законный представитель ребёнка. Он подписывает заказ сам, отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно.",
-              "Es zahlt ein Elternteil als gesetzlicher Vertreter des Kindes. Er unterschreibt den Auftrag selbst; eine gesonderte Kostenübernahmeerklärung ist nicht nötig.",
+              "Платит один из родителей — законный представитель ребёнка.",
+              "Es zahlt ein Elternteil als gesetzlicher Vertreter des Kindes.",
             )}
             {/* A third-party row of before that names a parent: one click names the parent as such (2026-10-19). */}
             {canEdit && minor && data?.status.payer_representative ? (
@@ -1122,12 +1111,12 @@ export function LeadPayerDeclarationSection({
           title={tx("Сменить плательщика?", "Zahler ändern?")}
           description={form.kind === "third_party"
             ? tx(
-              "Согласия клиента на контакт с плательщиком и на передачу расчёта относятся к прежнему плательщику и будут сняты. Его имя и дата рождения, контакты, адрес и связь с пациентом будут очищены: укажите данные нового плательщика. Форма уже отправлена, поэтому новые согласия запишете вы, указав, как клиент их дал.",
-              "Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung gelten dem bisherigen Zahler und entfallen. Sein Name und Geburtsdatum, seine Kontaktdaten, seine Anschrift und seine Beziehung zum Patienten werden geleert: Tragen Sie die Daten des neuen Zahlers ein. Ist das Formular bereits gesendet, tragen Sie die neuen Einwilligungen selbst ein und geben an, wie der Kunde sie erteilt hat.",
+              "Согласия и данные прежнего плательщика будут удалены.",
+              "Die Einwilligungen und Daten des bisherigen Zahlers werden gelöscht.",
             )
             : tx(
-              "Третье лицо больше не платит. Согласия клиента на контакт с ним и на передачу расчёта будут сняты, его имя и дата рождения, контакты, адрес и связь с пациентом будут очищены.",
-              "Der Dritte zahlt nicht mehr. Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung entfallen; sein Name und Geburtsdatum, seine Kontaktdaten, seine Anschrift und seine Beziehung zum Patienten werden geleert.",
+              "Третье лицо больше не платит: его согласия и данные будут удалены.",
+              "Der Dritte zahlt nicht mehr: seine Einwilligungen und Daten werden gelöscht.",
             )}
           confirmLabel={tx("Сменить", "Ändern")}
           cancelLabel={tx("Отмена", "Abbrechen")}

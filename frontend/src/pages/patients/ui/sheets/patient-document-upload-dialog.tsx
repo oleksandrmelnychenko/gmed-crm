@@ -70,7 +70,6 @@ type RecognitionCopy = {
   fileLabel: string;
   nameLabel: string;
   namePlaceholder: string;
-  recognitionHint: string;
   submit: string;
 };
 
@@ -82,7 +81,6 @@ function documentRecognitionCopy(lang: string): RecognitionCopy {
       fileLabel: "Datei zum Erkennen",
       nameLabel: "Dokumentname (optional)",
       namePlaceholder: "Leer lassen für automatische Benennung",
-      recognitionHint: "Wir erkennen Fachgebiet, Dokumentart, Datum, Verfasser und Institution. Eine manuell eingegebene Bezeichnung bleibt unverändert.",
       submit: "Hochladen und erkennen",
     };
   }
@@ -93,7 +91,6 @@ function documentRecognitionCopy(lang: string): RecognitionCopy {
       fileLabel: "Файл для розпізнавання",
       nameLabel: "Назва документа (необов’язково)",
       namePlaceholder: "Залиште порожнім для автоматичної назви",
-      recognitionHint: "Визначимо спеціалізацію, тип документа, дату, автора та установу. Назву, введену вручну, система не змінює.",
       submit: "Завантажити й розпізнати",
     };
   }
@@ -103,7 +100,6 @@ function documentRecognitionCopy(lang: string): RecognitionCopy {
     fileLabel: "Файл для распознавания",
     nameLabel: "Название документа (необязательно)",
     namePlaceholder: "Оставьте пустым для автоматического названия",
-    recognitionHint: "Определим специализацию, тип документа, дату, автора и учреждение. Название, введенное вручную, система не изменит.",
     submit: "Загрузить и распознать",
   };
 }
@@ -298,9 +294,6 @@ function DocumentFileSection({
             placeholder={copy.namePlaceholder}
           />
         </FormField>
-      </div>
-      <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.045] px-3.5 py-3 text-xs leading-5 text-foreground/75">
-        {copy.recognitionHint}
       </div>
     </FormSection>
   );

@@ -125,7 +125,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, readOnly = fa
           {t.compliance_steps_extension}:{" "}
           {merged.deadline_extension
             ? `${t.compliance_steps_done} · +${merged.deadline_extension.days ?? 60} · ${merged.deadline_extension.reason ?? ""}`
-            : t.compliance_steps_extension_hint}
+            : t.compliance_steps_open}
         </p>
         {!merged.deadline_extension && isOpen && !readOnly ? (
           <div className="flex flex-wrap gap-2">
@@ -190,7 +190,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, readOnly = fa
           {t.compliance_steps_recipients}:{" "}
           {merged.recipients_notification
             ? `${t.compliance_steps_done} · ${channelLabel(merged.recipients_notification.channel)} · ${day(merged.recipients_notification.at)}`
-            : t.compliance_steps_recipients_hint}
+            : t.compliance_steps_open}
         </p>
         {!merged.recipients_notification && !readOnly ? (
           <div className="flex flex-wrap gap-2">

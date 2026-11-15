@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ScanSearch, Files, FileArchive, LoaderCircle } from "lucide-react";
+import { ScanSearch, FileArchive, LoaderCircle } from "lucide-react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -126,7 +126,7 @@ export function ExportTab() {
   };
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+    <div className="grid gap-3">
       <Section icon={ScanSearch} title={t.personnel_export_scope}>
         <div className="flex flex-wrap items-center gap-1" role="group" aria-label={t.personnel_export_scope}>
           {(
@@ -197,17 +197,6 @@ export function ExportTab() {
           </Button>
         </div>
       </Section>
-      <aside className="h-fit">
-        <Section icon={Files} title={t.personnel_export_contents_title}>
-          <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-            <li>{t.personnel_export_contents_files}</li>
-            <li>{t.personnel_export_contents_index}</li>
-            <li>{t.personnel_export_contents_manifest}</li>
-            <li>{t.personnel_export_contents_report}</li>
-          </ul>
-          <p className="text-xs text-muted-foreground">{t.personnel_export_logged}</p>
-        </Section>
-      </aside>
     </div>
   );
 }

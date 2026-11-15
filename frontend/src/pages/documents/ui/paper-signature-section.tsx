@@ -55,20 +55,15 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
         <AdminSectionTitle icon={Stamp}>{tx("Подписано на бумаге", "Auf Papier unterschrieben")}</AdminSectionTitle>
       </div>
       <div className="space-y-3 p-3">
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+        {electronicFormExcluded ? <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
           <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <p>
-          {electronicFormExcluded
-            ? tx(
+          {tx(
                 `Для этого документа закон исключает электронную форму (${electronicFormExcluded}). Загрузите скан экземпляра, подписанного от руки.`,
                 `Für dieses Dokument ist die elektronische Form ausgeschlossen (${electronicFormExcluded}). Laden Sie den Scan des handschriftlich unterschriebenen Exemplars hoch.`,
-              )
-            : tx(
-                "Если документ подписан от руки, загрузите его скан. Скан станет подписанной версией документа, а договор, заказ, смета или согласие будут отмечены как подписанные.",
-                "Wurde das Dokument handschriftlich unterschrieben, laden Sie den Scan hoch. Der Scan wird zur unterschriebenen Fassung des Dokuments; Vertrag, Auftrag, Kostenvoranschlag oder Einwilligung gelten damit als unterschrieben.",
               )}
           </p>
-        </div>
+        </div> : null}
         <div className="flex flex-wrap items-center gap-2">
           <StatusChip tone="warning">{tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}</StatusChip>
           <span className="inline-flex">

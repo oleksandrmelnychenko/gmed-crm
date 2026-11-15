@@ -109,9 +109,6 @@ function PatientCaveNotesSheetContent({
       }
     >
       <FormSection icon={TriangleAlert} title={l("patients_warnings")}>
-        <p className="text-[12.5px] text-muted-foreground">
-          {l("patients_persistent_clinical_warnings_that_should_stay_visible_be")}
-        </p>
         <FormField
           label={l("patients_cave")}
           htmlFor="patient-cave-notes"

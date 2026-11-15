@@ -431,8 +431,8 @@ export function LeadPortalAccessDetail({
       {ownLoginClosed && status !== "none" ? (
         <p className="leading-6 text-foreground" data-testid="lead-portal-own-login-closed">
           {de
-            ? "Der eigene Zugang des Kindes ist gesperrt: Die Anfrage füllen die Eltern mit ihrem Zugang (unten) aus. Wird das Geburtsdatum auf 18 Jahre oder älter korrigiert, gilt er wieder."
-            : "Собственный вход ребёнка закрыт: заявку заполняют родители через свой доступ (ниже). Если дату рождения исправить на 18 лет и старше, вход снова заработает."}
+            ? "Der eigene Zugang des Kindes ist gesperrt: Die Anfrage füllen die Eltern mit ihrem Zugang (unten) aus."
+            : "Собственный вход ребёнка закрыт: заявку заполняют родители через свой доступ (ниже)."}
         </p>
       ) : null}
       {error ? <p className="text-rose-700" role="alert">{error}</p> : null}
@@ -471,15 +471,15 @@ export function LeadPortalAccessDetail({
             <DialogDescription>
               {!mailReady
                 ? de
-                  ? "Der E-Mail-Versand ist nicht eingerichtet. Mittaro wird unter „API-Verbindungen“ → „E-Mail“ verbunden; bis dahin den Zugang per Nachricht weitergeben."
-                  : "Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail»; пока передайте доступ сообщением."
+                  ? "Der E-Mail-Versand ist nicht eingerichtet: Zugang bitte per Nachricht weitergeben."
+                  : "Отправка e-mail не настроена: передайте доступ сообщением."
                 : canReset
                   ? de
-                    ? `Der Patient erhält ein neues Passwort: Das bisherige funktioniert danach nicht mehr, offene Sitzungen des Patienten werden beendet. Die E-Mail mit Anmeldeadresse, Login und Passwort geht an ${lead.email}.`
-                    : `Пациент получит новый пароль: старый перестанет работать, открытые сессии пациента будут завершены. Письмо с адресом входа, логином и паролем уйдёт на ${lead.email}.`
+                    ? `Das bisherige Passwort funktioniert danach nicht mehr. Die E-Mail geht an ${lead.email}.`
+                    : `Старый пароль перестанет работать. Письмо уйдёт на ${lead.email}.`
                   : de
-                    ? `Der Zugang wird angelegt. Die E-Mail mit Anmeldeadresse, Login und Passwort geht an ${lead.email}.`
-                    : `Доступ будет создан. Письмо с адресом входа, логином и паролем уйдёт на ${lead.email}.`}
+                    ? `Die E-Mail mit dem Zugang geht an ${lead.email}.`
+                    : `Письмо с доступом уйдёт на ${lead.email}.`}
             </DialogDescription>
           </DialogHeader>
           {mailReady ? (
@@ -1052,8 +1052,8 @@ export function LeadGuardianAccess({
         open={revoking !== null}
         title={tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?")}
         description={tx(
-          `${revoking?.name || "Родитель"} больше не сможет открыть эту заявку. Доступ можно выдать заново.`,
-          `${revoking?.name || "Der Elternteil"} kann diese Anfrage danach nicht mehr öffnen. Der Zugang kann neu angelegt werden.`,
+          `${revoking?.name || "Родитель"} больше не сможет открыть эту заявку.`,
+          `${revoking?.name || "Der Elternteil"} kann diese Anfrage danach nicht mehr öffnen.`,
         )}
         confirmLabel={tx("Отозвать", "Widerrufen")}
         cancelLabel={tx("Отмена", "Abbrechen")}

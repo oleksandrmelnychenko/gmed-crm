@@ -1123,9 +1123,7 @@ export function MedicationIntelligencePanel({
               <SectionHeading icon={Pill}>{lang === "de" ? "Medikament identifizieren" : "Идентифицировать медикамент"}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
-              {identityMedicationName} · {lang === "de"
-                ? "Deterministische Kandidaten werden niemals automatisch bestätigt."
-                : "Детерминированные кандидаты никогда не подтверждаются автоматически."}
+              {identityMedicationName}
             </DialogDescription>
           </DialogHeader>
           <MedicationIdentityWorkflow

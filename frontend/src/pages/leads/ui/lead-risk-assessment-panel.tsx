@@ -450,13 +450,10 @@ export function LeadRiskAssessmentPanel({
           <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-risk-preview">
             {assessment.status === "grandfathered"
               ? tx(
-                  "Обращение квалифицировано до введения оценки: удержания нет. Ниже — предварительный расчёт по текущим данным (не сохранён).",
-                  "Anfrage vor Einführung der Bewertung qualifiziert: kein Zurückhalten. Unten die Vorschau nach aktuellen Daten (nicht gespeichert).",
+                  "Обращение квалифицировано до введения оценки: удержания нет. Предварительный расчёт (не сохранён).",
+                  "Anfrage vor Einführung der Bewertung qualifiziert: kein Zurückhalten. Vorschau (nicht gespeichert).",
                 )
-              : tx(
-                  "Предварительный расчёт (не сохранён): оценка начнётся, когда пациент отправит анкету или при первом действии с документами.",
-                  "Vorschau (nicht gespeichert): Die Bewertung beginnt mit dem Senden der Anfrage durch den Patienten oder der ersten Dokumentenaktion.",
-                )}
+              : tx("Предварительный расчёт (не сохранён).", "Vorschau (nicht gespeichert).")}
           </p>
         ) : null}
         {restartError ? (
@@ -525,12 +522,6 @@ export function LeadRiskAssessmentPanel({
             <Caption icon={MessageCircleQuestion}>{questionsBeforeSubmit
               ? tx("Вопросы до отправки анкеты", "Fragen vor dem Absenden der Anfrage")
               : tx("Дополнительные сведения", "Ergänzende Angaben")}</Caption>
-            {questionsBeforeSubmit ? <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-risk-questions-preview">
-              {tx(
-                "Эти вопросы уже доступны пациенту в кабинете по текущим данным о стране. Ниже — заполненность ответов; оценка риска ещё не начата.",
-                "Diese Fragen stehen im Portal aufgrund der aktuellen Länderangaben bereits zur Verfügung. Unten ist der Ausfüllstand zu sehen; die Risikobewertung wurde noch nicht gestartet.",
-              )}
-            </p> : null}
             <ul className="grid items-start gap-2 @3xl/risk:grid-cols-2">
               {blocksShown.map((block) => (
                 <BlockRow key={block.key} block={block} requested={requested.has(block.key)} beforeSubmit={questionsBeforeSubmit} tx={tx} representatives={assessment.representatives} />
@@ -608,15 +599,6 @@ export function LeadRiskAssessmentPanel({
 
         {decisions.length > 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border/50 pt-2.5" data-testid="lead-risk-actions">
-            {decisions.some((decision) => decision !== "request_more") ? (
-              <StatusChip tone="warning" className="min-w-0 flex-[1_1_26rem] items-start whitespace-normal rounded-xl px-3 py-2" data-testid="lead-risk-decision-hint">
-                <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                <span>{tx(
-                  "Решение вступает в силу сразу, на любом уровне. Причина обязательна (минимум 10 символов).",
-                  "Die Entscheidung wird sofort wirksam, auf jeder Stufe. Eine Begründung ist Pflicht (mindestens 10 Zeichen).",
-                )}</span>
-              </StatusChip>
-            ) : null}
             <div className="flex flex-wrap gap-2">
               {decisions.map((decision) => (
                 <Button
@@ -635,13 +617,6 @@ export function LeadRiskAssessmentPanel({
               ))}
             </div>
           </div>
-        ) : !assessment.can_decide && started ? (
-          <p className="text-xs text-muted-foreground" data-testid="lead-risk-read-only">
-            {tx(
-              "Решения принимают CEO и назначенные им заместители.",
-              "Entscheidungen treffen der CEO und die von ihm benannten Vertreter.",
-            )}
-          </p>
         ) : null}
 
         {assessment.decisions.length > 0 || assessment.history.length > 0 ? (

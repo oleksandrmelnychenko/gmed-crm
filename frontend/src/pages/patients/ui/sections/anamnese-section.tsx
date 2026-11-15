@@ -954,8 +954,8 @@ export function AnamneseSection({
         open={Boolean(deleteTarget)}
         title={tx("Удалить анамнез?", "Anamnese löschen?")}
         message={tx(
-          "Версия анамнеза будет удалена. Если она активная, система выберет последнюю доступную версию.",
-          "Diese Anamnese-Version wird gelöscht. Wenn sie aktiv ist, wählt das System die letzte verfügbare Version.",
+          "Версия анамнеза будет удалена.",
+          "Diese Anamnese-Version wird gelöscht.",
         )}
         cancelLabel={tx("Отмена", "Abbrechen")}
         confirmLabel={deleteBusy ? tx("Удаление…", "Löschen…") : tx("Удалить", "Löschen")}

@@ -128,7 +128,6 @@ export function PainSection() {
       icon={Zap}
       columns={columns}
       title={t.cases_pain_title}
-      description={t.cases_pain_description}
       items={detail?.pain_records ?? []}
       blankItem={BLANK}
       cloneItem={(item) => ({ ...BLANK, ...item })}

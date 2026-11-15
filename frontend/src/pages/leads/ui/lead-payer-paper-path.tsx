@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CircleAlert, ClipboardPen, FileText, Info, LoaderCircle, Upload, Printer } from "lucide-react";
+import { Check, CircleAlert, ClipboardPen, FileText, LoaderCircle, Upload, Printer } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, inputClass, selectClass, tokens } from "@/components/ui-shell";
@@ -192,13 +192,6 @@ export function LeadPayerPaperPath({
       data-identified={identification.identified && !onlyPreviousPapers ? "true" : "false"}
     >
       <AdminSectionTitle icon={Printer}>{tx("Бумажный путь (без ссылки)", "Papierweg (ohne Link)")}</AdminSectionTitle>
-      <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
-        <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-        {tx(
-          "Если у плательщика нет e-mail или он предпочитает бумагу: загрузите его документ и подписанную на бумаге Selbstauskunft.",
-          "Hat der Zahler keine E-Mail oder bevorzugt er Papier: seinen Ausweis und die auf Papier unterschriebene Selbstauskunft hochladen.",
-        )}
-      </p>
       {line ? (
         <p
           className={cn(
@@ -221,9 +214,6 @@ export function LeadPayerPaperPath({
         <div className="min-w-0 space-y-1 rounded-lg border border-border/70 px-3 py-2" data-testid="lead-payer-paper-previous">
           <p className="break-words text-sm font-medium text-foreground">
             {tx("Бумаги прежнего плательщика", "Papiere des früheren Zahlers")}
-          </p>
-          <p className="break-words text-xs leading-5 text-muted-foreground">
-            {tx("Остаются в деле.", "Bleiben in der Akte.")}
           </p>
           <ul className="space-y-1">
             {previous.map((document) => (

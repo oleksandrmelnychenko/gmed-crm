@@ -1210,10 +1210,6 @@ function useStaffServicesPageContent() {
     };
   }, [orderPatientId]);
   const orderFieldLabel = lang === "de" ? "Auftrag" : "Заказ";
-  const orderFieldHint =
-    lang === "de"
-      ? "Eine bestätigte Buchung erfüllt die Anforderung „Nichtmedizinische Leistungen“ dieses Auftrags. Die Buchung beim Partner bestätigen der Concierge oder der CEO."
-      : "Подтверждённое бронирование закрывает требование «Немедицинские услуги» этого заказа. Бронирование у партнёра подтверждает консьерж или CEO.";
   const noOrderLabel = lang === "de" ? "Ohne Auftrag" : "Без заказа";
 
   const {
@@ -2217,7 +2213,6 @@ function useStaffServicesPageContent() {
                                 </option>
                               ))}
                             </NativeComboboxSelect>
-                            <span className="block text-xs text-muted-foreground">{orderFieldHint}</span>
                           </>
                         )}
                       </label>
@@ -2616,7 +2611,6 @@ function useStaffServicesPageContent() {
                           <p className="whitespace-pre-wrap rounded-md border bg-muted/40 px-3 py-2">
                             {selectedService.patient_note}
                           </p>
-                          <p className="text-xs text-muted-foreground">{t.staff_services_patient_request_note_hint}</p>
                         </div>
                       ) : null}
                       {selectedService.patient_budget ? (
@@ -2628,9 +2622,6 @@ function useStaffServicesPageContent() {
                           <p className="rounded-md border bg-muted/40 px-3 py-2 tabular-nums">
                             {formatPortalCurrency(selectedService.patient_budget, selectedService.currency)}
                           </p>
-                          <p className="text-xs text-muted-foreground">{canEditProtectedServiceFields
-                              ? t.staff_services_patient_budget_hint
-                              : t.staff_services_patient_budget_hint_concierge}</p>
                         </div>
                       ) : null}
                       <label className="space-y-1.5 text-sm">
@@ -2881,7 +2872,6 @@ function useStaffServicesPageContent() {
                           </option>
                         ))}
                       </NativeComboboxSelect>
-                      <span className="block text-xs text-muted-foreground">{orderFieldHint}</span>
                     </label>
 
                     <label className="space-y-1.5 text-sm">

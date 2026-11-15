@@ -718,7 +718,6 @@ test("a lead's order keeps the grid as a draft until the patient exists (plan st
   await page.goto(`/orders/${orderId}?section=planning`);
   const planner = page.getByTestId("order-visit-planner");
   await expect(planner).toHaveAttribute("data-mode", "draft");
-  await expect(planner).toContainText("Заказ лида: пациента ещё нет");
   // The saved draft is back on the grid and in the plan list, its provider among the doctors.
   await expect(planner.getByTestId("order-visit-planner-draft")).toHaveCount(1);
   await expect(planner.getByTestId("order-visit-planner-plan-row")).toContainText("Blutbild");

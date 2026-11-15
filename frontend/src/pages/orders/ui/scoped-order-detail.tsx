@@ -41,11 +41,6 @@ const copy = {
     delivered: "Erbracht",
     markDelivered: "Als erbracht markieren",
     empty: "In diesem Auftrag gibt es keine Leistungen aus Ihrem Bereich.",
-    // QA C3-09: the concierge records these lines as delivered, so not "read only".
-    concierge_services:
-      "Sie sehen den Zeitraum, den Status und die Service- und Logistikleistungen dieses Auftrags und können sie als erbracht markieren; sonst ändern Sie hier nichts. Medizinische Leistungen, Preise, Notizen und Finanzdaten sind ausgeblendet.",
-    interpreter_team:
-      "Nur Ansicht: Sie sehen den Zeitraum, den Status und die Dolmetscherleistungen dieses Auftrags. Medizinische Leistungen, Preise, Notizen und Finanzdaten sind ausgeblendet.",
   },
   ru: {
     order: "Заказ",
@@ -58,10 +53,6 @@ const copy = {
     delivered: "Оказано",
     markDelivered: "Отметить как оказанную",
     empty: "В этом заказе нет услуг из вашей зоны ответственности.",
-    concierge_services:
-      "Вы видите период, статус и сервисные и логистические услуги заказа и можете отмечать их оказанными; другие изменения здесь недоступны. Медицинские услуги, цены, заметки и финансы скрыты.",
-    interpreter_team:
-      "Только просмотр: вы видите период, статус и услуги переводчиков по заказу. Медицинские услуги, цены, заметки и финансы скрыты.",
   },
 } as const;
 
@@ -86,17 +77,9 @@ export function ScopedOrderDetail({
 }: ScopedOrderDetailProps) {
   const labels = copy[lang];
   const translations = translationsFor(lang);
-  const scopeHint =
-    detail.read_scope === "interpreter_team" ? labels.interpreter_team : labels.concierge_services;
 
   return (
     <div className="min-w-0 space-y-4 rounded-xl" data-testid="scoped-order-detail">
-      <p
-        role="note"
-        className="rounded-lg border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
-      >
-        {scopeHint}
-      </p>
       <section className="rounded-xl border border-border/70 bg-card p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-muted-foreground">

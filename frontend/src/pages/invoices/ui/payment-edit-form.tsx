@@ -85,11 +85,6 @@ export function PaymentEditForm({
 
   return (
     <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
-      <p className="text-xs text-muted-foreground">
-        {de
-          ? "Die ursprüngliche Zahlung wird storniert und mit den korrigierten Angaben neu erfasst. Beide Buchungen bleiben im Journal."
-          : "Исходный платёж сторнируется и записывается заново с исправленными данными. Обе записи остаются в журнале."}
-      </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field label={de ? "Eingang brutto" : "Сумма брутто"}>
           <MoneyInput

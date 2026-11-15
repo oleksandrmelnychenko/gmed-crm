@@ -29,7 +29,6 @@ export function StaffDashboardOperationsSection({
       <SectionHeader
         icon={Workflow}
         title={tr.dash_sec_ops ?? tr.common_unknown}
-        hint={tr.dash_sec_ops_hint ?? tr.common_unknown}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">

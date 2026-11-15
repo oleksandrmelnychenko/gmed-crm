@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Field, checkboxClass } from "@/components/ui-shell";
@@ -11,14 +9,12 @@ import type { OrderPrepaymentTerms } from "../model/order-prepayment";
 export function OrderPrepaymentFields({
   value,
   lang,
-  hint,
   onChange,
 }: {
   value: OrderPrepaymentTerms;
   /** The order total the amount may not exceed, when it is known. */
   maxAmount?: number;
   lang: "de" | "ru";
-  hint?: ReactNode;
   onChange: (patch: Partial<OrderPrepaymentTerms>) => void;
 }) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
@@ -57,7 +53,6 @@ export function OrderPrepaymentFields({
               }
             />
           </Field>
-          {hint ? <p className="text-xs text-muted-foreground sm:col-span-2">{hint}</p> : null}
         </div>
       ) : null}
     </>

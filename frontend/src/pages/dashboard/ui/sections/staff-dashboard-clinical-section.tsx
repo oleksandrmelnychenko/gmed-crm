@@ -26,14 +26,12 @@ export function StaffDashboardClinicalSection({
       <SectionHeader
         icon={Stethoscope}
         title={tr.dash_sec_clinical ?? tr.common_unknown}
-        hint={tr.dash_sec_clinical_hint ?? tr.common_unknown}
       />
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]">
         <ChartCard
           icon={ClipboardList}
           title={tr.dash_top_reasons ?? tr.common_unknown}
-          hint={tr.dash_top_reasons_hint ?? tr.common_unknown}
         >
           <HorizontalBars
             loading={sectionsLoading}
@@ -51,7 +49,6 @@ export function StaffDashboardClinicalSection({
         <ChartCard
           icon={ListChecks}
           title={tr.dash_cases_by_status ?? tr.common_unknown}
-          hint={tr.dash_cases_status_hint ?? tr.common_unknown}
         >
           <MiniDonut
             loading={sectionsLoading}

@@ -401,7 +401,6 @@ export function SanctionsLeadBanner({
             icon={ShieldCheck}
             open={liftOpen}
             title={t.sanctions_country_lift_title}
-            description={t.sanctions_country_lift_hint}
             confirmLabel={t.sanctions_country_lift}
             onConfirm={async (reason) => {
               await sanctionsApi.liftLeadCountryBlock(leadId, reason);

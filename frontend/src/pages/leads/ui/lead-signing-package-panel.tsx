@@ -60,10 +60,6 @@ export function LeadSigningPackagePanel({
     ? summary
     : undefined;
   const contractApplies = currentContractSigned || (!contractDocument && inheritedContract);
-  const description = source
-    ? tx("Проверьте состав пакета в окне подписи.", "Prüfen Sie den Paketinhalt im Unterschriftsfenster.")
-    : null;
-
   return (
     <section
       className="min-w-0 space-y-1.5 rounded-xl border border-border/50 bg-card p-3"
@@ -120,7 +116,6 @@ export function LeadSigningPackagePanel({
           </>
         ) : null}
       </div>
-      {description ? <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{description}</p> : null}
     </section>
   );
 }

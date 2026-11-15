@@ -1100,10 +1100,6 @@ function StaffDocumentsPage({
       lang === "ru" ? "Подпись" : "Unterschrift",
     documentForm:
       lang === "ru" ? "Форма документа" : "Dokumentformular",
-    finalGeneratedTextHint:
-      lang === "ru"
-        ? "Текст ниже собран из текущих данных формы. Если его изменить, PDF будет создан именно из этого текста."
-        : "Der Text unten wird aus den aktuellen Formulardaten aufgebaut. Wenn du ihn bearbeitest, wird das PDF genau aus diesem Text erstellt.",
     resetGeneratedText:
       lang === "ru" ? "Вернуть текст шаблона" : "Vorlagentext wiederherstellen",
     clearGeneratedText:
@@ -1114,10 +1110,6 @@ function StaffDocumentsPage({
         : "Geben Sie den Text des freien Dokuments ein.",
     intakeUploadTitle:
       lang === "ru" ? "Загрузить входящие документы" : "Eingehende Dokumente hochladen",
-    intakeUploadDescription:
-      lang === "ru"
-        ? "Пациента, заказ, приём и категорию можно указать после загрузки."
-        : "Patient, Auftrag, Termin und Kategorie können Sie nach dem Hochladen zuordnen.",
     intakeDropTitle:
       lang === "ru"
         ? "Перетащите документы сюда"
@@ -1154,10 +1146,6 @@ function StaffDocumentsPage({
       lang === "ru"
         ? "Для завершения проверки выберите пациента, тип и категорию документа."
         : "Wählen Sie Patient, Dokumenttyp und Kategorie, um die Prüfung abzuschließen.",
-    intakeReviewWorkspace:
-      lang === "ru"
-        ? "Сверяйте документ справа и заполняйте данные слева. После сохранения документ будет активирован и удален из очереди."
-        : "Prüfen Sie das Dokument rechts und erfassen Sie die Daten links. Nach dem Speichern wird es aktiviert und aus der Warteschlange entfernt.",
   };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
@@ -4751,9 +4739,6 @@ function StaffDocumentsPage({
                 {availableTemplateBlocks.length > 0 ? (
                   <DocumentSheetSection icon={Blocks} title={t.documents_text_blocks}>
                     <div className="space-y-4">
-                      <p className="text-xs text-muted-foreground">
-                        {t.documents_text_blocks_hint}
-                      </p>
                       <div className="grid gap-3 md:grid-cols-2">
                   {availableTemplateBlocks.map((block) => {
                     const checked = generateForm.textBlockKeys.includes(
@@ -4949,7 +4934,6 @@ function StaffDocumentsPage({
           <AdminDialogScaffold
             icon={FolderInput}
             title={metaText.intakeUploadTitle}
-            description={metaText.intakeUploadDescription}
             onSubmit={handleIntakeBatchUpload}
             maxWidthClassName="sm:max-w-lg"
             footer={
@@ -5123,15 +5107,6 @@ function StaffDocumentsPage({
             >
               <div className="space-y-4 rounded-xl">
                 {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
-                {!canManage ? (
-                  <Banner tone="warning">
-                    {user?.role === "interpreter"
-                      ? t.documents_upload_interpreter_hint
-                      : user?.role === "teamlead_interpreter"
-                        ? t.documents_upload_teamlead_hint
-                        : t.documents_upload_internal_hint}
-                  </Banner>
-                ) : null}
 
                 <DocumentSheetSection icon={FileUp} title={t.documents_section_file}>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -5879,9 +5854,7 @@ function StaffDocumentsPage({
             <DialogHeader className="sr-only">
               <DialogTitle>{t.documents_edit_metadata_title}</DialogTitle>
               <DialogDescription>
-                {detail?.ursprung === "manual_intake"
-                  ? metaText.intakeReviewWorkspace
-                  : t.documents_edit_metadata_title}
+                {t.documents_edit_metadata_title}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -5910,8 +5883,7 @@ function StaffDocumentsPage({
                   )}
                 >
                 {detail?.ursprung === "manual_intake" && !detail.deletion_protected ? (
-                  <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm">{metaText.intakeReviewWorkspace}</p>
+                  <div className="flex justify-end">
                     <Button
                       type="button"
                       variant="outline"
@@ -6558,7 +6530,7 @@ function StaffDocumentsPage({
         <AdminDialogScaffold
           icon={Trash2}
           title={t.documents_delete_file}
-          description={deleteTarget?.name ? `${deleteTarget.name} · ${t.documents_delete_file_description}` : t.documents_delete_file_description}
+          description={deleteTarget?.name || undefined}
           maxWidthClassName="sm:max-w-xl"
           onSubmit={(event) => {
             event.preventDefault();

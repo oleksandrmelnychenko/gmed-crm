@@ -299,8 +299,8 @@ export function PatientOrdersTab({
             </DialogTitle>
             <DialogDescription>
               {labelLang === "de"
-                ? "Der Entwurf wird aus der aktiven Liste entfernt. Abgeschlossene und aktive Aufträge bleiben unverändert."
-                : "Черновик будет удалён из активного списка. Завершённые и активные заказы не изменятся."}
+                ? "Der Entwurf wird aus der aktiven Liste entfernt."
+                : "Черновик будет удалён из активного списка."}
             </DialogDescription>
           </DialogHeader>
           {deleteError ? <p role="alert" className="text-sm text-destructive">{deleteError}</p> : null}

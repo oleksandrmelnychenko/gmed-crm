@@ -37,7 +37,6 @@ type Props = {
 const copy = {
   ru: {
     title: "Взаиморасчёты с партнёром / исполнителем",
-    description: "Все счета, выплаты и открытые суммы за выбранный период",
     opening: "Осталось выплатить на начало периода",
     charged: "Сумма по счетам партнёра / исполнителя",
     paid: "Выплачено компанией",
@@ -59,7 +58,6 @@ const copy = {
   },
   de: {
     title: "Zahlungsübersicht: Partner / Leistungserbringer",
-    description: "Alle Rechnungsbeträge, Zahlungen und offenen Beträge im gewählten Zeitraum",
     opening: "Zu Periodenbeginn noch zu zahlen",
     charged: "Rechnungsbeträge des Partners / Leistungserbringers",
     paid: "Vom Unternehmen bezahlt",
@@ -159,7 +157,7 @@ export function ProviderStatementDialog({
         <DialogHeader>
           <DialogTitle><SectionHeading icon={FileSpreadsheet}>{text.title}</SectionHeading></DialogTitle>
           <DialogDescription>
-            {provider?.provider_name} · {text.description}
+            {provider?.provider_name}
             {statement ? ` · ${formatDate(statement.period.from)} — ${formatDate(statement.period.to)}` : ""}
           </DialogDescription>
         </DialogHeader>

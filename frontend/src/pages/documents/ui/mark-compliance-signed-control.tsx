@@ -142,12 +142,6 @@ export function MarkComplianceSignedControl({
       <h4 className="text-sm font-semibold text-foreground">
         {tx("Подписанный документ (комплаенс)", "Unterzeichnetes Dokument (Compliance)")}
       </h4>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {tx(
-          "Зафиксировать как подписанное подтверждение и закрыть требование комплаенса.",
-          "Als unterzeichneten Nachweis erfassen und die Compliance-Anforderung erfüllen.",
-        )}
-      </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <NativeComboboxSelect
           value={kind}
@@ -179,14 +173,6 @@ export function MarkComplianceSignedControl({
           </Button>
         )}
       </div>
-      {needsProof && !done ? (
-        <p className="mt-2 text-xs text-muted-foreground" data-testid="mark-signed-proof-hint">
-          {tx(
-            "Созданный документ считается подписанным только с подтверждением: загрузите скан подписанного экземпляра или подпишите его электронно.",
-            "Ein erstelltes Dokument gilt erst mit Nachweis als unterschrieben: Scan des unterschriebenen Exemplars hochladen oder elektronisch unterschreiben lassen.",
-          )}
-        </p>
-      ) : null}
       {!patientId ? (
         <p className="mt-2 text-xs text-amber-600">
           {tx(

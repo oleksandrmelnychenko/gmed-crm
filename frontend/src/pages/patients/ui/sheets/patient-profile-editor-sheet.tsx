@@ -861,12 +861,7 @@ function PatientProfileEditorFormSections({
                     : dictionary.patient_profile_editor_emergency_contact
                 }
               >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">
-                    {lang === "de"
-                      ? "Mehrere Kontakte und Vertretungen können hinterlegt werden."
-                      : "Можно добавить несколько контактов и представителей."}
-                  </p>
+                <div className="flex flex-wrap items-center justify-end gap-3">
                   <Button
                     type="button"
                     variant="outline"
@@ -1117,9 +1112,6 @@ function PatientProfileLegalStatusSection({
           );
         })}
       </div>
-      {readOnlyHint ? (
-        <p className="text-xs leading-5 text-muted-foreground">{readOnlyHint}</p>
-      ) : null}
       <FormField label={dictionary.patient_profile_editor_contract_status}>
         <NativeComboboxSelect
           value={form.legalStatus.contractStatus}

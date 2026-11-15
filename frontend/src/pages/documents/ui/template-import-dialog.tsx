@@ -90,9 +90,6 @@ function texts(lang: Lang) {
   return {
     title: ru ? "Импорт шаблона" : "Vorlage importieren",
     file: ru ? "Файл Word" : "Word-Datei",
-    intro: ru
-      ? "Выберите файл Word (.docx). Документ будет выглядеть как в Word; сверху и снизу добавятся шапка и подвал GMED."
-      : "Wählen Sie eine Word-Datei (.docx). Das Dokument sieht aus wie in Word; oben und unten kommen Kopf- und Fußzeile von GMED hinzu.",
     replacing: ru ? "Новый файл для шаблона" : "Neue Datei für die Vorlage",
     cancelReplace: ru ? "Отменить" : "Abbrechen",
     uploading: ru ? "Файл загружается…" : "Die Datei wird hochgeladen…",
@@ -441,16 +438,14 @@ export function TemplateImportDialog({
             className="rounded-lg border border-dashed border-border bg-muted/30 p-2"
             buttonClassName="h-8"
           />
+          {busy === "upload" ? (
           <p className="text-xs leading-5 text-muted-foreground">
-            {busy === "upload" ? (
               <span role="status" className="inline-flex items-center gap-2">
                 <LoaderCircle className="size-3.5 animate-spin" />
                 {tx.uploading}
               </span>
-            ) : (
-              tx.intro
-            )}
           </p>
+          ) : null}
         </AdminFormSection>
 
         {selected ? (

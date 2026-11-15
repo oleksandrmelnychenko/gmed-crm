@@ -153,12 +153,6 @@ export function TerminateContractDialog({
             <DialogTitle>
               <SectionHeading icon={FileCheck2}>{tx("Договор расторгнут", "Vertrag gekündigt")} {contract.contract_number}</SectionHeading>
             </DialogTitle>
-            <DialogDescription>
-              {tx(
-                "Заказы остановлены, по каждому создан расчёт при расторжении. Бухгалтерия выставит финальный счёт или оформит возврат.",
-                "Die Aufträge wurden gestoppt, für jeden wurde eine Abrechnung bei Kündigung angelegt. Die Buchhaltung erstellt die Schlussrechnung oder die Erstattung.",
-              )}
-            </DialogDescription>
           </DialogHeader>
           <ul className="grid max-h-[55vh] gap-3 overflow-y-auto" data-testid="termination-result">
             {result.settlements.map((settlement) => (
@@ -193,8 +187,8 @@ export function TerminateContractDialog({
             </DialogTitle>
             <DialogDescription>
               {tx(
-                "Договор перестанет действовать для новых заказов. Для следующих заказов нужно будет оформить и подписать новый рамочный договор.",
-                "Der Vertrag gilt danach nicht mehr für neue Aufträge. Für weitere Aufträge muss ein neuer Rahmenvertrag erstellt und unterzeichnet werden.",
+                "Договор перестанет действовать для новых заказов.",
+                "Der Vertrag gilt danach nicht mehr für neue Aufträge.",
               )}
             </DialogDescription>
           </DialogHeader>
@@ -226,8 +220,8 @@ export function TerminateContractDialog({
                 <p className="flex items-start gap-2 font-medium text-amber-900">
                   <OctagonAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
                   {tx(
-                    "Эти заказы будут остановлены: запланированные услуги и будущие приёмы отменяются, паушалы «при расторжении полностью» начисляются целиком.",
-                    "Diese Aufträge werden gestoppt: geplante Leistungen und künftige Termine werden storniert, Pauschalen „bei Kündigung voll fällig“ werden vollständig berechnet.",
+                    "Эти заказы будут остановлены.",
+                    "Diese Aufträge werden gestoppt.",
                   )}
                 </p>
                 <ul className="grid max-h-[40vh] gap-2 overflow-y-auto">

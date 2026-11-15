@@ -210,13 +210,6 @@ export function ExternalInvoiceAllocationSheet({
 
               {workspace ? (
                 <>
-                  {workspace.order_service_billed ? (
-                    <p className="text-sm text-muted-foreground">
-                      {lang === "de"
-                        ? "Die Eingangsrechnung ist GMED-Kosten einer Auftragsleistung, die dem Patienten berechnet wird. Sie ist keine Patientenforderung; eine Zuordnung ändert keine Patientensalden."
-                        : "Входящий счёт — расход GMED по услуге заказа, которая выставляется пациенту. Это не долг пациента; распределение не меняет баланс пациента."}
-                    </p>
-                  ) : null}
                   <div className="grid gap-3 sm:grid-cols-3">
                     <InfoRow
                       className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}
@@ -289,16 +282,9 @@ export function ExternalInvoiceAllocationSheet({
                   </form>
 
                   <section className="space-y-3 border-t border-border pt-5">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">
-                        <SectionHeading icon={History}>{lang === "de" ? "Zuordnungshistorie" : "История распределений"}</SectionHeading>
-                      </h3>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {lang === "de"
-                          ? "Fehler werden storniert und bleiben nachvollziehbar."
-                          : "Ошибки сторнируются и остаются в истории."}
-                      </p>
-                    </div>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      <SectionHeading icon={History}>{lang === "de" ? "Zuordnungshistorie" : "История распределений"}</SectionHeading>
+                    </h3>
                     {activeAllocations.length > 0 ? (
                       <Field htmlFor="allocation-reversal-note" label={lang === "de" ? "Stornogrund" : "Причина сторнирования"}>
                         <Input

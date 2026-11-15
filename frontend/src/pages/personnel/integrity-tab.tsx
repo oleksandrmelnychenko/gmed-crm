@@ -262,7 +262,6 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
               ) : null
             }
           >
-            <p className="px-1 text-xs text-muted-foreground">{t.personnel_integrity_intro}</p>
             <DataTableSurface
               rows={runs}
               columns={runColumns}
@@ -320,7 +319,6 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
               ) : null
             }
           >
-            <p className="px-1 text-xs text-muted-foreground">{t.personnel_anchors_hint}</p>
             <DataTableSurface
               rows={anchors}
               columns={anchorColumns}

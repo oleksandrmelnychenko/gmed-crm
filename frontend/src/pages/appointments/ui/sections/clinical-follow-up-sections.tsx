@@ -37,7 +37,6 @@ import { cn } from "@/lib/utils";
 import {
   appointmentFilterControlClassName,
   appointmentSelectControlClassName,
-  appointmentSoftPanelClassName,
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import {
@@ -683,12 +682,6 @@ function useAppointmentIncomingDataSectionContent({
           </>
         }
       >
-        <div
-          className={cn("text-sm text-muted-foreground", appointmentSoftPanelClassName)}
-        >
-          {appointmentText("appointments_all_changes_are_saved_directly_on_the_appointment_and_sh")}
-        </div>
-
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={tr.documents_source}>
             <NativeComboboxSelect
@@ -800,7 +793,6 @@ function useAppointmentIncomingDataSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.requiresCaseUpdate}
             title={caseUpdateLabel}
-            description={appointmentText("appointments_creates_a_separate_checklist_step_to_apply_the_update_to")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -811,7 +803,6 @@ function useAppointmentIncomingDataSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.requiresPatientFollowUp}
             title={patientFollowUpLabel}
-            description={appointmentText("appointments_adds_a_separate_step_to_contact_the_patient_after_data_t")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -825,7 +816,6 @@ function useAppointmentIncomingDataSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.createTask}
             title={appointmentText("appointments_create_linked_task")}
-            description={appointmentText("appointments_also_creates_a_linked_operational_task_for_the_assignee")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -1358,12 +1348,6 @@ function useAppointmentFindingsSectionContent({
           </>
         }
       >
-        <div
-          className={cn("text-sm text-muted-foreground", appointmentSoftPanelClassName)}
-        >
-          {appointmentText("appointments_created_reminders_tasks_and_checklist_items_appear_immed")}
-        </div>
-
         <Field
           label={appointmentText("appointments_expected_document")}
         >
@@ -1438,7 +1422,6 @@ function useAppointmentFindingsSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.translationRequired}
             title={translationRequiredLabel}
-            description={appointmentText("appointments_adds_a_separate_step_for_written_translation")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -1449,7 +1432,6 @@ function useAppointmentFindingsSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.sendToPatient}
             title={sendToPatientLabel}
-            description={appointmentText("appointments_plans_an_additional_step_to_send_the_findings_package_to")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,
@@ -1463,7 +1445,6 @@ function useAppointmentFindingsSectionContent({
           <AppointmentClinicalToggleCard
             checked={form.createTask}
             title={appointmentText("appointments_create_linked_task")}
-            description={appointmentText("appointments_also_creates_a_linked_operational_task_for_findings_foll")}
             onChange={(checked) =>
               setForm((current) => ({
                 ...current,

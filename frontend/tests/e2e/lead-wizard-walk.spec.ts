@@ -303,7 +303,7 @@ test("the service and order tabs and the release checklist follow what each step
   await expect(wizard.getByRole("tab", { name: /Оформление заказа — не завершено/ })).toBeVisible();
 
   await wizard.getByRole("tab", { name: /Создание пациента/ }).click();
-  const checklist = wizard.locator("section").filter({ has: page.getByText("Проверьте все этапы.", { exact: false }) }).first();
+  const checklist = wizard.locator("section").filter({ has: page.locator(".wizard-review-list") }).first();
   await expect(checklist.getByRole("button", { name: /Сервисная история\s*Необязательно, не заполнено/ })).toBeVisible();
   // The empty optional medical step reads as the tab bar says it, not as done.
   await expect(wizard.getByRole("tab", { name: /Медицинская характеристика — необязательно, не заполнено/ })).toBeVisible();

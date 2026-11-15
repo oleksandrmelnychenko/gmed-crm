@@ -59,7 +59,6 @@ type Copy = {
   category: string;
   noCategory: string;
   medical: string;
-  manualHint: string;
   classification: string;
   status: string;
   visibility: string;
@@ -105,8 +104,6 @@ const COPY: Record<"de" | "ru", Copy> = {
     category: "Kategorie / Fachgebiet",
     noCategory: "Nicht zugeordnet",
     medical: "Medizinisches Dokument",
-    manualHint:
-      "Manuelle Änderungen haben Vorrang und werden nicht mehr durch die Hintergrund-Erkennung überschrieben.",
     classification: "Klassifikation und Freigabe",
     status: "Status",
     visibility: "Sichtbarkeit",
@@ -150,8 +147,6 @@ const COPY: Record<"de" | "ru", Copy> = {
     category: "Категория / специализация",
     noCategory: "Не назначена",
     medical: "Медицинский документ",
-    manualHint:
-      "Ручные изменения имеют приоритет и больше не будут перезаписаны фоновым распознаванием.",
     classification: "Классификация и доступ",
     status: "Статус",
     visibility: "Видимость",
@@ -723,9 +718,6 @@ export function PatientDocumentEditSheet({
               />
               {copy.medical}
             </label>
-            <div className="rounded-xl border border-primary/20 bg-primary/[0.045] px-3.5 py-3 text-xs leading-5 text-foreground/75">
-              {copy.manualHint}
-            </div>
           </FormSection>
 
           <FormSection icon={Tags} title={copy.classification}>

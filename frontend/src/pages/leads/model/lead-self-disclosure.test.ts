@@ -33,7 +33,7 @@ describe("the lead's patient form", () => {
     expect(leadSelfDisclosureRecordedByGmed({ submitted_at: "2026-10-07T08:30:00Z", fill_mode: "staff" })).toBe(false);
     expect(leadSelfDisclosureRecordedByGmed(null)).toBe(false);
     expect(leadSelfDisclosureSourceNote({ submitted_at: null, fill_mode: "staff" }, de)).toContain("Angaben aufgenommen durch GMED");
-    expect(leadSelfDisclosureSourceNote({ submitted_at: null, fill_mode: "staff" }, ru)).toContain("создайте анкету заново");
+    expect(leadSelfDisclosureSourceNote({ submitted_at: null, fill_mode: "staff" }, ru)).toContain("внесённых сотрудником");
     expect(leadSelfDisclosureSourceNote({ submitted_at: "2026-10-07T08:30:00Z" }, de)).toContain("Angaben aus dem Portal");
     expect(leadSelfDisclosureAvailable(null)).toBe(false);
     expect(leadSelfDisclosureAvailable(undefined)).toBe(false);

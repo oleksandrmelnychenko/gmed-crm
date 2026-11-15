@@ -39,13 +39,13 @@ export function leadSelfDisclosureAvailable(intake: CabinetIntake): boolean {
 export function leadSelfDisclosureSourceNote(intake: CabinetIntake, tx: Tx): string {
   if (leadSelfDisclosureRecordedByGmed(intake)) {
     return tx(
-      "Пациент не отправлял заявку через кабинет: анкета создаётся из данных, внесённых сотрудником, с отметкой «Angaben aufgenommen durch GMED». Подписывает пациент или законные представители — на бумаге или КЭП, как другие документы. Если пациент позже отправит заявку через кабинет, создайте анкету заново: она заполнится данными кабинета.",
-      "Der Patient hat keine Anfrage über das Kundenkabinett gesendet: Das Formular wird aus den von GMED erfassten Angaben erstellt, mit dem Vermerk „Angaben aufgenommen durch GMED“. Der Patient oder die gesetzlichen Vertreter unterschreiben – auf Papier oder per QES wie die anderen Dokumente. Sendet der Patient später eine Anfrage über das Kundenkabinett, erstellen Sie das Formular aus diesen Angaben neu.",
+      "Анкета из данных, внесённых сотрудником («Angaben aufgenommen durch GMED»).",
+      "Formular aus den von GMED erfassten Angaben („Angaben aufgenommen durch GMED“).",
     );
   }
   return tx(
-    "Ответы из анкеты клиента. Подписывает пациент или законные представители вместе с договором, заказом и согласиями.",
-    "Angaben aus dem Portal. Der Patient oder die gesetzlichen Vertreter unterschreiben zusammen mit Vertrag, Auftrag und Einwilligungen.",
+    "Ответы из анкеты клиента.",
+    "Angaben aus dem Portal.",
   );
 }
 

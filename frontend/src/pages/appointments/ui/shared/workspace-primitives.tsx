@@ -42,13 +42,11 @@ export function AppointmentClinicalToggleCard({
   checked,
   disabled = false,
   title,
-  description,
   onChange,
 }: {
   checked: boolean;
   disabled?: boolean;
   title: string;
-  description: string;
   onChange: (checked: boolean) => void;
 }) {
   const id = useId();
@@ -70,11 +68,8 @@ export function AppointmentClinicalToggleCard({
         onChange={(event) => onChange(event.target.checked)}
         className={cn(checkboxClass, "mt-0.5")}
       />
-      <span className="min-w-0 space-y-1">
+      <span className="min-w-0">
         <span className="block text-sm font-medium text-foreground">{title}</span>
-        <span className="block text-xs text-muted-foreground">
-          {description}
-        </span>
       </span>
     </label>
   );

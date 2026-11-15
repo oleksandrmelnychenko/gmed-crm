@@ -546,7 +546,7 @@ test("a new invitation replaces the current link only after the question", async
   const question = page.getByTestId("lead-payer-link-resend-dialog");
   await expect(question).toBeVisible();
   await expect(question).toContainText("Neuen Link vorbereiten?");
-  await expect(question).toContainText("Der vorherige Link wird ungültig. Gespeicherte Antworten bleiben erhalten.");
+  await expect(question).toContainText("Der vorherige Link wird ungültig.");
   await question.getByRole("button", { name: "Abbrechen", exact: true }).click();
   await expect(question).toBeHidden();
   expect(calls.prepares).toEqual([]);
@@ -606,7 +606,7 @@ test("staff revoke a link only after the confirmation", async ({ page }) => {
   const question = page.getByTestId("lead-payer-link-revoke-dialog");
   await expect(question).toBeVisible();
   await expect(question).toContainText("Отозвать ссылку плательщика?");
-  await expect(question).toContainText("Открыть её больше будет нельзя; ответы плательщика сохраняются.");
+  await expect(question).toContainText("Открыть её больше будет нельзя.");
   await question.getByRole("button", { name: "Отмена", exact: true }).click();
   await expect(question).toBeHidden();
   expect(calls.revokes).toBe(0);

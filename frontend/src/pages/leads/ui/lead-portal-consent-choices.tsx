@@ -174,16 +174,6 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
           </StatusChip></dd>
         </div>}
       </dl>
-      {disclosureDenied ? <p className="flex items-start gap-2 text-sm leading-5 text-foreground" data-testid="portal-disclosure-optional">
-        <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-        <span>
-        {disclosureDefaultNo
-          ? tx("Клиент не ответил: по умолчанию информация третьим лицам не предоставляется; в форме согласия пункт о передаче указанным лицам остаётся не отмеченным.",
-            "Nicht beantwortet: standardmäßig keine Auskunft an Dritte; in der Einverständniserklärung bleibt die Übermittlung an genannte Personen unangekreuzt.")
-          : tx("Выбор клиента: информацию третьим лицам не предоставлять. Это допустимый ответ — отдельное согласие не нужно, оформление он не блокирует; в форме согласия пункт о передаче указанным лицам остаётся не отмеченным.",
-            "Wahl des Kunden: keine Auskunft an Dritte. Das ist eine gültige Antwort – eine gesonderte Einwilligung ist nicht nötig, sie blockiert nichts; in der Einverständniserklärung bleibt die Übermittlung an genannte Personen unangekreuzt.")}
-        </span>
-      </p> : null}
       {/* The persons themselves are listed once, in «Лица и учреждения» (owner 2026-10-26). */}
       {persons.length > 0 ? <StatusChip tone="neutral" className="items-start whitespace-normal" data-testid="portal-trusted-persons-pointer">
         <Info aria-hidden="true" className="mt-0.5" />

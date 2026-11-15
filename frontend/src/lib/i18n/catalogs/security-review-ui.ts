@@ -259,8 +259,7 @@ export const securityReviewUiDe = {
   compliance_error_failed: "Die Aktion am Antrag ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
 
   // 2FA administration
-  twofactor_admin_reset_confirm:
-    "Zwei-Faktor-Anmeldung dieser Person zurücksetzen? Der zweite Faktor wird entfernt und alle Sitzungen werden beendet; bei der nächsten Anmeldung richtet die Person ihn neu ein.",
+  twofactor_admin_reset_confirm: "Zwei-Faktor-Anmeldung dieses Mitarbeiters zurücksetzen? Alle Sitzungen werden beendet.",
 
   // 2FA refusals (routes/totp.rs)
   twofactor_error_sign_in_again: "Die Anmeldung ist abgelaufen. Bitte melden Sie sich erneut an.",
@@ -513,8 +512,7 @@ export const securityReviewUiRu = {
   compliance_error_forbidden: "У вас нет прав на это действие с запросом.",
   compliance_error_failed: "Не удалось выполнить действие с запросом. Попробуйте ещё раз.",
 
-  twofactor_admin_reset_confirm:
-    "Сбросить двухфакторный вход этого сотрудника? Второй фактор будет удалён, все сессии завершатся; при следующем входе сотрудник настроит его заново.",
+  twofactor_admin_reset_confirm: "Сбросить двухфакторный вход этого сотрудника? Все его сессии завершатся.",
 
   twofactor_error_sign_in_again: "Сеанс входа истёк. Войдите снова.",
   twofactor_error_already_active: "Двухфакторный вход уже настроен.",

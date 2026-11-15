@@ -265,7 +265,6 @@ const words = {
     notExpected: "Платёж с собственного счёта не ожидается",
     converted: "Зафиксировано при конвертации обращения 06.10.2026",
     openLead: "Открыть обращение",
-    changedElsewhere: "Плательщика заказа или счёта меняют в заказе и в счёте",
     addressIncomplete: "Адрес неполный: улица, индекс",
     minorRecipient: "Несовершеннолетний получит счёт — укажите плательщика",
     openRequest: "Открыто новое обращение — плательщик уточняется в нём",
@@ -310,7 +309,6 @@ const words = {
     notExpected: "Keine Zahlung vom eigenen Konto zu erwarten",
     converted: "Bei der Umwandlung der Anfrage am 06.10.2026 festgehalten",
     openLead: "Anfrage öffnen",
-    changedElsewhere: "Der Zahler eines Auftrags oder einer Rechnung wird dort geändert",
     addressIncomplete: "Adresse unvollständig: Straße, PLZ",
     minorRecipient: "Minderjährige/r als Empfänger – Zahler angeben",
     openRequest: "Eine neue Anfrage ist offen – der Zahler wird dort erfasst",
@@ -374,13 +372,6 @@ for (const lang of ["ru", "de"] as const) {
       await expect(line("identification-payer")).toHaveCount(0);
       // 6. The footer.
       await expect(line("footer")).toContainText(w.converted);
-      await expect(line("footer")).toContainText(w.changedElsewhere);
-      // Guidance remains available on demand, while evidence stays visible.
-      const guidance = line("footer").locator("details");
-      await expect(guidance.getByText(w.changedElsewhere, { exact: true })).toBeHidden();
-      await guidance.locator("summary").click();
-      await expect(guidance.getByText(w.changedElsewhere, { exact: true })).toBeVisible();
-      await guidance.locator("summary").click();
       const order = await Promise.all(
         ["who-pays", "name", "contracting-party", "recipient", "identification", "footer"].map(async (id) => (await line(id).boundingBox())!.y),
       );
@@ -477,8 +468,7 @@ for (const [lang, width] of [["de", 1440], ["ru", 390]] as const) {
     await expect(line("recipient-minor-warning")).toHaveText(w.minorRecipient);
     await expect(line("identification")).toHaveCount(0);
     await expect(line("open-lead")).toHaveCount(0);
-    await expect(line("footer")).not.toContainText(w.converted.slice(0, 20));
-    await expect(line("footer")).toContainText(w.changedElsewhere);
+    await expect(line("footer")).toHaveCount(0);
     await expectNoHorizontalScroll(page, width);
     await screenshot(page, "no-lead", mock);
     expect(errors).toEqual([]);

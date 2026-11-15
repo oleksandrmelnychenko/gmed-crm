@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Info, LoaderCircle, CreditCard } from "lucide-react";
+import { LoaderCircle, CreditCard } from "lucide-react";
 
 import { inputClass, selectClass, textareaClass, tokens } from "@/components/ui-shell";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -175,13 +175,6 @@ export function LeadPayerPaymentRoute({
   return (
     <div className="space-y-2 rounded-xl border border-border/50 bg-card p-3" data-testid="lead-payer-payment-route">
       {header}
-      <p className="wizard-notice flex w-fit max-w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
-        <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-        {tx(
-          "Учитывается в оценке риска сразу. Если плательщик позже ответит по своей ссылке, его ответ заменит этот.",
-          "Zählt sofort für die Risikobewertung. Antwortet der Zahler später über seinen Link, ersetzt seine Angabe diese.",
-        )}
-      </p>
       <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
         <RouteField label={tx("Способ оплаты", "Zahlungsart")} error={errorOf("payment_method")}>
           <NativeComboboxSelect

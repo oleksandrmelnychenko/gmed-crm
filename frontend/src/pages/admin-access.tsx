@@ -699,12 +699,7 @@ function useAdminAccessPageContent() {
             {selectedField ? (
               <>
                 <section className={cn("space-y-2.5 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <div className="space-y-1">
-                    <AdminSectionTitle icon={KeyRound}>{t.admin_system_permissions}</AdminSectionTitle>
-                    <p className="text-[11px] text-muted-foreground">
-                      {t.admin_system_access_cycle_hint}
-                    </p>
-                  </div>
+                  <AdminSectionTitle icon={KeyRound}>{t.admin_system_permissions}</AdminSectionTitle>
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(

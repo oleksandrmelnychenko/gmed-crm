@@ -158,24 +158,19 @@ export const ru = {
   users_generate_password: "Сгенерировать",
   users_password_reset_success:
     "Пароль изменён. Блокировка снята, активные сессии завершены; при следующем входе пользователь должен задать новый пароль.",
-  users_password_reset_confirm:
-    "Новый пароль начнёт действовать сразу. Пользователь выйдет из аккаунта на всех устройствах, блокировка входа будет снята, а при следующем входе он должен будет задать свой пароль.",
+  users_password_reset_confirm: "Пользователь выйдет на всех устройствах и при входе задаст свой пароль.",
   users_empty_no_results: "Нет результатов",
   users_empty_no_users: "Нет пользователей",
   users_one_time_password_mode: "Одноразовый пароль (сгенерирует сервер)",
-  users_one_time_password_mode_hint:
-    "Пароль будет показан один раз — передайте его пользователю лично. При первом входе он обязан задать свой пароль. Письма не отправляются.",
   users_manual_password_mode: "Задать пароль вручную",
   users_one_time_password_title: "Одноразовый пароль",
-  users_one_time_password_shown_once:
-    "Показывается только сейчас. Скопируйте и передайте пользователю лично — после закрытия окна пароль недоступен.",
+  users_one_time_password_shown_once: "Пароль показывается только сейчас.",
   users_copy_password: "Скопировать",
   users_copied: "Скопировано",
   users_created_title: "Пользователь создан",
   users_done: "Готово",
   users_generate_one_time_password: "Сгенерировать одноразовый пароль",
-  users_generate_one_time_password_confirm:
-    "Сервер создаст новый одноразовый пароль и покажет его один раз. Пользователь выйдет из аккаунта на всех устройствах, блокировка входа будет снята, а при следующем входе он должен будет задать свой пароль.",
+  users_generate_one_time_password_confirm: "Пользователь выйдет на всех устройствах и при входе задаст свой пароль.",
   users_password_reset_required_badge: "Смена пароля при входе",
   users_totp: "Аутентификатор",
   users_totp_enrolled: "Подключён",
@@ -414,8 +409,6 @@ export const ru = {
   providers_existing_doctor_placeholder: "Выберите врача из другого провайдера",
   providers_existing_doctor_loading: "Врачи загружаются...",
   providers_existing_doctor_empty: "В других медицинских провайдерах врачи не найдены.",
-  providers_existing_doctor_hint:
-    "Выбор скопирует профиль в этого провайдера; приёмы и документы останутся привязаны к конкретному провайдеру.",
   providers_contact_person_new: "Новый контакт",
   providers_contact_person_detail: "Детали контакта",
   providers_contact_profile: "Профиль контакта",
@@ -539,8 +532,6 @@ export const ru = {
   orders_phase: "Фаза",
   orders_cost_pass_through_badge: "Транзитная позиция",
   orders_treat_as_cost_pass_through: "Провести как транзитную позицию",
-  orders_cost_pass_through_hint:
-    "Позиция останется видимой для расчёта, но не будет включаться в агентскую маржу.",
   orders_auto_billed_from_interpreter_report:
     "Автоматически начислено по отчёту переводчика",
   orders_auto_billed_from_completed_appointment:
@@ -551,8 +542,6 @@ export const ru = {
     "Привязать автоматически, если найден ровно один подходящий документ",
   orders_supporting_document_select_hint:
     "Привязать автоматически, если найден ровно один подходящий документ",
-  orders_supporting_document_pin_hint:
-    "Выберите конкретный чек или счёт провайдера, если для позиции подходит несколько файлов.",
   orders_billing_source: "Источник начисления",
   orders_billing_source_interpreter_report: "Отчёт переводчика",
   orders_billing_source_completed_appointment: "Завершённый приём",
@@ -627,13 +616,7 @@ export const ru = {
   appointments_scope_single: "Только этот приём",
   appointments_scope_following: "Этот и следующие",
   appointments_scope_series: "Вся серия",
-  appointments_scope_bulk_status_hint:
-    "Изменение статуса можно применить к текущему приёму, к текущему и следующим или ко всей активной серии.",
-  appointments_scope_following_hint:
-    "Этот и следующие создаёт новую хвостовую ветку серии от текущего приёма. Вся серия сохраняет ту же идентичность серии и сдвигает все активные приёмы вместе.",
   appointments_repeat_this: "Повторять этот приём",
-  appointments_repeat_hint:
-    "Создать повторяющуюся серию на основе текущей даты и временного слота.",
   appointments_time_pair_error:
     "Укажите время начала и окончания вместе либо оставьте оба поля пустыми.",
   appointments_time_end_capped:
@@ -783,32 +766,19 @@ export const ru = {
   settings_agency_vat_id: "ИНН по НДС / USt-IdNr. (на счетах и в e-счёте)",
   settings_agency_tax_number: "Налоговый номер / Steuernummer (на счетах и в e-счёте)",
   settings_agency_country_code: "Код страны агентства (ISO, напр. DE)",
-  settings_agency_hint:
-    "Эти данные используются в стикерах, договорах, согласиях и финансовых документах.",
   settings_document_requirements: "Обязательные документы",
-  settings_document_requirements_hint:
-    "JSON-правила минимального пакета документов пациента для алертов о недостающих файлах.",
   settings_required_patient_documents: "Обязательные документы пациента (JSON)",
   settings_clinical_data: "Хранение клинических данных",
-  settings_clinical_data_hint:
-    "Управляет сроком хранения медицинских кейсов и append-only истории анамнеза.",
   settings_clinical_retention_years: "Срок хранения медкейсов (лет)",
   settings_concierge_preparation: "Подготовка консьерж-услуг",
   settings_portal_themes: "Темы кабинетов",
-  settings_portal_themes_hint: "Эти темы используются, пока пользователь не выбрал свою в настройках аккаунта.",
   settings_patient_theme: "Кабинет пациента",
   settings_lead_theme: "Кабинет лида",
-  settings_concierge_preparation_hint:
-    "За сколько часов до начала консьерж-услуги приходит напоминание и истекает срок задачи на подготовку.",
   settings_concierge_reminder_lead_hours: "Напоминание о предстоящей услуге, часов до начала",
   settings_concierge_prep_lead_hours: "Срок задачи на подготовку, часов до начала",
   settings_interpreter_access: "Доступ переводчиков к пациенту",
-  settings_interpreter_access_hint:
-    "Забронированный переводчик видит базовую карточку, открытые документы и чат пациента. Доступ заканчивается без активного бронирования или через столько дней после последнего забронированного приёма; ручные назначения сохраняются.",
   settings_interpreter_booking_access_days: "Доступ после последнего забронированного приёма (дней)",
   settings_dunning: "Напоминания об оплате",
-  settings_dunning_hint:
-    "Первое автоматическое напоминание отправляется только после этого льготного периода после срока оплаты (по календарю Берлина). Счета с блокировкой напоминаний, планом оплаты или эскалированным долгом автоматически не напоминаются.",
   settings_auto_dunning_grace_days: "Льготный период до первого автоматического напоминания (дней)",
   settings_signature_stuck_request_days: "Закрывать неотслеживаемые запросы подписи через (дней)",
   settings_sessions: "Управление сессиями",
@@ -851,11 +821,7 @@ export const ru = {
   activity_view_activity: "Действия",
   activity_view_security: "Безопасность",
   activity_view_technical: "Технические",
-  activity_view_activity_hint: "Только реальные действия пользователей и изменения данных — без фоновых запросов.",
-  activity_view_security_hint: "Входы, управление сессиями, MFA и другие события безопасности.",
-  activity_view_technical_hint: "Сырые HTTP-запросы для диагностики. Они автоматически удаляются по короткой политике хранения.",
   activity_view_access: "Доступ и роли",
-  activity_view_access_hint: "Создание и блокировка аккаунтов, смена ролей, сброс паролей и 2FA, изменения матрицы доступа и индивидуальных прав.",
   activity_metric_events_24h: "Действий за 24 часа",
   activity_metric_users_24h: "Активных пользователей",
   activity_metric_changes_24h: "Изменений данных",
@@ -893,7 +859,6 @@ export const ru = {
   security_subtitle: "IP-фильтрация, блокировки и режим обслуживания",
   security_ip_whitelist: "Белый список IP",
   security_ip_add: "Добавить IP",
-  security_ip_add_hint: "Управляемые сетевые диапазоны с рабочим доступом и статусом допуска.",
   security_ip_cidr: "CIDR (напр. 192.168.1.0/24)",
   security_ip_cidr_placeholder: "10.0.0.0/8",
   security_ip_desc: "Описание",
@@ -905,8 +870,7 @@ export const ru = {
   security_login_history: "История входов",
   security_maintenance: "Режим обслуживания",
   security_maintenance_msg: "Сообщение",
-  security_maintenance_hint:
-    "Включайте режим обслуживания только для плановых работ. Сообщение будет показано всем затронутым пользователям.",
+  security_maintenance_hint: "Сообщение увидят все затронутые пользователи. Включить?",
   security_maintenance_on: "Включить",
   security_maintenance_off: "Выключить",
   security_audit_analytics: "Аудит-аналитика",
@@ -917,8 +881,6 @@ export const ru = {
   security_audit_token_theft: "Кража сессии за 30 дн.",
   security_audit_executive_access: "Доступ руководства к конфиденциальному за 7 дн.",
   security_audit_off_hours: "Доступ в нерабочее время за 7 дн.",
-  security_audit_hint:
-    "Неудачные входы, доступ руководителей к чувствительным данным и чтение вне рабочих часов из append-only аудит-лога.",
   security_col_reason: "Причина",
   security_col_route: "Маршрут",
   security_col_events: "События",
@@ -1007,15 +969,11 @@ export const ru = {
   compliance_col_expires: "Истекает",
   compliance_col_note: "Заметка",
   compliance_privacy_requests_title: "Запросы приватности пациента",
-  compliance_privacy_requests_hint:
-    "Регистрируйте запросы на удаление или ограничение обработки и проверяйте ретенционный контекст перед исполнением.",
   compliance_request_type_label: "Тип запроса",
   compliance_request_reason: "Причина / заметка приёма",
   compliance_request_reason_placeholder:
     "Пациент запросил удаление, юридическое ограничение, курьер подтвердил подписанный отзыв",
   compliance_create_request: "Создать запрос",
-  compliance_new_request_hint:
-    "Новые запросы наследуют снимок ретенции пациента и попадают в общую очередь проверки.",
   compliance_privacy_history: "История запросов приватности",
   compliance_no_privacy_requests:
     "По этому пациенту пока нет запросов приватности.",
@@ -1064,7 +1022,6 @@ export const ru = {
   compliance_steps_identity: "Личность заявителя",
   compliance_steps_identity_confirm: "Отметить как проверенную",
   compliance_steps_extension: "Продление срока",
-  compliance_steps_extension_hint: "один раз на два месяца, только с обоснованием",
   compliance_steps_extension_reason: "Обоснование для заявителя",
   compliance_steps_extension_confirm: "Продлить срок",
   compliance_steps_notified: "Заявитель уведомлён",
@@ -1082,7 +1039,6 @@ export const ru = {
   compliance_steps_channel_phone: "Телефон",
   compliance_steps_channel_in_person: "Лично",
   compliance_steps_recipients: "Получатели уведомлены (ст. 19)",
-  compliance_steps_recipients_hint: "уведомить клиники и других получателей об исправлении, удалении или ограничении",
   compliance_steps_recipients_note: "Кто был уведомлён?",
   compliance_steps_recipients_confirm: "Отметить уведомление получателей",
   compliance_request_type_restriction: "Ограничение обработки (ст. 18)",
@@ -1203,7 +1159,6 @@ export const ru = {
   dash_surgeries: "Операции",
   dash_followups: "Наблюдение",
   dash_active: "Активный",
-  dash_subtitle: "Обзор ежедневной работы команды",
   dash_open_tasks: "Открытых задач",
   dash_leads_monthly_hint: "Ежемесячные лиды за последние 12 месяцев",
   dash_insurance_mix: "Структура страхования",
@@ -1217,20 +1172,15 @@ export const ru = {
   dash_greeting_afternoon: "Добрый день",
   dash_greeting_evening: "Добрый вечер",
   dash_sec_demographics: "Демография",
-  dash_sec_demographics_hint: "Кто наши пациенты",
   dash_sec_clinical: "Клиника",
-  dash_sec_clinical_hint: "Причины обращений, статусы и лечение",
   dash_sec_ops: "Операционная работа",
-  dash_sec_ops_hint: "Визиты, заказы и сеть клиник",
   dash_by_country: "Пациенты по странам",
   dash_by_age: "Распределение по возрасту",
   dash_by_age_hint: "По возрастным группам",
   dash_by_gender: "Пол",
   dash_top_languages: "Топ языков",
   dash_top_reasons: "Топ причин обращений",
-  dash_top_reasons_hint: "Самые частые поводы",
   dash_cases_by_status: "Кейсы по статусу",
-  dash_cases_status_hint: "Снимок пайплайна",
   dash_avg_duration: "Средняя длительность кейса",
   dash_avg_duration_hint: "От открытия до закрытия",
   dash_days: "дней",
@@ -1464,10 +1414,7 @@ export const ru = {
   documents_share: "Поделиться",
   documents_delete: "Удалить",
   documents_delete_file: "Удалить файл",
-  documents_delete_file_description:
-    "Контролируемо удалить сохранённый файл, отозвать активные публикации и оставить запись документа как архивную историю.",
-  documents_delete_file_hint:
-    "Это действие удаляет бинарный файл с диска, отзывает активные публикации и навсегда отключает скачивание и предпросмотр. Метаданные и история версий остаются в аудиторском следе.",
+  documents_delete_file_hint: "Файл будет удалён безвозвратно.",
   documents_delete_file_reason: "Причина удаления",
   documents_delete_file_reason_placeholder:
     "Почему сохранённый файл нужно удалить?",
@@ -1540,8 +1487,6 @@ export const ru = {
   documents_patient_wide_context: "Использовать контекст всего пациента",
   documents_all_appointments_scope: "Все приёмы в выбранной области",
   documents_text_blocks: "Переиспользуемые текстовые блоки",
-  documents_text_blocks_hint:
-    "Они становятся стандартизированными подсказками или инструкционными секциями в сгенерированном документе.",
   documents_default_template_source: "По умолчанию: template:{id}",
   documents_generate_document: "Сгенерировать документ",
   documents_generating: "Генерация…",
@@ -1683,11 +1628,6 @@ export const ru = {
   documents_confidence_medium: "средняя",
   documents_confidence_high: "высокая",
   documents_unclassified: "Без классификации",
-  documents_upload_interpreter_hint:
-    "Загрузки переводчика сохраняются как внутренние черновики документов и отправляются на проверку тимлиду.",
-  documents_upload_internal_hint: "Эта загрузка сохраняется как внутренний документ.",
-  documents_upload_teamlead_hint:
-    "Эта загрузка сохраняется как внутренний документ. Здесь для загрузок тимлида недоступны полные инструменты управления документом.",
   documents_auto_classification_optional:
     "Автоматически",
   documents_popup_blocked:

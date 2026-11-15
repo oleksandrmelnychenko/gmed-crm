@@ -350,13 +350,11 @@ function PatientRelationEditorSheet({
               </option>
             ))}
           </NativeComboboxSelect>
-          <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground">
-            {patientOptionsLoading
-              ? t.patient_relation_loading_directory
-              : form.relatedPatientId
-                ? t.patient_relation_linked_sync_hint
-                : t.patient_relation_unlinked_hint}
-          </p>
+          {patientOptionsLoading ? (
+            <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground">
+              {t.patient_relation_loading_directory}
+            </p>
+          ) : null}
         </FormField>
       </FormSection>
 
@@ -492,12 +490,6 @@ function PatientRelationEditorSheet({
       </FormSection>
 
       <FormSection icon={Wallet} title={tx("Счета и плательщик", "Rechnungen und Zahler")}>
-        <p className="text-xs leading-5 text-muted-foreground">
-          {tx(
-            "Если этот человек оплачивает лечение, счёт выставляется на его имя и адрес. Для выпуска счёта нужны улица, индекс, город и страна.",
-            "Zahlt diese Person die Behandlung, geht die Rechnung an ihren Namen und ihre Anschrift. Für die Ausstellung werden Straße, PLZ, Ort und Land benötigt.",
-          )}
-        </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <FormField label={tx("E-mail для счетов", "E-Mail für Rechnungen")} htmlFor="relation-email">
             <Input

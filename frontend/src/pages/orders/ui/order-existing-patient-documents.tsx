@@ -43,11 +43,9 @@ export function OrderExistingPatientDocuments({ patientId, lang, selectedContrac
       onRefresh={() => { void review.refresh().catch(() => undefined); }} onOpenDocuments={onOpenPatient} onSaveExpiry={review.saveExpiry} />
     <OrderWizardSection flush icon={FolderArchive} title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
       <OrderExistingContractsTable contracts={review.contracts} selectedId={chosen} lang={lang} busy={review.loading} onSelect={onSelectContract} />
-      <p className="border-t border-border/60 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
-        {chosen
-          ? tx("Заказ будет привязан к выбранному подписанному договору — новый договор не нужен.", "Der Auftrag wird dem ausgewählten unterzeichneten Vertrag zugeordnet – ein neuer Vertrag ist nicht nötig.")
-          : tx("Подписанного рамочного договора нет: сначала оформите и подпишите договор.", "Es gibt keinen unterzeichneten Rahmenvertrag: Erstellen und unterzeichnen Sie zuerst einen Vertrag.")}
-      </p>
+      {chosen ? null : <p className="border-t border-border/60 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
+        {tx("Подписанного рамочного договора нет: сначала оформите и подпишите договор.", "Es gibt keinen unterzeichneten Rahmenvertrag: Erstellen und unterzeichnen Sie zuerst einen Vertrag.")}
+      </p>}
     </OrderWizardSection>
   </div>;
 }

@@ -2,11 +2,9 @@ import { useLang } from "@/lib/i18n";
 
 const ru = {
   title: "Проверка документов до подключения",
-  hint: "Проверьте реальные PDF, сканы или XML через распознавание GMED. Результат не создаёт счёт и не отправляется в DATEV.",
   limits: "До 10 файлов в одной сессии: PDF, PNG, JPG до 25 МБ; XML UBL/CII до 5 МБ.",
   choose: "Выбрать документы", input: "Документы для проверки", stop: "Остановить", clear: "Очистить результаты",
   report: "Скачать отчёт проверки", empty: "Выберите документы, которые планируете импортировать.",
-  session: "Результаты хранятся только до ухода с этой страницы. Проверка повторов охватывает эти файлы, а не базу счетов. Сверка с оригиналом и выбор клиента выполняются при импорте счёта.",
   disclaimer: "Распознавание GMED не подтверждает совместимость с DATEV. Для XML выполняются базовые проверки, а не полная проверка схемы и EN16931.",
   tooMany: "В этой сессии можно проверить до 10 файлов. Выберите меньше документов или очистите результаты.",
   noAccess: "Проверка документов доступна пользователям с правом работы со счетами. Настройки подключения доступны отдельно.",
@@ -24,11 +22,9 @@ const ru = {
 };
 const de: typeof ru = {
   title: "Dokumente vor der Anbindung prüfen",
-  hint: "Echte PDFs, Scans oder XML mit der GMED-Erkennung prüfen. Dabei wird keine Rechnung angelegt und nichts an DATEV gesendet.",
   limits: "Bis zu 10 Dateien pro Sitzung: PDF, PNG, JPG bis 25 MB; UBL/CII-XML bis 5 MB.",
   choose: "Dokumente auswählen", input: "Dokumente zur Prüfung", stop: "Stoppen", clear: "Ergebnisse löschen",
   report: "Prüfbericht herunterladen", empty: "Dokumente auswählen, die später importiert werden sollen.",
-  session: "Ergebnisse bleiben nur bis zum Verlassen dieser Seite erhalten. Die Dublettenprüfung umfasst diese Dateien, nicht den Rechnungsbestand. Originalabgleich und Patientenzuordnung erfolgen beim Rechnungsimport.",
   disclaimer: "Die GMED-Erkennung bestätigt keine DATEV-Kompatibilität. XML wird grundlegend geprüft, nicht vollständig gegen Schema und EN16931 validiert.",
   tooMany: "Pro Sitzung können bis zu 10 Dateien geprüft werden. Weniger Dokumente auswählen oder Ergebnisse löschen.",
   noAccess: "Die Dokumentenprüfung erfordert Zugriff auf Rechnungen. Die Verbindungseinstellungen sind davon getrennt zugänglich.",

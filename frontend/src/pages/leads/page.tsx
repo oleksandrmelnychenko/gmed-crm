@@ -2050,12 +2050,6 @@ function useLeadsPageContent() {
                   ) : null}
                 </section>
 
-                {detailMedicalHidden ? (
-                  <p className="rounded-xl border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
-                    {t.lead_medical_fields_hidden}
-                  </p>
-                ) : null}
-
                 {detailLeadType === "form" && !detailMedicalHidden ? (
                   <section className={cardClass("p-4")}>
                     {detail.message ? (
@@ -2377,12 +2371,7 @@ function useLeadsPageContent() {
                 {leadWorkflow ? (
                   <section className={cardClass("p-4")}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <SectionTitle>{t.lead_workflow_title}</SectionTitle>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {t.lead_workflow_description}
-                        </p>
-                      </div>
+                      <SectionTitle>{t.lead_workflow_title}</SectionTitle>
                       <div className="flex flex-wrap gap-2">
                         <Badge variant="outline" className="rounded-full">
                           {formatUiText(t.lead_workflow_progress, {
@@ -2397,7 +2386,6 @@ function useLeadsPageContent() {
                       <WorkflowActionCard
                         icon={<ClipboardCheck className="size-4" />}
                         title={t.lead_workflow_complete_gate_title}
-                        description={t.lead_workflow_complete_gate_description}
                         status={
                           detail.readiness.qualification_ready
                             ? t.lead_workflow_done
@@ -2431,7 +2419,6 @@ function useLeadsPageContent() {
                       <WorkflowActionCard
                         icon={<ShieldCheck className="size-4" />}
                         title={t.lead_workflow_qualify_title}
-                        description={t.lead_workflow_qualify_description}
                         status={
                           leadWorkflow.leadQualified
                             ? t.lead_workflow_done
@@ -2473,7 +2460,6 @@ function useLeadsPageContent() {
                       <WorkflowActionCard
                         icon={<UserPlus className="size-4" />}
                         title={t.lead_workflow_convert_title}
-                        description={t.lead_workflow_convert_description}
                         status={
                           leadWorkflow.leadConverted
                             ? t.lead_workflow_done
@@ -2513,7 +2499,6 @@ function useLeadsPageContent() {
                       <WorkflowActionCard
                         icon={<FileCheck2 className="size-4" />}
                         title={t.lead_workflow_failed_title}
-                        description={t.lead_workflow_failed_description}
                         status={
                           leadWorkflow.failedResolved
                             ? t.lead_workflow_done
@@ -2559,12 +2544,7 @@ function useLeadsPageContent() {
                 {detailIsConverted ? null : (
                 <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <SectionTitle>{t.lead_section_process_readiness}</SectionTitle>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.lead_process_readiness_description}
-                      </p>
-                    </div>
+                    <SectionTitle>{t.lead_section_process_readiness}</SectionTitle>
                     <div className="flex flex-wrap gap-2">
                       <Badge
                         variant="outline"
@@ -2644,12 +2624,7 @@ function useLeadsPageContent() {
 
                 <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <SectionTitle>{t.lead_section_lifecycle}</SectionTitle>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.lead_lifecycle_description}
-                      </p>
-                    </div>
+                    <SectionTitle>{t.lead_section_lifecycle}</SectionTitle>
                     <StatusBadge tone="neutral">
                       {`${t.lead_current_stage}: ${leadStageLabel(detail.lifecycle.current_stage, t)}`}
                     </StatusBadge>
@@ -2710,12 +2685,7 @@ function useLeadsPageContent() {
                 {gateForm && detail.failed_outcome.status === "none" ? (
                   <section className={cardClass("p-4")}>
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <SectionTitle>{t.lead_qualification_gate_data}</SectionTitle>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {t.lead_qualification_gate_description}
-                        </p>
-                      </div>
+                      <SectionTitle>{t.lead_qualification_gate_data}</SectionTitle>
                     </div>
 
                     {gateEditable ? (
@@ -2889,9 +2859,6 @@ function useLeadsPageContent() {
                               </option>
                             ))}
                           </NativeComboboxSelect>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {t.lead_compliance_signed_by_signature_hint}
-                          </p>
                           {complianceSignedWithoutDocument(detail) ? (
                             <p className="mt-1 text-xs text-amber-700">
                               {t.lead_compliance_signed_without_document}
@@ -2938,14 +2905,7 @@ function useLeadsPageContent() {
                               )
                             }
                           />
-                          <span>
-                            {t.lead_healthcare_consent_available}
-                            {detailMedicalHidden ? (
-                              <span className="mt-1 block text-xs text-muted-foreground" data-testid="lead-gate-healthcare-consent-hint">
-                                {t.lead_healthcare_consent_recorded_by_manager}
-                              </span>
-                            ) : null}
-                          </span>
+                          <span>{t.lead_healthcare_consent_available}</span>
                         </label>
                         <label className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}>
                           <input
@@ -3026,18 +2986,6 @@ function useLeadsPageContent() {
                             ? tx("Лид закрыт", "Lead geschlossen")
                             : t.lead_failed_resolution_title}
                         </SectionTitle>
-                        {detail.failed_outcome.status === "none" ? (
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {/* Only the patient manager and the CEO delete (server 403 for the rest):
-                                the text offered Sales a deletion the form does not have (QA 2026-11-10). */}
-                            {user?.role === "patient_manager" || user?.role === "ceo"
-                              ? t.lead_failed_resolution_description
-                              : tx(
-                                "Лид не подходит: заархивируйте его. Причина обязательна. Удалить с анонимизацией может менеджер пациентов или CEO.",
-                                "Der Lead passt nicht: archivieren. Ein Grund ist Pflicht. Löschen und anonymisieren können das Patientenmanagement oder der CEO.",
-                              )}
-                          </p>
-                        ) : null}
                       </div>
                       {detail.failed_outcome.status !== "none" ? (
                         <Badge
@@ -3190,8 +3138,8 @@ function useLeadsPageContent() {
                       testId="lead-delete-anonymize-dialog"
                       title={tx("Удалить и анонимизировать лид?", "Lead löschen und anonymisieren?")}
                       description={tx(
-                        "Это необратимо: персональные данные лида и все вложения будут удалены, вход в портал закрыт. В журнале аудита лид останется.",
-                        "Das kann nicht rückgängig gemacht werden: Die personenbezogenen Daten des Leads und alle Anhänge werden gelöscht, der Portalzugang wird geschlossen. Im Audit-Protokoll bleibt der Lead erhalten.",
+                        "Данные лида и вложения будут удалены безвозвратно.",
+                        "Die Daten des Leads und die Anhänge werden endgültig gelöscht.",
                       )}
                       confirmLabel={tx("Удалить безвозвратно", "Endgültig löschen")}
                       cancelLabel={tx("Отмена", "Abbrechen")}
@@ -3990,14 +3938,12 @@ function DetailCard({ label, value }: { label: ReactNode; value: ReactNode }) {
 function WorkflowActionCard({
   icon,
   title,
-  description,
   status,
   tone,
   action,
 }: {
   icon: ReactNode;
   title: string;
-  description: string;
   status: string;
   tone: "success" | "warning" | "info" | "muted";
   action: ReactNode;
@@ -4019,7 +3965,6 @@ function WorkflowActionCard({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <p className="text-sm font-medium text-foreground">{title}</p>
-              <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
             </div>
             <Badge variant="outline" className={cn("rounded-full", toneClass)}>
               {status}

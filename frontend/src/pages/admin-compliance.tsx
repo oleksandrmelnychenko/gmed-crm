@@ -1213,7 +1213,6 @@ function useAdminCompliancePageContent() {
             {readOnly ? null : (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 p-3">
                 <div className="space-y-1.5">
-                  <p className="text-xs text-muted-foreground">{t.compliance_new_request_hint}</p>
                   {activePatientId && !patientReady ? (
                     <p className="text-xs text-muted-foreground" data-testid="compliance-patient-not-ready">
                       {uiText("compliance_patient_not_loaded", lang)}
@@ -1243,7 +1242,6 @@ function useAdminCompliancePageContent() {
                   ? uiText("privacy_history_of", lang, { patient: activePatientLabel })
                   : t.compliance_privacy_history
               }
-              description={t.compliance_privacy_requests_hint}
               count={patientPrivacyRequests.length}
             >
               {patientLoading ? (
@@ -1490,9 +1488,6 @@ function useAdminCompliancePageContent() {
 
                     {canDecide(reviewSheetRecord) ? (
                       <div className="space-y-2">
-                        {reviewSheetRecord.status === "approved" ? (
-                          <p className="text-xs text-muted-foreground">{uiText("privacy_revise_hint", lang)}</p>
-                        ) : null}
                         <Field
                           label={uiText("privacy_decision_reason", lang)}
                           htmlFor="privacy-decision-reason"
@@ -1559,12 +1554,8 @@ function useAdminCompliancePageContent() {
                               />
                               <span>{uiText("privacy_open_business_restrict", lang)}</span>
                             </label>
-                            <p className="text-xs text-muted-foreground">
-                              {uiText("privacy_open_business_hold_hint", lang)}
-                            </p>
                           </div>
                         ) : null}
-                        <p className="text-xs text-muted-foreground">{uiText("privacy_decision_reason_hint", lang)}</p>
                         <Field label={uiText("privacy_internal_note", lang)} htmlFor="privacy-review-note">
                           <textarea
                             id="privacy-review-note"

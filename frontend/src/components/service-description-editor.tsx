@@ -19,9 +19,6 @@ export function ServiceDescriptionEditor({ items, onChange, lang, disabled = fal
   }
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        {label("Каждый пункт станет отдельным пунктом в документе. Enter переносит текст внутри пункта.", "Jeder Eintrag wird zu einem eigenen Punkt im Dokument. Enter erzeugt einen Zeilenumbruch innerhalb des Punktes.")}
-      </p>
       {items.map((item, index) => (
         <div key={item.id} className="rounded-lg border border-border bg-background p-3">
           <div className="mb-2 flex items-center justify-between gap-2">

@@ -97,7 +97,7 @@ export function DatevDocumentChecks() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return <DatevSetupSection id="datev-document-checks" icon={FileCheck2} title={copy.title} description={copy.hint} className="scroll-mt-5" data-testid="datev-document-checks">
+  return <DatevSetupSection id="datev-document-checks" icon={FileCheck2} title={copy.title} className="scroll-mt-5" data-testid="datev-document-checks">
     {!canStaffPath("/invoices") ? <p className="text-sm text-muted-foreground">{copy.noAccess}</p> : <>
       <div className="flex flex-wrap items-center gap-2">
         <input ref={input} type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.xml" aria-label={copy.input} className="sr-only" disabled={running || rows.length >= MAX_CHECK_FILES} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; choose(files); }} />
@@ -137,7 +137,6 @@ export function DatevDocumentChecks() {
           {["error", "cancelled"].includes(row.status) ? <Button type="button" size="sm" variant="outline" disabled={running} onClick={() => { update(row.id, { status: "queued" }); void run([row.id]); }}><RotateCcw aria-hidden className="size-3.5" />{copy.retry}</Button> : null}
         </article>)}
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">{copy.session}</p>
       <p className="text-xs leading-5 text-muted-foreground">{copy.disclaimer}</p>
     </>}
   </DatevSetupSection>;

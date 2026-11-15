@@ -79,7 +79,6 @@ export function SymptomsSection() {
       icon={Stethoscope}
       columns={columns}
       title={tri(lang, "case_ws_symptoms")}
-      description={tri(lang, "case_ws_clinical_complaints_and_related_specialty")}
       items={detail?.symptome ?? []}
       blankItem={BLANK}
       cloneItem={(item) => ({

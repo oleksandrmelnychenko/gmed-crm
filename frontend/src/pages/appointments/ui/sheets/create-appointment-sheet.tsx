@@ -804,9 +804,6 @@ function useCreateAppointmentSheetContent({
                       <span className="block font-medium text-foreground">
                         {t.appointments_repeat_this}
                       </span>
-                      <span className="block text-xs text-muted-foreground">
-                        {t.appointments_repeat_hint}
-                      </span>
                     </span>
                   </label>
                   {form.repeatEnabled ? (
@@ -1137,9 +1134,6 @@ function useCreateAppointmentSheetContent({
                     <span>
                       <span className="block font-medium text-foreground">
                         {appointmentText("appointments_interpreter_needed")}
-                      </span>
-                      <span className="block text-xs text-muted-foreground">
-                        {appointmentText("appointments_interpreter_needed_hint")}
                       </span>
                     </span>
                   </label>

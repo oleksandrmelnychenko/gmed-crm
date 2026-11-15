@@ -122,7 +122,6 @@ export function CompletenessTab() {
             {cellLabel(code)}
           </span>
         ))}
-        <span>· {formatUiText(t.personnel_late_rule, { days: data?.late_days ?? 7 })}</span>
       </p>
 
       {error ? <Banner tone="error">{error}</Banner> : null}

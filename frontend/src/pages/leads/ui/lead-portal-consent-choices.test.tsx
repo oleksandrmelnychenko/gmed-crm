@@ -192,7 +192,6 @@ describe("portal consent facts in the staff wizard", () => {
     expect(html).toContain(">Нет — не разрешено</span>");
     expect(html).not.toContain("Не дано");
     expect(html).not.toContain("portal-disclosure-consent");
-    expect(html).toContain("Это допустимый ответ");
     // Who chose is a chip of the receipt since 2026-10-26 (owner).
     expect(html.slice(html.indexOf("portal-disclosure-audit"))).toMatch(chip("user-round", "<span>Пациент"));
     expect(html).not.toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);

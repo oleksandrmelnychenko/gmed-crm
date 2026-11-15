@@ -68,10 +68,8 @@ const copy = {
   ru: {
     create: "Добавить счет",
     createTitle: "Новый счет GMED",
-    createDescription: "Банк, касса или карта в одной валюте.",
     edit: "Редактировать",
     editTitle: "Редактировать счет",
-    editDescription: "Название, тип, реквизиты и начальный остаток. Валюта не меняется.",
     activeAccount: "Счет активен",
     delete: "Удалить",
     deleteTitle: "Удалить счет?",
@@ -95,7 +93,6 @@ const copy = {
     internalTransfers: "Внутренние переводы",
     internalTransfer: "Перевести между счетами",
     transferTitle: "Внутренний перевод",
-    transferDescription: "Перемещение денег между счетами GMED в одной валюте.",
     sourceAccount: "Со счета",
     targetAccount: "На счет",
     reference: "Назначение / референс",
@@ -141,10 +138,8 @@ const copy = {
   de: {
     create: "Konto hinzufügen",
     createTitle: "Neues GMED-Konto",
-    createDescription: "Bank, Kasse oder Karte in einer Währung.",
     edit: "Bearbeiten",
     editTitle: "Konto bearbeiten",
-    editDescription: "Name, Typ, Bankverbindung und Anfangsbestand. Die Währung bleibt.",
     activeAccount: "Konto aktiv",
     delete: "Löschen",
     deleteTitle: "Konto löschen?",
@@ -168,7 +163,6 @@ const copy = {
     internalTransfers: "Interne Umbuchungen",
     internalTransfer: "Zwischen Konten umbuchen",
     transferTitle: "Interne Umbuchung",
-    transferDescription: "Geld zwischen GMED-Konten derselben Währung verschieben.",
     sourceAccount: "Vom Konto",
     targetAccount: "Auf Konto",
     reference: "Verwendungszweck / Referenz",
@@ -728,7 +722,6 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle><SectionHeading icon={ArrowLeftRight}>{text.transferTitle}</SectionHeading></DialogTitle>
-            <DialogDescription>{text.transferDescription}</DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleTransfer}>
             {transferError ? <ShellBanner tone="error">{transferError}</ShellBanner> : null}
@@ -836,7 +829,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={editAccount !== null} onOpenChange={(open) => { if (!open) setEditAccount(null); }}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle><SectionHeading icon={SquarePen}>{text.editTitle}</SectionHeading></DialogTitle><DialogDescription>{text.editDescription}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={SquarePen}>{text.editTitle}</SectionHeading></DialogTitle></DialogHeader>
           <form className="space-y-4" onSubmit={handleEdit}>
             {editError ? <ShellBanner tone="error">{editError}</ShellBanner> : null}
             <label className="block space-y-1.5 text-sm"><span>{text.name}</span><Input required maxLength={120} value={editForm.name} onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))} /></label>
@@ -863,7 +856,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle><SectionHeading icon={ListPlus}>{text.createTitle}</SectionHeading></DialogTitle><DialogDescription>{text.createDescription}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={ListPlus}>{text.createTitle}</SectionHeading></DialogTitle></DialogHeader>
           <form className="space-y-4" onSubmit={handleCreate}>
             {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
             <label className="block space-y-1.5 text-sm"><span>{text.name}</span><Input required maxLength={120} value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} /></label>

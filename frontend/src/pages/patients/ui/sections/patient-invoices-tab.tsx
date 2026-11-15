@@ -2507,15 +2507,8 @@ function usePatientInvoicesTabContent({
           ) : null}
           <section className="rounded-xl border border-border/70 bg-card p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-foreground">
-                  {lang === "de" ? "Manuelle Kontokorrekturen" : "Ручные корректировки баланса"}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {lang === "de"
-                    ? "Nur für Salden, die nicht durch Rechnung, Zahlung oder Gutschrift abgebildet werden. Ein Fehler wird storniert, nie gelöscht."
-                    : "Только для сальдо, которое не отражено счётом, оплатой или кредит-нотой. Ошибка сторнируется, а не удаляется."}
-                </p>
+              <div className="text-sm font-semibold text-foreground">
+                {lang === "de" ? "Manuelle Kontokorrekturen" : "Ручные корректировки баланса"}
               </div>
               {canManageBalance ? (
                 <Button
@@ -2782,8 +2775,8 @@ function usePatientInvoicesTabContent({
 
         <Banner tone="warning" withIcon>
           {lang === "de"
-            ? "Nur für Beträge verwenden, die nicht bereits durch Rechnung, Zahlung, Rückzahlung oder Gutschrift gebucht sind. Eine falsche Buchung wird storniert und bleibt nachvollziehbar."
-            : "Используйте только для сумм, которые ещё не отражены счётом, оплатой, возвратом или кредит-нотой. Ошибочная запись сторнируется и остаётся в истории."}
+            ? "Nur für Beträge, die nicht bereits durch Rechnung, Zahlung, Rückzahlung oder Gutschrift gebucht sind."
+            : "Только для сумм, которые ещё не отражены счётом, оплатой, возвратом или кредит-нотой."}
         </Banner>
 
         <PatientFormSection icon={Wallet} title={lang === "de" ? "Buchung" : "Операция"}>
@@ -2932,15 +2925,8 @@ function usePatientInvoicesTabContent({
                 }
                 disabled={balanceAdjustmentBusy}
               />
-              <span>
-                <span className="block font-medium">
-                  {lang === "de" ? "Begründung im Patientenportal anzeigen" : "Показывать причину в портале пациента"}
-                </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  {lang === "de"
-                    ? "Betrag und Datum sind für einen korrekten Saldo immer sichtbar. Diese Option zeigt zusätzlich die Begründung; die interne Notiz bleibt verborgen."
-                    : "Сумма и дата всегда видны для правильного сальдо. Эта опция дополнительно показывает причину; внутренняя заметка остаётся скрытой."}
-                </span>
+              <span className="block font-medium">
+                {lang === "de" ? "Begründung im Patientenportal anzeigen" : "Показывать причину в портале пациента"}
               </span>
             </label>
           </div>
@@ -3050,8 +3036,8 @@ function usePatientInvoicesTabContent({
                   {activatedPortalAccount.reused
                     ? lang === "de" ? "Das bisherige Passwort und der Zugang zu den Kindern bleiben erhalten." : "Прежний пароль и доступ к детям сохранены."
                     : lang === "de"
-                    ? "Übermitteln Sie diese Zugangsdaten sicher an den Patienten. Das temporäre Passwort wird nach dem Schließen nicht mehr angezeigt."
-                    : "Безопасно передайте эти данные пациенту. После закрытия временный пароль больше не будет показан."}
+                    ? "Das temporäre Passwort wird nach dem Schließen nicht mehr angezeigt."
+                    : "После закрытия временный пароль больше не будет показан."}
                 </p>
               </div>
             </div>
@@ -3116,15 +3102,15 @@ function usePatientInvoicesTabContent({
             <Banner tone="warning" withIcon>
               {portalAccountIsActive
                 ? lang === "de"
-                  ? "Ändern Sie die E-Mail-Adresse oder vergeben Sie ein neues Passwort. Aktive Sitzungen werden nach dem Speichern beendet."
-                  : "Измените email или задайте новый пароль. После сохранения активные сессии будут завершены."
+                  ? "Aktive Sitzungen werden nach dem Speichern beendet."
+                  : "После сохранения активные сессии будут завершены."
                 : linkedPortalAssignment
                   ? lang === "de"
-                    ? "Das bestehende Patientenkonto wird aktiviert und erhält ein neues Passwort. Aktive Sitzungen werden beendet."
-                    : "Существующий аккаунт пациента будет активирован и получит новый пароль. Активные сессии будут завершены."
+                    ? "Das bestehende Patientenkonto erhält ein neues Passwort."
+                    : "Существующий аккаунт пациента получит новый пароль."
                 : lang === "de"
-                  ? "Ein bestehender Elternzugang derselben Person wird mit seinem bisherigen Passwort verknüpft. Für einen neuen Zugang vergeben Sie ein Passwort."
-                  : "Существующий аккаунт родителя для этого же человека подключается с прежним паролем. Для нового аккаунта укажите пароль."}
+                  ? "Ein bestehender Elternzugang derselben Person wird mit seinem bisherigen Passwort verknüpft."
+                  : "Существующий аккаунт родителя для этого же человека подключается с прежним паролем."}
             </Banner>
 
             <FormSection icon={LockKeyhole} title={lang === "de" ? "Patientenzugang" : "Доступ пациента"}>

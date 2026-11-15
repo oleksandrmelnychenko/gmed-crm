@@ -174,9 +174,6 @@ export function StaffDashboardOverviewSection({
           <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">
             {greeting}
           </h1>
-          <p className="mt-1 text-[13px] text-muted-foreground">
-            {tr.dash_subtitle ?? tr.common_unknown}
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <OpenTaskQueueLink />

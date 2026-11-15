@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApiRequestError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -56,7 +56,6 @@ export function SignatureConnectionDialog({ canConfigure, onChanged }: { canConf
       <DialogContent className="grid max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:max-h-[90dvh] sm:max-w-2xl">
         <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle><SectionHeading icon={KeyRound}>{lang === "de" ? "Skribble verbinden" : "Подключить Skribble"}</SectionHeading></DialogTitle>
-          <DialogDescription className="text-xs">{lang === "de" ? "Deutschland · Elektronische Unterschriften für GMED" : "Германия · Электронные подписи для GMED"}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto p-4 sm:p-5">
           {open ? <SignatureConnectionForm canConfigure={canConfigure} onChanged={() => { changed.current = true; }} onDirtyChange={setDirty} /> : null}
@@ -137,7 +136,6 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
       {!loading && !connection?.configured ? (
       <ConnectionSection icon={LogIn} title={tx("Вход в кабинет Skribble", "Bei Skribble anmelden")}>
         <div className="flex flex-col items-start gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs leading-5 text-muted-foreground">{tx("Откройте немецкий кабинет сервиса в отдельном окне.", "Öffnen Sie das deutsche Skribble-Konto in einem separaten Fenster.")}</p>
           {portalLink}
         </div>
       </ConnectionSection>
@@ -188,9 +186,7 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
             icon={KeyRound} title={connection?.configured ? tx("Изменить подключение", "Verbindung ändern") : tx("Подключение GMED", "GMED anbinden")}
           >
             <div className="space-y-3 p-3.5">
-              <p className="text-xs leading-5 text-muted-foreground">{connection?.configured
-                ? tx("Введите новый API-ключ для замены подключения. Текущее подключение действует до проверки и сохранения новых данных.", "Geben Sie einen neuen API-Schlüssel ein. Die aktuelle Verbindung bleibt aktiv, bis die neuen Zugangsdaten geprüft und gespeichert sind.")
-                : tx("Создайте API-доступ в административном разделе Skribble и введите данные здесь.", "Erstellen Sie im Skribble-Adminbereich einen API-Zugang und tragen Sie die Zugangsdaten hier ein.")}{" "}<a href="https://docs.skribble.com/business-admin/api/apicreate.html" target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">{tx("Инструкция", "Anleitung")}</a></p>
+              <p className="text-xs leading-5 text-muted-foreground"><a href="https://docs.skribble.com/business-admin/api/apicreate.html" target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">{tx("Инструкция", "Anleitung")}</a></p>
               <fieldset disabled={busy || loading} className="grid min-w-0 gap-3 sm:grid-cols-2">
                 <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">
                   <span>{tx("Режим", "Betriebsart")}</span>
@@ -222,7 +218,6 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
                   <span>{tx("API-ключ", "API-Schlüssel")}</span>
                   <Input className="h-9 bg-field font-normal" type="password" autoComplete="new-password" maxLength={8192} value={apiKey} required onChange={e => setApiKey(e.target.value)} />
                 </label>
-                <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{tx("Ключ будет зашифрован на сервере. После сохранения поле очистится.", "Der Schlüssel wird verschlüsselt auf dem Server gespeichert. Nach dem Speichern wird das Feld geleert.")}</p>
               </fieldset>
               {feedback}
             </div>

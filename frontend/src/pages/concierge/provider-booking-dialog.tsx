@@ -91,17 +91,12 @@ const copy = {
     book: "Beim Partner buchen",
     confirm: "Buchung bestätigen",
     title: "Buchung beim Partner",
-    description: "Buchungsstand, Buchungsnummer und Kontakt beim Partner festhalten. Eine bestätigte Buchung setzt den Service auf „Bestätigt“.",
     provider: "Partner",
     chooseProvider: "Partner auswählen",
-    providerFixed: "Der Service ist mit diesem Partner verknüpft.",
-    vendorKept: (name: string) => `Der Patient sieht weiterhin den Anbieter „${name}“.`,
-    vendorFromPartner: "Der Patient sieht den Namen des Partners als Anbieter.",
     state: "Buchungsstand",
     details: "Buchungsdetails",
     requested: "Angefragt",
     confirmed: "Bestätigt",
-    alreadyRequested: "Die Buchung ist angefragt – jetzt kann sie bestätigt werden.",
     startsAt: "Beginn",
     endsAt: "Ende (optional)",
     address: "Serviceadresse",
@@ -148,17 +143,12 @@ const copy = {
     book: "Забронировать у партнёра",
     confirm: "Подтвердить бронь",
     title: "Бронирование у партнёра",
-    description: "Зафиксируйте этап брони, номер брони и контакт партнёра. Подтверждённая бронь переводит сервис в статус «Подтверждено».",
     provider: "Партнёр",
     chooseProvider: "Выберите партнёра",
-    providerFixed: "Сервис уже связан с этим партнёром.",
-    vendorKept: (name: string) => `Пациент по-прежнему видит поставщика «${name}».`,
-    vendorFromPartner: "Пациент увидит имя партнёра как поставщика.",
     state: "Этап брони",
     details: "Детали бронирования",
     requested: "Запрошено",
     confirmed: "Подтверждено",
-    alreadyRequested: "Бронь уже запрошена — теперь её можно подтвердить.",
     startsAt: "Начало",
     endsAt: "Окончание (необязательно)",
     address: "Адрес услуги",
@@ -439,7 +429,7 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
         <ConciergeDialogHeader
           icon={CalendarCheck2}
           title={labels.title}
-          description={serviceTitle ? `${serviceTitle} · ${labels.description}` : labels.description}
+          description={serviceTitle || undefined}
         />
         {!service ? (
           <ConciergeDialogBody>
@@ -475,13 +465,6 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
                           ))}
                         </NativeComboboxSelect>
                       </ConciergeField>
-                      {providerFixed ? <p className="text-xs text-muted-foreground">{labels.providerFixed}</p> : null}
-                      {/* The booking keeps a supplier name the patient already sees (QA D-5). */}
-                      <p className="text-xs text-muted-foreground" data-testid="booking-vendor-hint">
-                        {service.vendor_name?.trim()
-                          ? labels.vendorKept(service.vendor_name.trim())
-                          : labels.vendorFromPartner}
-                      </p>
                       {provider ? (
                         <div className="grid grid-cols-3 gap-2">
                           <Button nativeButton={false} render={<a href={callUrl ?? "#"} />} variant="outline" size="sm" disabled={!callUrl}><Phone />{labels.call}</Button>
@@ -510,9 +493,6 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
                         </Button>
                       ))}
                     </div>
-                    {service.status === "booked" ? (
-                      <p className="mt-2 text-xs text-muted-foreground">{labels.alreadyRequested}</p>
-                    ) : null}
                   </ConciergeDialogSection>
                 </div>
 

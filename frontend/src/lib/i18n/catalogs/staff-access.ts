@@ -25,7 +25,6 @@ export type StaffAccessCopy = {
   directDeny: string;
   inheritedRule: string;
   globalRules: string;
-  allScopeHint: string;
   remove: string;
   create: string;
   clone: string;
@@ -93,8 +92,6 @@ export const staffAccessDe = {
   directDeny: "Direkt verboten",
   inheritedRule: "Profil",
   globalRules: "Globale persönliche Regeln",
-  allScopeHint:
-    "Persönliche Regel für alle verfügbaren Einträge; medizinische Systemgrenzen bleiben aktiv.",
   remove: "Entfernen",
   create: "Profil erstellen",
   clone: "Profil duplizieren",
@@ -159,8 +156,6 @@ export const staffAccessRu = {
   directDeny: "Прямой запрет",
   inheritedRule: "Профиль",
   globalRules: "Глобальные персональные правила",
-  allScopeHint:
-    "Персональное правило для всех доступных записей; системные медицинские ограничения продолжают действовать.",
   remove: "Удалить",
   create: "Создать профиль",
   clone: "Дублировать профиль",

@@ -364,8 +364,8 @@ export function LeadPayerLinkPanel({
         testId="lead-payer-link-revoke-dialog"
         title={tx("Отозвать ссылку плательщика?", "Link des Zahlers widerrufen?")}
         description={tx(
-          "Открыть её больше будет нельзя; ответы плательщика сохраняются.",
-          "Er lässt sich danach nicht mehr öffnen; die Angaben des Zahlers bleiben erhalten.",
+          "Открыть её больше будет нельзя.",
+          "Er lässt sich danach nicht mehr öffnen.",
         )}
         confirmLabel={tx("Отозвать ссылку", "Link widerrufen")}
         cancelLabel={tx("Отмена", "Abbrechen")}
@@ -377,7 +377,7 @@ export function LeadPayerLinkPanel({
         open={confirm === "resend"}
         testId="lead-payer-link-resend-dialog"
         title={tx("Подготовить новую ссылку?", "Neuen Link vorbereiten?")}
-        description={tx("Предыдущая ссылка перестанет работать. Сохранённые ответы останутся.", "Der vorherige Link wird ungültig. Gespeicherte Antworten bleiben erhalten.")}
+        description={tx("Предыдущая ссылка перестанет работать.", "Der vorherige Link wird ungültig.")}
         confirmLabel={tx("Подготовить", "Vorbereiten")}
         cancelLabel={tx("Отмена", "Abbrechen")}
         onConfirm={() => void prepare()}

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/ui-shell";
 import { DATEV_DEMO_ORDERS, DATEV_DEMO_PATIENTS, datevDate, datevMoney, demoDocumentUrl, isValidDemoBinding, suggestDemoPatient, type DatevDemoBinding, type DatevDemoInvoice } from "./model";
 import { useDatevText } from "./text";
@@ -27,7 +27,6 @@ export function DatevInvoiceDialog({ invoice, binding, onClose, onSave }: {
     <DialogContent className="left-1/2 right-auto top-1/2 bottom-auto flex h-[min(920px,calc(100dvh-24px))] max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-[1380px] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden p-0 sm:w-[calc(100vw-48px)] sm:max-w-[1380px] sm:pb-0">
       <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
         <DialogTitle className="flex flex-wrap items-center gap-2"><SectionHeading icon={FileCheck2}>{text.review}</SectionHeading><Badge variant="secondary">{text.demo}</Badge></DialogTitle>
-        <DialogDescription>{text.reviewHint}</DialogDescription>
       </DialogHeader>
       <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:overflow-hidden">
         <section aria-label={text.original} className="flex min-h-0 flex-col border-b bg-muted/30 lg:border-r lg:border-b-0">
@@ -56,7 +55,6 @@ export function DatevInvoiceDialog({ invoice, binding, onClose, onSave }: {
             <Field label={text.order}><NativeComboboxSelect aria-label={text.order} value={orderId} disabled={!patientId} onChange={(event) => { setOrderId(event.target.value); setConfirmed(false); }}>
               <option value="">{text.chooseOrder}</option>{DATEV_DEMO_ORDERS.filter((order) => order.patient_id === patientId).map((order) => <option key={order.id} value={order.id}>{order.order_number}</option>)}
             </NativeComboboxSelect></Field>
-            <p className="text-xs leading-5 text-muted-foreground">{text.bindingNote}</p>
           </div>
           <div className="space-y-3">
             <h3 className="text-sm font-semibold"><SectionHeading icon={ListFilter}>{text.fields}</SectionHeading></h3>

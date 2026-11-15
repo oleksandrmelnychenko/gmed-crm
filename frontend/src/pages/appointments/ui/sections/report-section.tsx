@@ -665,11 +665,6 @@ function useAppointmentReportSectionContent({
                     placeholder={withEllipsis(tr.patients_notes)}
                     data-testid="report-review-note"
                   />
-                  {canRejectReport ? (
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {appointmentText("appointments_report_review_note_hint")}
-                    </span>
-                  ) : null}
                 </Field>
               </>
             ) : null}

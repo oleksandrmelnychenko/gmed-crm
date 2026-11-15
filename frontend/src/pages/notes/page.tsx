@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApiRequestError, apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
@@ -94,14 +94,11 @@ export const NOTES_COPY = {
     error: "Aktion fehlgeschlagen",
     cancel: "Abbrechen",
     visibility: "Sichtbarkeit",
-    visibilityHint: "Wer die Notiz lesen darf. Der CEO sieht alle Notizen.",
     visibilityAuthorOnly: "Die Sichtbarkeit ändert nur die Person, die die Notiz angelegt hat.",
     visibilityOwn: { private: "Nur ich", role: "Meine Rolle", staff: "Alle Mitarbeitenden" },
     visibilityOther: { private: "Nur Autor:in", role: "Rolle", staff: "Alle Mitarbeitenden" },
     visibilityAuthorRole: (role: string) => `Rolle der Autor:in: ${role}`,
     visibilityAuthorRoleUnknown: "Rolle der Autor:in",
-    visibilityHintOther: (author: string) =>
-      `Die Sichtbarkeit gilt aus Sicht der Person, die die Notiz angelegt hat (${author}). Der CEO sieht alle Notizen.`,
     errorNotFound: "Die Notiz gibt es nicht mehr oder sie ist nicht für Sie freigegeben.",
     errorConflict: "Die Notiz wurde inzwischen von jemand anderem geändert. Bitte neu laden.",
     errorReadOnly: "Ihre Rolle kann Notizen nur lesen.",
@@ -113,7 +110,6 @@ export const NOTES_COPY = {
     noArchived: "Keine archivierten Notizen",
     selectArchived: "Archivierte Notiz auswählen",
     archivedOn: (date: string, by: string) => `Archiviert am ${date} · ${by}`,
-    restoreHint: "Wiederherstellen können die Person, die die Notiz angelegt hat, und der CEO.",
   },
   ru: {
     title: "Заметки",
@@ -143,14 +139,11 @@ export const NOTES_COPY = {
     error: "Не удалось выполнить действие",
     cancel: "Отмена",
     visibility: "Видимость",
-    visibilityHint: "Кто может читать заметку. CEO видит все заметки.",
     visibilityAuthorOnly: "Видимость меняет только автор заметки.",
     visibilityOwn: { private: "Только я", role: "Моя роль", staff: "Все сотрудники" },
     visibilityOther: { private: "Только автор", role: "Роль", staff: "Все сотрудники" },
     visibilityAuthorRole: (role: string) => `Роль автора: ${role}`,
     visibilityAuthorRoleUnknown: "Роль автора",
-    visibilityHintOther: (author: string) =>
-      `Видимость задаётся от лица автора заметки (${author}). CEO видит все заметки.`,
     errorNotFound: "Заметки больше нет или она вам недоступна.",
     errorConflict: "Заметку тем временем изменил другой сотрудник. Обновите страницу.",
     errorReadOnly: "Ваша роль может только просматривать заметки.",
@@ -162,7 +155,6 @@ export const NOTES_COPY = {
     noArchived: "В архиве нет заметок",
     selectArchived: "Выберите заметку из архива",
     archivedOn: (date: string, by: string) => `В архиве с ${date} · ${by}`,
-    restoreHint: "Восстановить заметку может её автор или CEO.",
   },
 } as const;
 
@@ -294,7 +286,6 @@ export function InternalNotesPage() {
   // Only the author (or the CEO) decides who reads a note and archives it; the server checks it too.
   const canManage = canManageNote(activeNote, user);
   const canChangeVisibility = canManage;
-  const editingOthersNote = Boolean(activeNote && user && activeNote.created_by !== user.id);
   const visibilityChoices = noteVisibilityChoices(activeNote, user?.id, labels, roleName);
   // A plain list: the select reads its <option> children, not a fragment.
   const optionsFor = (choices: Record<NoteVisibility, string>) =>
@@ -598,7 +589,6 @@ export function InternalNotesPage() {
                     </Button>
                   ) : null}
                 </div>
-                <p className="mx-4 mt-3 text-xs text-muted-foreground sm:mx-5">{labels.restoreHint}</p>
                 <p className="mx-4 mt-3 mb-4 whitespace-pre-wrap break-words rounded-lg border border-border/70 bg-muted/20 px-3 py-3 text-sm leading-6 sm:mx-5">
                   {archivedNote.body || "—"}
                 </p>
@@ -648,15 +638,6 @@ export function InternalNotesPage() {
                       {noteVisibilityLabel(activeNote, user?.id, labels, roleName)}
                     </span>
                   )}
-                  <span className="block text-xs font-normal text-muted-foreground">
-                    {canChangeVisibility
-                      ? editingOthersNote
-                        ? labels.visibilityHintOther(activeNote.created_by_name)
-                        : labels.visibilityHint
-                      : readOnly
-                        ? labels.errorReadOnly
-                        : `${labels.visibilityAuthorOnly} ${labels.archiveAuthorOnly}`}
-                  </span>
                 </label>
               ) : null}
               <label className="mx-4 mt-3 block space-y-1.5 text-sm font-medium sm:mx-5">
@@ -719,7 +700,6 @@ export function InternalNotesPage() {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle><SectionHeading icon={NotebookPen}>{labels.newNote}</SectionHeading></DialogTitle>
-            <DialogDescription>{labels.subtitle}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <label className="grid gap-1.5 text-sm font-medium">
@@ -736,7 +716,6 @@ export function InternalNotesPage() {
               >
                 {optionsFor(labels.visibilityOwn)}
               </NativeComboboxSelect>
-              <span className="text-xs font-normal text-muted-foreground">{labels.visibilityHint}</span>
             </label>
             <label className="grid gap-1.5 text-sm font-medium">
               <span>{labels.noteBody}</span>

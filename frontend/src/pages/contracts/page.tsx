@@ -2585,11 +2585,6 @@ function useContractsPageContent() {
                           setAgencyServiceForm((current) => ({ ...current, serviceName: event.target.value }))
                         }
                       />
-                      <span className="text-[11px] leading-4 text-muted-foreground">
-                        {lang === "de"
-                          ? "Deutsch: so steht die Leistung im Auftrag, im Kostenvoranschlag und auf der Rechnung."
-                          : "На немецком: так услуга печатается в заказе, смете и счёте."}
-                      </span>
                     </Field>
                     <Field label={lang === "de" ? "Name für die russische Oberfläche" : "Название в русском интерфейсе"} className="sm:col-span-2">
                       <Input
@@ -2968,7 +2963,6 @@ function useContractsPageContent() {
                           setCreateQuoteForm((current) => ({ ...current, internalNote: event.target.value }))
                         }
                       />
-                      <p className="text-xs text-muted-foreground">{t.finance_internal_note_hint}</p>
                     </Field>
                   </div>
                 </section>

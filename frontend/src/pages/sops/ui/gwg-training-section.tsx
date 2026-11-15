@@ -554,14 +554,13 @@ export function GwgTrainingFormFields({
   );
 }
 
-function SectionHeader({ icon, title, intro, accessory }: { icon: LucideIcon; title: string; intro: string; accessory?: ReactNode }) {
+function SectionHeader({ icon, title, accessory }: { icon: LucideIcon; title: string; accessory?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0">
         <h2 className={tokens.text.sectionTitle}>
           <SectionHeading icon={icon}>{title}</SectionHeading>
         </h2>
-        <p className="max-w-3xl text-xs leading-5 text-muted-foreground">{intro}</p>
       </div>
       {accessory}
     </div>
@@ -670,7 +669,6 @@ function GwgTrainingManager() {
       <SectionHeader
         icon={GraduationCap}
         title={t.sops_gwg_title}
-        intro={t.sops_gwg_intro}
         accessory={
           dueCount > 0 ? (
             <Badge variant="outline" className="rounded-full bg-rose-100 text-rose-700 hover:bg-rose-100">
@@ -813,7 +811,6 @@ function GwgOwnTrainingsView() {
       <SectionHeader
         icon={NotebookPen}
         title={t.sops_gwg_my_title}
-        intro={t.sops_gwg_my_intro}
         accessory={
           data && data.records.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">

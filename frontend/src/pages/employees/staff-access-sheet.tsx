@@ -591,7 +591,6 @@ export function StaffAccessSheet({
                       </span>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-foreground">{copy.all}</p>
-                        <p className="text-xs text-muted-foreground">{copy.allScopeHint}</p>
                         {resourceType === "document" && !targetCanUseMedicalDocuments ? (
                           <p className="mt-1 text-xs text-muted-foreground">
                             {copy.medicalAllLocked} {copy.nonMedicalUploadHint}

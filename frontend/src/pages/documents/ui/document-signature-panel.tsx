@@ -181,7 +181,6 @@ export function SignatureRequestMembers({ request, documentId, onPreview }: { re
           </li>;
         })}
       </ol>
-      {request.result_document_id ? <p className="text-[11px] leading-5 text-foreground">{tx("Подписанный оригинал — общий PDF пакета; документ не разделяется, иначе подпись теряет силу.", "Das signierte Original ist die gemeinsame PDF des Pakets; sie wird nicht aufgeteilt, sonst verliert die Signatur ihre Wirkung.")}</p> : null}
     </section> : null}
     {request.attachments?.length ? <section className="min-w-0 space-y-1.5" data-signature-attachments>
       <h4><SectionHeading icon={Paperclip}>{tx("Для ознакомления", "Zur Kenntnisnahme")}</SectionHeading></h4>
@@ -506,7 +505,6 @@ export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChan
             <div className="flex flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">Skribble · Deutschland</p>
-                {!state.test_mode ? <p className="text-xs leading-5 text-muted-foreground">{tx("Квалифицированная подпись по стандарту eIDAS", "Qualifizierte Signatur nach eIDAS")}</p> : null}
               </div>
               <SignatureConnectionDialog canConfigure={state.can_configure} onChanged={() => { setAwaitingState(true); setRevision(value => value + 1); }} />
             </div>
@@ -515,7 +513,6 @@ export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChan
             <Badge variant="outline" className="rounded-full text-[10px]">{state.test_mode ? "DEMO · Skribble" : "QES / eIDAS · Skribble"}</Badge>
           </div>}
           {state.enabled && state.test_mode ? <Banner tone="warning">{tx("Тестовый режим (DEMO): подписи не имеют юридической силы и не меняют статус договоров, заказов и согласий.", "Testmodus (DEMO): Die Unterschriften haben keine Rechtswirkung und ändern keine Verträge, Aufträge oder Einwilligungen.")}</Banner> : null}
-          {!state.can_send ? <p className="text-xs leading-5 text-muted-foreground">{tx("Доступен просмотр статуса. Для отправки документа на подпись нужны права редактирования и скачивания.", "Der Status ist sichtbar. Zum Versand werden Bearbeitungs- und Downloadrechte benötigt.")}</p> : null}
 
           {state.requests.map((request, index) => {
             return <section key={request.id} ref={request.id === submittedRequestId ? submittedCardRef : undefined} aria-label={index === 0 ? tx("Текущий запрос подписи", "Aktuelle Signaturanfrage") : tx("Предыдущий запрос подписи", "Frühere Signaturanfrage")} className="rounded-xl border border-border/70 bg-card shadow-xs" data-signature-request={request.id}>

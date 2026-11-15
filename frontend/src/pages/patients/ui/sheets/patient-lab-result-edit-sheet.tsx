@@ -890,8 +890,8 @@ export function PatientLabResultDeleteSheet({
       onSubmit={handleSubmit}
       title={tx("Удалить результат анализа", "Laborwert löschen")}
       description={tx(
-        "Запись исчезнет из активной истории. Удаление будет сохранено в журнале.",
-        "Der Eintrag verschwindet aus dem aktiven Verlauf. Die Löschung wird protokolliert.",
+        "Запись исчезнет из активной истории.",
+        "Der Eintrag verschwindet aus dem aktiven Verlauf.",
       )}
       footer={
         <>

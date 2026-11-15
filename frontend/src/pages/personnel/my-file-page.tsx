@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ContactRound, Download, Lock } from "lucide-react";
+import { ContactRound, Download } from "lucide-react";
 
 import { Banner, EmptyCell, InfoRow, PageHeader, Section, TabLoader, TabShell } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
@@ -9,7 +9,7 @@ import { useLang } from "@/lib/i18n";
 import { personnelApi, type PersonnelCategory, type PersonnelDocument, type PersonnelOwnFile } from "./api";
 import { PersonnelDocumentsTable } from "./documents-list";
 import { formatEmploymentPeriod } from "./model";
-import { FilePreviewDialog, MutedNote, RowIconAction, usePersonnelLabels } from "./personnel-ui";
+import { FilePreviewDialog, RowIconAction, usePersonnelLabels } from "./personnel-ui";
 
 /**
  * The signed-in employee's own personnel file (§ 83 BetrVG, Art. 15 DSGVO):
@@ -67,7 +67,6 @@ export function MyPersonnelFilePage() {
               />
             </div>
           </Section>
-          <MutedNote icon={Lock}>{t.personnel_my_file_notice}</MutedNote>
           <PersonnelDocumentsTable
             title={t.personnel_tab_documents}
             documents={file?.documents ?? []}
@@ -97,7 +96,6 @@ export function MyPersonnelFilePage() {
         mimeType={previewing?.mime_type ?? ""}
         load={() => personnelApi.documentFile(previewing?.id ?? "", true)}
         onClose={() => setPreviewing(null)}
-        note={t.personnel_access_logged}
       />
     </TabShell>
   );

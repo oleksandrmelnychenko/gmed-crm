@@ -268,11 +268,6 @@ function AdminAnnouncementCreateSheet({
                   </NativeComboboxSelect>
                 </Field>
               </div>
-              {fVariant === "error" ? (
-                <p className="text-xs text-muted-foreground">
-                  {t.uiText.announcements_error_not_dismissible}
-                </p>
-              ) : null}
               <Field label={`${t.ann_message} *`} htmlFor="announcement-message">
                 <Input
                   id="announcement-message"

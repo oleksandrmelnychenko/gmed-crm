@@ -25,13 +25,6 @@ function AppointmentLinksSection({
   // The order tile only helps people who may open orders (an interpreter
   // would land on the dashboard).
   const canOpenOrder = hasCapability(user, "orders.view");
-  const l = (key: string) => t.uiText[key] ?? key;
-  const descriptions = {
-    patient: l("appointments_linked_tile_patient_description"),
-    order: l("appointments_linked_tile_order_description"),
-    clinic: l("appointments_linked_tile_clinic_description"),
-    documents: l("appointments_linked_tile_documents_description"),
-  };
   const patientLabel = appointmentText("appointments_patient");
   const orderLabel = appointmentText("appointments_order");
   const clinicLabel = appointmentText("appointments_clinic");
@@ -49,7 +42,6 @@ function AppointmentLinksSection({
           <LinkedRecordTile
             icon={UserRound}
             title={patientLabel}
-            description={descriptions.patient}
             onClick={() => onOpenPreview("patient", patientLabel)}
           />
         ) : null}
@@ -57,7 +49,6 @@ function AppointmentLinksSection({
           <LinkedRecordTile
             icon={ClipboardList}
             title={orderLabel}
-            description={descriptions.order}
             onClick={() => onOpenPreview("order", orderLabel)}
           />
         ) : null}
@@ -65,14 +56,12 @@ function AppointmentLinksSection({
           <LinkedRecordTile
             icon={Hospital}
             title={clinicLabel}
-            description={descriptions.clinic}
             onClick={() => onOpenPreview("provider", clinicLabel)}
           />
         ) : null}
         <LinkedRecordTile
           icon={FolderOpen}
           title={documentsLabel}
-          description={descriptions.documents}
           onClick={() => onOpenPreview("documents", documentsLabel)}
         />
       </div>
@@ -83,12 +72,10 @@ function AppointmentLinksSection({
 function LinkedRecordTile({
   icon,
   title,
-  description,
   onClick,
 }: {
   icon: LucideIcon;
   title: string;
-  description: string;
   onClick: () => void;
 }) {
   return (
@@ -99,7 +86,6 @@ function LinkedRecordTile({
     >
       <SectionHeading icon={icon}>{title}</SectionHeading>
       <ArrowUpRight aria-hidden="true" className="mt-0.5 size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
-      <span className="col-span-2 min-w-0 break-words text-xs leading-5 text-muted-foreground">{description}</span>
     </button>
   );
 }

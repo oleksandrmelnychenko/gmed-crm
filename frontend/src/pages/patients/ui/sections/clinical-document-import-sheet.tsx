@@ -583,14 +583,6 @@ function MedicationCandidateEditor({
               )}
             </span>
           ) : null}
-          {createsNewSeries ? (
-            <span className="block text-[11px] text-sky-800">
-              {tx(
-                "Будет создана отдельная параллельная линия; существующие схемы не перезаписываются.",
-                "Es wird eine eigene parallele Serie erstellt; bestehende Schemata werden nicht überschrieben.",
-              )}
-            </span>
-          ) : null}
         </label>
       ) : null}
 
@@ -795,17 +787,9 @@ function VitalCandidateEditor({
       onClick={(event) => event.stopPropagation()}
     >
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-pink-100 bg-pink-50/70 px-3 py-2.5">
-        <div>
-          <p className="text-xs font-semibold text-pink-950">
-            {tx("Проверьте дату и каждое измерение", "Datum und jeden Messwert prüfen")}
-          </p>
-          <p className="mt-0.5 text-[11px] leading-4 text-pink-800">
-            {tx(
-              "В историю попадёт отдельная запись с источником и страницей документа.",
-              "Im Verlauf wird ein eigener Eintrag mit Dokumentquelle und Seite angelegt.",
-            )}
-          </p>
-        </div>
+        <p className="text-xs font-semibold text-pink-950">
+          {tx("Проверьте дату и каждое измерение", "Datum und jeden Messwert prüfen")}
+        </p>
         <Badge variant="outline" className="border-pink-200 bg-white text-[10px] text-pink-800">
           {candidate.source.page
             ? tx(`Страница ${candidate.source.page}`, `Seite ${candidate.source.page}`)
@@ -829,12 +813,6 @@ function VitalCandidateEditor({
               normalized: { ...candidate.normalized, measured_at: event.target.value },
             })}
           />
-          <span className="block text-[10px] leading-4 text-muted-foreground">
-            {tx(
-              "Только дата или время с часовым поясом, например 2026-08-10T09:30:00+02:00.",
-              "Nur Datum oder Uhrzeit mit Zeitzone, z. B. 2026-08-10T09:30:00+02:00.",
-            )}
-          </span>
         </label>
         <label className="space-y-1">
           <span className="text-[10px] font-semibold text-muted-foreground">
@@ -2759,12 +2737,6 @@ export function ClinicalDocumentImportSheet({
                       <p className="mt-2 text-sm font-medium">
                         {tx("Обработок пока нет", "Noch keine Verarbeitungen")}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {tx(
-                          "После загрузки здесь появятся статус обработки и готовый снимок.",
-                          "Nach dem Upload erscheinen hier Worker-Status und fertiger Snapshot.",
-                        )}
-                      </p>
                     </div>
                   ) : (
                     <div className="divide-y divide-border/60">
@@ -2877,18 +2849,6 @@ export function ClinicalDocumentImportSheet({
               </div>
               <div>
                 <p className="font-semibold">{tx("Строим клинический черновик…", "Klinischen Entwurf erstellen…")}</p>
-                <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                  {tx(
-                    "Распознаём страницы, секции, диагнозы, анамнез, медикаменты, показатели, обследования и рекомендации.",
-                    "Seiten, Abschnitte, Diagnosen, Anamnese, Medikation, Vitalwerte, Befunde und Empfehlungen werden erkannt.",
-                  )}
-                </p>
-                <p className="mt-3 max-w-md text-xs font-medium text-foreground/75">
-                  {tx(
-                    "Окно останется открытым. Готовый черновик появится здесь автоматически.",
-                    "Das Fenster bleibt geöffnet. Der fertige Entwurf erscheint hier automatisch.",
-                  )}
-                </p>
                 {/* A job nobody picks up said nothing (QA 2026-11-12 A-04). */}
                 {clinicalImportWaitsTooLong(documentImport) ? (
                   <p className="mt-3 max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -3111,12 +3071,6 @@ export function ClinicalDocumentImportSheet({
                       <p className="text-xs font-semibold text-foreground">
                         {tx("Страна документа", "Ursprungsland des Dokuments")}
                       </p>
-                      <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                        {tx(
-                          "Выберите страну, где документ был выдан. Она сохранится как часть источника для всех выбранных медицинских данных.",
-                          "Land auswählen, in dem das Dokument ausgestellt wurde. Es wird als Teil der Quelle aller ausgewählten medizinischen Daten gespeichert.",
-                        )}
-                      </p>
                     </div>
                     <label className="space-y-1">
                       <span className="sr-only">
@@ -3157,17 +3111,9 @@ export function ClinicalDocumentImportSheet({
                 {activeTab === "source" ? (
                   <section className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h4 className="text-sm font-semibold">
-                          <SectionHeading icon={ScanText}>{tx("Распознанный текст по страницам", "Erkannter Text nach Seiten")}</SectionHeading>
-                        </h4>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {tx(
-                            "Выберите страницу. Оригинал справа откроется на той же странице.",
-                            "Seite auswählen. Das Original rechts öffnet dieselbe Seite.",
-                          )}
-                        </p>
-                      </div>
+                      <h4 className="text-sm font-semibold">
+                        <SectionHeading icon={ScanText}>{tx("Распознанный текст по страницам", "Erkannter Text nach Seiten")}</SectionHeading>
+                      </h4>
                       {selectedSourcePage?.extraction ? (
                         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                           <Badge variant="outline" className="rounded-full bg-card font-normal">

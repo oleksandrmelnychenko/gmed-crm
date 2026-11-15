@@ -142,9 +142,7 @@ export function CreditNoteForm({
 
   return (
     <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3">
-      {byAmount ? (
-        <p className="text-sm text-muted-foreground">{t.finance_credit_note_by_amount_hint}</p>
-      ) : (
+      {byAmount ? null : (
         <div className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border border-border bg-card p-0.5" role="radiogroup" aria-label={t.finance_credit_note_section_title}>
           {(["lines", "vat_rate"] as const).map((mode) => (
             <label

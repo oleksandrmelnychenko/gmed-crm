@@ -161,7 +161,6 @@ const words = {
     identity: "Удостоверение личности проверено",
     dsgvo: "DSGVO",
     release: "Разрешение на раскрытие врачебной тайны",
-    readOnly: "Отмечается только по подписанному документу",
     save: "Сохранить",
     revoked: "Согласие отозвано 12.10.2026",
     revokedHint: "Новые заказы заблокированы, пока нет согласия, подписанного после отзыва.",
@@ -185,7 +184,6 @@ const words = {
     identity: "Ausweisdokument geprüft",
     dsgvo: "DSGVO",
     release: "Schweigepflichtentbindung",
-    readOnly: "Wird nur über ein unterschriebenes Dokument gesetzt",
     save: "Speichern",
     revoked: "Einwilligung am 12.10.2026 widerrufen",
     revokedHint: "Neue Aufträge sind gesperrt, bis eine danach unterschriebene Einwilligung vorliegt.",
@@ -377,7 +375,6 @@ for (const lang of ["ru", "de"] as const) {
       await expect(releaseRow).toContainText(w.missing);
       await expect(dsgvoRow.getByRole("button")).toHaveCount(0);
       await expect(releaseRow.getByRole("button")).toHaveCount(0);
-      await expect(sheet).toContainText(w.readOnly);
       await expectNoHorizontalScroll(page, width);
       await page.screenshot({ path: `../artifacts/design-qa/patient-legal-status-sheet-${lang}-${width}.png`, animations: "disabled" });
 

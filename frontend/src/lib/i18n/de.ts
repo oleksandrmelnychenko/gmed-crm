@@ -159,24 +159,19 @@ export const de = {
   users_generate_password: "Generieren",
   users_password_reset_success:
     "Passwort geändert. Die Sperre wurde aufgehoben, aktive Sitzungen wurden beendet; beim nächsten Login muss der Benutzer ein eigenes Passwort setzen.",
-  users_password_reset_confirm:
-    "Das neue Passwort gilt sofort. Der Benutzer wird auf allen Geräten abgemeldet, eine Anmeldesperre wird aufgehoben und beim nächsten Login muss er ein eigenes Passwort setzen.",
+  users_password_reset_confirm: "Der Benutzer wird auf allen Geräten abgemeldet und legt bei der Anmeldung ein eigenes Passwort fest.",
   users_empty_no_results: "Keine Ergebnisse",
   users_empty_no_users: "Keine Benutzer",
   users_one_time_password_mode: "Einmalpasswort (vom Server generiert)",
-  users_one_time_password_mode_hint:
-    "Das Passwort wird nur einmal angezeigt – übergeben Sie es persönlich. Beim ersten Login muss der Benutzer ein eigenes Passwort setzen. Es wird keine E-Mail versendet.",
   users_manual_password_mode: "Passwort manuell festlegen",
   users_one_time_password_title: "Einmalpasswort",
-  users_one_time_password_shown_once:
-    "Wird nur jetzt angezeigt. Kopieren Sie es und übergeben Sie es persönlich – nach dem Schließen ist es nicht mehr abrufbar.",
+  users_one_time_password_shown_once: "Das Passwort wird nur jetzt angezeigt.",
   users_copy_password: "Kopieren",
   users_copied: "Kopiert",
   users_created_title: "Benutzer angelegt",
   users_done: "Fertig",
   users_generate_one_time_password: "Einmalpasswort generieren",
-  users_generate_one_time_password_confirm:
-    "Der Server erzeugt ein neues Einmalpasswort und zeigt es einmal an. Der Benutzer wird auf allen Geräten abgemeldet, eine Anmeldesperre wird aufgehoben und beim nächsten Login muss er ein eigenes Passwort setzen.",
+  users_generate_one_time_password_confirm: "Der Benutzer wird auf allen Geräten abgemeldet und legt bei der Anmeldung ein eigenes Passwort fest.",
   users_password_reset_required_badge: "Passwortwechsel beim Login",
   users_totp: "Authenticator",
   users_totp_enrolled: "Eingerichtet",
@@ -416,8 +411,6 @@ export const de = {
   providers_existing_doctor_placeholder: "Arzt aus anderem Provider auswählen",
   providers_existing_doctor_loading: "Ärzte werden geladen...",
   providers_existing_doctor_empty: "Keine Ärzte in anderen medizinischen Providern gefunden.",
-  providers_existing_doctor_hint:
-    "Auswahl kopiert das Profil in diesen Provider; Termine und Dokumente bleiben providerspezifisch.",
   providers_contact_person_new: "Neuer Kontakt",
   providers_contact_person_detail: "Kontakt-Details",
   providers_contact_profile: "Kontaktprofil",
@@ -541,8 +534,6 @@ export const de = {
   orders_phase: "Phase",
   orders_cost_pass_through_badge: "Durchlaufposten",
   orders_treat_as_cost_pass_through: "Als Durchlaufposten behandeln",
-  orders_cost_pass_through_hint:
-    "Die Position bleibt für die Abrechnung sichtbar, ohne in die agentureigene Marge einzugehen.",
   orders_auto_billed_from_interpreter_report:
     "Automatisch aus Dolmetscherbericht abgerechnet",
   orders_auto_billed_from_completed_appointment:
@@ -553,8 +544,6 @@ export const de = {
     "Automatisch verknüpfen, wenn genau ein passendes Dokument vorhanden ist",
   orders_supporting_document_select_hint:
     "Automatisch verknüpfen, wenn genau ein passender Beleg vorhanden ist",
-  orders_supporting_document_pin_hint:
-    "Einen konkreten Beleg oder eine Provider-Rechnung fest zuordnen, wenn mehrere passende Dateien vorliegen.",
   orders_billing_source: "Abrechnungsquelle",
   orders_billing_source_interpreter_report: "Dolmetscherbericht",
   orders_billing_source_completed_appointment: "Abgeschlossener Termin",
@@ -629,13 +618,7 @@ export const de = {
   appointments_scope_single: "Nur dieser Termin",
   appointments_scope_following: "Dieser und folgende",
   appointments_scope_series: "Ganze Serie",
-  appointments_scope_bulk_status_hint:
-    "Statusänderungen können auf diesen Termin, diesen und folgende oder die ganze aktive Serie angewendet werden.",
-  appointments_scope_following_hint:
-    "Dieser und folgende startet ab dem aktuellen Termin eine neue Serienverzweigung. Ganze Serie behält dieselbe Serienidentität und verschiebt alle aktiven Termine gemeinsam.",
   appointments_repeat_this: "Diesen Termin wiederholen",
-  appointments_repeat_hint:
-    "Eine wiederkehrende Serie basierend auf dem aktuellen Datum und Zeitfenster erstellen.",
   appointments_time_pair_error:
     "Start- und Endzeit müssen gemeinsam angegeben oder beide leer gelassen werden.",
   appointments_time_end_capped:
@@ -785,33 +768,20 @@ export const de = {
   settings_agency_vat_id: "USt-IdNr. (auf Rechnungen und E-Rechnung)",
   settings_agency_tax_number: "Steuernummer (auf Rechnungen und E-Rechnung)",
   settings_agency_country_code: "Ländercode der Agentur (ISO, z. B. DE)",
-  settings_agency_hint:
-    "Diese Angaben werden in Patientenetiketten, Verträgen, Einwilligungen und Finanzdokumenten verwendet.",
   settings_document_requirements: "Pflichtunterlagen",
-  settings_document_requirements_hint:
-    "JSON-Regeln für den Mindestdokumentensatz pro Patient, der für Missing-Document-Alerts geprüft wird.",
   settings_required_patient_documents:
     "Erforderliche Patientendokumente (JSON)",
   settings_clinical_data: "Klinische Aufbewahrung",
-  settings_clinical_data_hint:
-    "Steuert die Aufbewahrungsfrist für medizinische Fälle und die append-only Anamnese-Historie.",
   settings_clinical_retention_years: "Aufbewahrung medizinischer Fälle (Jahre)",
   settings_concierge_preparation: "Vorbereitung von Concierge-Services",
   settings_portal_themes: "Portaldesigns",
-  settings_portal_themes_hint: "Diese Designs gelten, bis im jeweiligen Konto ein eigenes Design gewählt wird.",
   settings_patient_theme: "Patientenportal",
   settings_lead_theme: "Leadportal",
-  settings_concierge_preparation_hint:
-    "Wie viele Stunden vor Beginn eines Concierge-Services die Erinnerung kommt und die Vorbereitungsaufgabe fällig ist.",
   settings_concierge_reminder_lead_hours: "Erinnerung an den anstehenden Service, Stunden vorher",
   settings_concierge_prep_lead_hours: "Fälligkeit der Vorbereitungsaufgabe, Stunden vorher",
   settings_interpreter_access: "Patientenzugang von Dolmetschern",
-  settings_interpreter_access_hint:
-    "Ein gebuchter Dolmetscher sieht die Basisdaten, freigegebenen Dokumente und den Chat des Patienten. Der Zugang endet ohne aktive Buchung oder so viele Tage nach dem letzten gebuchten Termin; manuelle Zuweisungen bleiben bestehen.",
   settings_interpreter_booking_access_days: "Zugang nach dem letzten gebuchten Termin (Tage)",
   settings_dunning: "Mahnwesen",
-  settings_dunning_hint:
-    "Die erste automatische Zahlungserinnerung folgt erst nach dieser Karenzzeit nach dem Zahlungsziel (Berliner Kalender). Rechnungen mit Mahnsperre, Ratenplan oder eskaliertem Forderungsfall werden nicht automatisch gemahnt.",
   settings_auto_dunning_grace_days: "Karenzzeit vor der ersten automatischen Erinnerung (Tage)",
   settings_signature_stuck_request_days: "Nicht nachverfolgbare Signaturanfragen schließen nach (Tagen)",
   settings_sessions: "Sitzungsverwaltung",
@@ -854,11 +824,7 @@ export const de = {
   activity_view_activity: "Aktivitäten",
   activity_view_security: "Sicherheit",
   activity_view_technical: "Technisch",
-  activity_view_activity_hint: "Nur echte Benutzeraktionen und Datenänderungen – ohne Hintergrundanfragen.",
-  activity_view_security_hint: "Anmeldungen, Sitzungsverwaltung, MFA und weitere Sicherheitsereignisse.",
-  activity_view_technical_hint: "Rohe HTTP-Anfragen zur Diagnose. Sie werden nach der kurzen Aufbewahrungsfrist automatisch gelöscht.",
   activity_view_access: "Zugriff und Rollen",
-  activity_view_access_hint: "Anlegen und Sperren von Konten, Rollenwechsel, Zurücksetzen von Passwörtern und 2FA, Änderungen der Zugriffsmatrix und individueller Rechte.",
   activity_metric_events_24h: "Aktivitäten in 24 Stunden",
   activity_metric_users_24h: "Aktive Benutzer",
   activity_metric_changes_24h: "Datenänderungen",
@@ -896,7 +862,6 @@ export const de = {
   security_subtitle: "IP-Filterung, Kontosperren und Wartungsmodus",
   security_ip_whitelist: "IP-Whitelist",
   security_ip_add: "IP hinzufügen",
-  security_ip_add_hint: "Verwaltete Netzbereiche mit produktivem Zugriff und Freigabestatus.",
   security_ip_cidr: "CIDR (z.B. 192.168.1.0/24)",
   security_ip_cidr_placeholder: "10.0.0.0/8",
   security_ip_desc: "Beschreibung",
@@ -908,8 +873,7 @@ export const de = {
   security_login_history: "Anmeldeverlauf",
   security_maintenance: "Wartungsmodus",
   security_maintenance_msg: "Nachricht",
-  security_maintenance_hint:
-    "Aktivieren Sie den Wartungsmodus nur für geplante Eingriffe. Die Nachricht wird allen betroffenen Benutzern angezeigt.",
+  security_maintenance_hint: "Die Meldung sehen alle betroffenen Benutzer. Einschalten?",
   security_maintenance_on: "Aktivieren",
   security_maintenance_off: "Deaktivieren",
   security_audit_analytics: "Audit-Analytik",
@@ -920,8 +884,6 @@ export const de = {
   security_audit_token_theft: "Sitzungsdiebstahl (30 Tage)",
   security_audit_executive_access: "Zugriffe der Geschäftsführung auf Vertrauliches (7 Tage)",
   security_audit_off_hours: "Zugriffe außerhalb der Arbeitszeit (7 Tage)",
-  security_audit_hint:
-    "Fehlgeschlagene Anmeldungen, sensible Chef-Zugriffe und Lesezugriffe außerhalb der Geschäftszeiten aus dem append-only Audit-Trail.",
   security_col_reason: "Grund",
   security_col_route: "Route",
   security_col_events: "Ereignisse",
@@ -1011,15 +973,11 @@ export const de = {
   compliance_col_expires: "Läuft ab",
   compliance_col_note: "Notiz",
   compliance_privacy_requests_title: "Datenschutzanträge des Patienten",
-  compliance_privacy_requests_hint:
-    "Löschanträge oder Verarbeitungseinschränkungen erfassen und den Aufbewahrungskontext vor der Ausführung prüfen.",
   compliance_request_type_label: "Antragsart",
   compliance_request_reason: "Begründung / Aufnahme-Notiz",
   compliance_request_reason_placeholder:
     "Patient hat Löschung beantragt, rechtliche Einschränkungsanfrage, Kurier hat unterschriebenen Widerruf bestätigt",
   compliance_create_request: "Antrag anlegen",
-  compliance_new_request_hint:
-    "Neue Anträge übernehmen den Aufbewahrungs-Snapshot des Patienten und erscheinen in der globalen Prüf-Warteschlange.",
   compliance_privacy_history: "Datenschutzantrag-Historie",
   compliance_no_privacy_requests:
     "Für diesen Patienten wurden noch keine Datenschutzanträge erfasst.",
@@ -1069,7 +1027,6 @@ export const de = {
   compliance_steps_identity: "Identität der antragstellenden Person",
   compliance_steps_identity_confirm: "Als geprüft vermerken",
   compliance_steps_extension: "Fristverlängerung",
-  compliance_steps_extension_hint: "einmalig um zwei Monate, nur mit Begründung",
   compliance_steps_extension_reason: "Begründung für die betroffene Person",
   compliance_steps_extension_confirm: "Frist verlängern",
   compliance_steps_notified: "Betroffene Person informiert",
@@ -1087,7 +1044,6 @@ export const de = {
   compliance_steps_channel_phone: "Telefon",
   compliance_steps_channel_in_person: "Persönlich",
   compliance_steps_recipients: "Empfänger informiert (Art. 19)",
-  compliance_steps_recipients_hint: "Kliniken und weitere Empfänger über Berichtigung, Löschung oder Einschränkung unterrichten",
   compliance_steps_recipients_note: "Wer wurde informiert?",
   compliance_steps_recipients_confirm: "Empfänger-Mitteilung vermerken",
   compliance_request_type_restriction: "Einschränkung der Verarbeitung (Art. 18)",
@@ -1208,7 +1164,6 @@ export const de = {
   dash_surgeries: "Operationen",
   dash_followups: "Nachsorge",
   dash_active: "Aktiv",
-  dash_subtitle: "Überblick über die tägliche Leistung des Teams",
   dash_open_tasks: "Offene Aufgaben",
   dash_leads_monthly_hint: "Monatliche Neuanfragen der letzten 12 Monate",
   dash_insurance_mix: "Versicherungsmix",
@@ -1222,20 +1177,15 @@ export const de = {
   dash_greeting_afternoon: "Guten Tag",
   dash_greeting_evening: "Guten Abend",
   dash_sec_demographics: "Demografie",
-  dash_sec_demographics_hint: "Wer unsere Patienten sind",
   dash_sec_clinical: "Klinik",
-  dash_sec_clinical_hint: "Anfragegründe, Status und Behandlungsmuster",
   dash_sec_ops: "Betrieb",
-  dash_sec_ops_hint: "Termine, Aufträge und Klinik-Netzwerk",
   dash_by_country: "Patienten nach Land",
   dash_by_age: "Altersverteilung",
   dash_by_age_hint: "Gruppiert nach Altersgruppen",
   dash_by_gender: "Geschlecht",
   dash_top_languages: "Top-Sprachen",
   dash_top_reasons: "Häufigste Anfragegründe",
-  dash_top_reasons_hint: "Die häufigsten Fallgründe",
   dash_cases_by_status: "Fälle nach Status",
-  dash_cases_status_hint: "Pipeline-Snapshot",
   dash_avg_duration: "Durchschn. Fall­dauer",
   dash_avg_duration_hint: "Von eröffnet bis geschlossen",
   dash_days: "Tage",
@@ -1469,10 +1419,7 @@ export const de = {
   documents_share: "Teilen",
   documents_delete: "Löschen",
   documents_delete_file: "Datei löschen",
-  documents_delete_file_description:
-    "Die gespeicherte Datei kontrolliert entfernen, aktive Freigaben widerrufen und die Dokumentzeile als archivierten Verlaufseintrag erhalten.",
-  documents_delete_file_hint:
-    "Diese Aktion entfernt die Binärdatei vom Datenträger, widerruft aktive Freigaben und macht Herunterladen/Vorschau dauerhaft unzugänglich. Metadaten und Versionshistorie bleiben als Prüfspur erhalten.",
+  documents_delete_file_hint: "Die Datei wird unwiderruflich gelöscht.",
   documents_delete_file_reason: "Löschgrund",
   documents_delete_file_reason_placeholder:
     "Warum wird die gespeicherte Datei entfernt?",
@@ -1545,8 +1492,6 @@ export const de = {
   documents_patient_wide_context: "Patientenweiten Kontext verwenden",
   documents_all_appointments_scope: "Alle Termine im Geltungsbereich",
   documents_text_blocks: "Wiederverwendbare Textbausteine",
-  documents_text_blocks_hint:
-    "Diese werden zu standardisierten Hinweis- oder Instruktionsabschnitten im generierten Dokument.",
   documents_default_template_source: "Standard: template:{id}",
   documents_generate_document: "Dokument erstellen",
   documents_generating: "Erstelle…",
@@ -1688,11 +1633,6 @@ export const de = {
   documents_confidence_medium: "mittel",
   documents_confidence_high: "hoch",
   documents_unclassified: "Nicht klassifiziert",
-  documents_upload_interpreter_hint:
-    "Dolmetscher-Dateien werden als interne Entwurfsdokumente gespeichert und an die Teamlead-Prüfung weitergeleitet.",
-  documents_upload_internal_hint: "Dieser Upload wird als internes Dokument gespeichert.",
-  documents_upload_teamlead_hint:
-    "Diese Datei wird als internes Dokument gespeichert. Teamlead-Dateien zeigen hier keine vollständigen Dokumentverwaltungs-Steuerungen.",
   documents_auto_classification_optional:
     "Automatisch",
   documents_popup_blocked:

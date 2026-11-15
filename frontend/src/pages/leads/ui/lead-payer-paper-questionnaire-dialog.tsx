@@ -101,8 +101,8 @@ export function LeadPayerPaperQuestionnaireDialog({
         <div className="max-h-[75vh] space-y-4 overflow-y-auto bg-muted/30 p-4 sm:p-5">
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" data-testid="lead-payer-paper-questionnaire-hint">
             {tx(
-              "Перенесите ответы из подписанной плательщиком Selbstauskunft — так, как их отметил плательщик. Отправленные ответы считаются как анкета по ссылке и помечаются «внёс сотрудник».",
-              "Übertragen Sie die Angaben aus der vom Zahler unterschriebenen Selbstauskunft – so, wie der Zahler sie angekreuzt hat. Gesendete Angaben zählen wie der Fragebogen über den Link und werden als „von GMED erfasst“ markiert.",
+              "Перенесите ответы из подписанной плательщиком Selbstauskunft так, как их отметил плательщик.",
+              "Übertragen Sie die Angaben aus der vom Zahler unterschriebenen Selbstauskunft so, wie der Zahler sie angekreuzt hat.",
             )}
           </p>
           {error ? <Banner tone="error">{error}</Banner> : null}

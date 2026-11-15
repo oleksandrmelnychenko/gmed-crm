@@ -195,7 +195,6 @@ function SignatureWorkspace({ documentId, scope, title, prefillSignersFrom, onDo
       </div>
       {!documentId || error ? <div className="space-y-3 p-4">
         {!documentId ? <>
-          <p className="text-xs leading-5 text-muted-foreground">{tx("Выберите сохранённый PDF. Запрос подписи относится к выбранному документу.", "Wählen Sie die gespeicherte PDF. Die Signaturanfrage gilt für das ausgewählte Dokument.")}</p>
           {loading ? <p role="status" className="text-sm"><LoaderCircle className="mr-2 inline size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</p> : null}
           {!loading && !error && documents.length === 0 ? <p className="text-sm" data-testid="signature-no-documents">{informationalOnly
             ? tx("Здесь пока есть только информационные документы — их не подписывают. Создайте договор, заказ или согласие: информационные документы уйдут вместе с ними как приложение для ознакомления.", "Hier gibt es bisher nur Informationsdokumente – sie werden nicht unterschrieben. Erstellen Sie Vertrag, Auftrag oder Einwilligung: Die Informationsdokumente gehen als Anlage zur Kenntnisnahme mit.")

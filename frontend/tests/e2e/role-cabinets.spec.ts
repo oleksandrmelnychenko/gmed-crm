@@ -93,7 +93,7 @@ test("billing lands on the finance cabinet", async ({ page }) => {
     ["invoices", "orders", "company-finance", "contracts"],
     ["patients", "leads", "appointments", "admin/users"],
   );
-  await expect(page.getByText("Кабинет бухгалтерии", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("role-dashboard-greeting")).toBeVisible();
   await link(page, "invoices").click();
   await expect(page).toHaveURL(/\/invoices$/);
 });
@@ -105,7 +105,7 @@ test("concierge lands on the service cabinet with the lead grid", async ({ page 
     ["services", "hotels", "appointments", "leads"],
     ["invoices", "orders", "contracts", "company-finance", "admin/users"],
   );
-  await expect(page.getByText("Кабинет консьержа", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("role-dashboard-greeting")).toBeVisible();
 });
 
 test("sales lands on the leads cabinet without finance", async ({ page }) => {
@@ -115,7 +115,7 @@ test("sales lands on the leads cabinet without finance", async ({ page }) => {
     ["leads", "providers", "reports", "chat"],
     ["invoices", "orders", "patients", "appointments", "company-finance"],
   );
-  await expect(page.getByText("Кабинет продаж", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("role-dashboard-greeting")).toBeVisible();
 });
 
 test("it admin lands on the technical cabinet without patients", async ({ page }) => {

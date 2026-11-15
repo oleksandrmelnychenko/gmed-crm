@@ -9,7 +9,6 @@ import {
   EyeOff,
   FileInput,
   Hash,
-  Lock,
   Pencil,
   Scale,
   StickyNote,
@@ -259,14 +258,10 @@ export function PersonnelEmployeePage() {
             </div>
           </section>
 
-          <MutedNote icon={Lock}>
-            {formatUiText(t.personnel_immutable_notice, { days: file?.late_days ?? 7 })}
-          </MutedNote>
           {file?.health_hidden ? <MutedNote icon={EyeOff}>{t.personnel_health_hidden}</MutedNote> : null}
 
           {importable.length > 0 ? (
             <Section icon={DatabaseBackup} title={t.personnel_import_section} accessory={<CountBadge>{importable.length}</CountBadge>}>
-              <p className="text-xs text-muted-foreground">{t.personnel_import_hint}</p>
               <div className="grid gap-2 md:grid-cols-2">
                 {importable.map((document) => (
                   <ListItem key={document.document_id} className="flex items-center justify-between gap-3 py-2.5">
@@ -335,17 +330,12 @@ export function PersonnelEmployeePage() {
           setPreviewing(null);
           loadEvents();
         }}
-        note={t.personnel_access_logged}
       />
       <ReasonDialog
         icon={Scale}
         open={Boolean(holdTarget)}
         title={holdTarget?.legal_hold ? t.personnel_legal_hold_release : t.personnel_legal_hold_set}
-        description={
-          <>
-            {t.personnel_legal_hold_hint} <ArchiveName name={holdTarget?.archive_file_name ?? ""} />
-          </>
-        }
+        description={<ArchiveName name={holdTarget?.archive_file_name ?? ""} />}
         confirmLabel={holdTarget?.legal_hold ? t.personnel_legal_hold_release : t.personnel_legal_hold_set}
         optional
         onConfirm={async (reason) => {

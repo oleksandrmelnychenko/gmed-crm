@@ -95,12 +95,12 @@ export function DatevConnectionDetails() {
     <DatevReadiness profile={setup.profile} dirty={dirty} />
     <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.65fr)_minmax(18rem,1fr)]">
       <form className="min-w-0 space-y-3" onSubmit={(event) => { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>('button[type="submit"]')?.click(); }}>
-        <DatevSetupSection icon={Building2} title={copy.profile} description={copy.profileHint}>
+        <DatevSetupSection icon={Building2} title={copy.profile}>
           <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2">
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2"><span>{copy.companyName}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.company_name} maxLength={160} onChange={(e) => edit({ company_name: e.target.value })} autoComplete="off" /></label>
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground"><span>{copy.consultant}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.consultant_number} inputMode="numeric" maxLength={7} aria-invalid={!valid} aria-describedby="datev-numbers-hint" onChange={(e) => edit({ consultant_number: e.target.value })} autoComplete="off" /></label>
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground"><span>{copy.client}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.client_number} inputMode="numeric" maxLength={5} aria-invalid={!valid} aria-describedby="datev-numbers-hint" onChange={(e) => edit({ client_number: e.target.value })} autoComplete="off" /></label>
-            <p id="datev-numbers-hint" className={`text-xs leading-5 sm:col-span-2 ${valid ? "text-muted-foreground" : "text-destructive"}`}>{valid ? copy.numbersHint : copy.invalidNumbers}</p>
+            {valid ? null : <p id="datev-numbers-hint" className="text-xs leading-5 text-destructive sm:col-span-2">{copy.invalidNumbers}</p>}
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2"><span>{copy.version}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.belege_version} placeholder={copy.versionPlaceholder} maxLength={80} onChange={(e) => edit({ belege_version: e.target.value })} /></label>
           </fieldset>
         </DatevSetupSection>
@@ -116,7 +116,7 @@ export function DatevConnectionDetails() {
             </div>)}
           </fieldset>
         </DatevSetupSection>
-        <DatevSetupSection icon={FileOutput} title={copy.exportService} description={copy.exportHint}>
+        <DatevSetupSection icon={FileOutput} title={copy.exportService}>
           <NativeComboboxSelect id="datev-export-service" aria-label={copy.exportService} disabled={saving} className="h-9 w-full bg-field text-sm font-normal" value={draft.export_service} onChange={(e) => edit({ export_service: e.target.value as DatevProfile["export_service"] })}>
             <option value="unknown">{copy.unknown}</option><option value="not_ordered">{copy.notOrdered}</option><option value="ordered">{copy.ordered}</option>
           </NativeComboboxSelect>
@@ -134,7 +134,6 @@ export function DatevConnectionDetails() {
         <DatevSetupSection icon={Server} title={text.systemName}>
           <DatevActionButton size="sm" className="w-full" title={copy.openPortal} description={operationDescription("portal", lang === "de")} onConfirm={() => { window.open(DATEV_PORTAL, "_blank", "noopener,noreferrer"); }}><ArrowUpRight className="size-4" />{copy.openPortal}</DatevActionButton>
           <p className="text-xs leading-5 text-muted-foreground">{copy.portalHint}</p>
-          <p className="text-xs leading-5 text-muted-foreground">{lang === "de" ? "Zugangsdaten, Anmeldung und tatsächliche Zugriffsprüfung befinden sich im Abschnitt DATEV-Zugriff oben." : "Ключи, вход и фактическая проверка прав находятся в разделе «Доступ к DATEV» выше."}</p>
         </DatevSetupSection>
         <DatevSetupSection icon={ListChecks} title={copy.next}>
           <ol className="divide-y divide-border/60">
@@ -144,7 +143,6 @@ export function DatevConnectionDetails() {
         </DatevSetupSection>
         <section className="space-y-3 rounded-lg border border-border/70 bg-card p-3.5">
           <DatevActionButton size="sm" className="w-full" title={`DATEV · ${copy.brief}`} description={operationDescription("brief", lang === "de")} disabled={dirty || !setup.revision} contextKey={setup.revision ?? ""} onConfirm={downloadBrief}><Download className="size-4 shrink-0" />DATEV · {copy.brief}</DatevActionButton>
-          <p className="text-xs leading-5 text-muted-foreground">{copy.briefHint}</p>
         </section>
       </aside>
     </div>

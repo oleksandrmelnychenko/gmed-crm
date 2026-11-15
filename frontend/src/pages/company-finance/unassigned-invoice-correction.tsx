@@ -13,7 +13,6 @@ import type { CompanyProviderLiability } from "./types";
 const copy = {
   ru: {
     title: "Исправить или отменить счёт",
-    hint: "Счёт без заказа можно исправить или отменить, пока по нему нет оплаты. Изменения и отмена записываются в журнал аудита.",
     number: "Номер счёта",
     invoiceDate: "Дата счёта",
     dueDate: "Оплатить до",
@@ -31,7 +30,6 @@ const copy = {
   },
   de: {
     title: "Rechnung korrigieren oder stornieren",
-    hint: "Eine Rechnung ohne Auftrag kann korrigiert oder storniert werden, solange keine Zahlung erfasst ist. Änderungen und Storno werden im Audit-Protokoll erfasst.",
     number: "Rechnungsnummer",
     invoiceDate: "Rechnungsdatum",
     dueDate: "Fällig am",
@@ -137,7 +135,6 @@ export function UnassignedInvoiceCorrection({ liability, onChanged, onDirtyChang
       onChangeCapture={() => onDirtyChange(true)}
       aria-label={text.title}
     >
-      <p className="text-xs leading-5 text-muted-foreground">{text.hint}</p>
       {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
       <div className="grid gap-3 sm:grid-cols-3">
         <label className={fieldClassName}>

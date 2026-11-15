@@ -2393,19 +2393,11 @@ function MedicationHistoryTree({
   return (
     <section className="rounded-xl border border-border/70 bg-card">
       <header className="flex flex-wrap items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={PillBottle}>{tx("История медикаментов", "Medikationsverlauf")}</SectionHeading></h3>
-            <CountBadge>
-              {formatCount(tx("ru", "de") as Lang, series.length, MEDICATION_SERIES_WORDS)}
-            </CountBadge>
-          </div>
-          <p className="mt-0.5 max-w-3xl text-xs leading-4 text-muted-foreground">
-            {tx(
-              "Каждая линия показывает текущее состояние и неизменяемую хронологию OCR-документов, схем и статусов.",
-              "Jede Serie zeigt den aktuellen Stand und die unveränderliche Chronologie aus OCR-Dokumenten, Schemata und Statuswechseln.",
-            )}
-          </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={PillBottle}>{tx("История медикаментов", "Medikationsverlauf")}</SectionHeading></h3>
+          <CountBadge>
+            {formatCount(tx("ru", "de") as Lang, series.length, MEDICATION_SERIES_WORDS)}
+          </CountBadge>
         </div>
         <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-800">
           {formatCount(uiLang(tx), total, EVENT_WORDS)}

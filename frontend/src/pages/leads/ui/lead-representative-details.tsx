@@ -110,12 +110,6 @@ export function LeadRepresentativeDetailsForm({
   return (
     <div className="space-y-3" data-testid={`lead-representative-details-${person.id}`}>
       <h4><SectionHeading icon={MapPinned}>{tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}</SectionHeading></h4>
-      <p className="text-[11.5px] leading-tight text-muted-foreground">
-        {tx(
-          "Сохраняются кнопкой «Сохранить» вместе с карточкой.",
-          "Werden mit „Speichern“ zusammen mit der Karte gespeichert.",
-        )}
-      </p>
       <RepresentativeDetailsFields
         draft={draft}
         errors={errors}
@@ -166,12 +160,6 @@ export function PendingRepresentativeDetailsForm({
   return (
     <div className="space-y-3" data-testid="lead-representative-details-pending">
       <h4><SectionHeading icon={MapPinHouse}>{tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}</SectionHeading></h4>
-      <p className="text-[11.5px] leading-tight text-muted-foreground">
-        {tx(
-          "Нужны для договора и анкеты GwG родителя. Сохраняются вместе с карточкой.",
-          "Nötig für den Vertrag und den GwG-Bogen des Elternteils. Werden mit der Karte gespeichert.",
-        )}
-      </p>
       <RepresentativeDetailsFields
         draft={value}
         errors={errors}

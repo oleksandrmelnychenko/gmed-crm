@@ -128,7 +128,6 @@ describe("LeadRiskAssessmentPanel", () => {
     // Four-eyes removed (owner 2026-10-25): no proposal wording, no second-reviewer warning.
     expect(html).toContain("lead-risk-level3-stop");
     expect(html).toContain("K.o.: Stufe 3 unabhängig von den Punkten");
-    expect(html).toContain("Die Entscheidung wird sofort wirksam, auf jeder Stufe. Eine Begründung ist Pflicht (mindestens 10 Zeichen).");
     expect(html).toContain(">Freigeben<");
     expect(html).toContain(">Ablehnen<");
     expect(html).not.toContain("Vorschläge");
@@ -164,7 +163,6 @@ describe("LeadRiskAssessmentPanel", () => {
 
   it("is read-only for a non-reviewer", () => {
     const html = render(assessment({ can_decide: false }));
-    expect(html).toContain("lead-risk-read-only");
     expect(html).not.toContain("lead-risk-decide-");
     expect(html).not.toContain("lead-risk-restart");
   });
@@ -221,7 +219,6 @@ describe("LeadRiskAssessmentPanel", () => {
     const html = render(value);
     expect(html).toContain("Не начата");
     expect(html).toContain("Вопросы до отправки анкеты");
-    expect(html).toContain("оценка риска ещё не начата");
     for (const block of ["A", "F", "K", "L"]) expect(html).toContain(`data-testid="lead-risk-block-${block}"`);
     expect(html).toContain("заполнено");
     expect(html).toContain("нужен ответ");

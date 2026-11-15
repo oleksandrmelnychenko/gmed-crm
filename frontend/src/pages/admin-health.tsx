@@ -364,8 +364,6 @@ export function aiHealthCopy(lang: "ru" | "de") {
         disabled: "Aus",
         noModel: "Nicht festgelegt",
         noTimestamp: "Keine Ereignisse",
-        privacy:
-          "Es werden weder API-Schlüssel noch Patienten- oder Antwortinhalte angezeigt.",
         attentionFailed: "KI-Aufträge mit Fehlern in den letzten 24 Stunden",
         attentionStale: "KI-Aufträge mit abgelaufener Verarbeitungssperre",
         attentionLeaseRecovered:
@@ -423,8 +421,6 @@ export function aiHealthCopy(lang: "ru" | "de") {
         disabled: "Выключены",
         noModel: "Не задана",
         noTimestamp: "Событий ещё нет",
-        privacy:
-          "API-ключи, данные пациентов и содержимое ответов здесь не отображаются.",
         attentionFailed: "AI-задачи с ошибками за последние 24 часа",
         attentionStale: "AI-задачи с просроченной блокировкой обработки",
         attentionLeaseRecovered:
@@ -875,9 +871,6 @@ function AdminHealthDetailSheet({
                   </span>
                 </div>
               </div>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {aiCopy.privacy}
-              </p>
             </section>
           ) : null}
         </AdminDialogScaffold>
@@ -1375,9 +1368,6 @@ export function AdminHealthPage() {
               >
                 {aiStatusLabel(data.medication_ai.operational_status, aiCopy)}
               </StatusChip>
-              <span className="text-xs text-muted-foreground">
-                {aiCopy.privacy}
-              </span>
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <HealthMetric

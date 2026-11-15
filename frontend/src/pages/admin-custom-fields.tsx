@@ -332,9 +332,9 @@ function AdminCustomFieldCreateSheet({
                     onChange={(event) => onKeyChange(event.target.value)}
                     className="h-9 rounded-lg bg-field font-mono"
                   />
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    {editing ? t.cf_key_locked_hint : t.cf_key_hint}
-                  </p>
+                  {editing ? null : (
+                    <p className="text-[11px] leading-snug text-muted-foreground">{t.cf_key_hint}</p>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -380,7 +380,6 @@ function AdminCustomFieldCreateSheet({
                     onChange={(event) => onOptionsChange(event.target.value)}
                     className="h-9 rounded-lg bg-field"
                   />
-                  <p className="text-[11px] leading-snug text-muted-foreground">{t.cf_options_hint}</p>
                 </div>
               </div>
               <label className="flex items-center gap-2 text-[13px] text-foreground">
@@ -391,24 +390,17 @@ function AdminCustomFieldCreateSheet({
                   onChange={(event) => onRequiredChange(event.target.checked)}
                 />
                 {t.cf_required}
-                <span className="text-[11.5px] text-muted-foreground">· {t.cf_required_hint}</span>
               </label>
-              <label className="flex items-start gap-2 text-[13px] text-foreground">
+              <label className="flex items-center gap-2 text-[13px] text-foreground">
                 <input
                   type="checkbox"
-                  className="mt-0.5 size-4 accent-primary"
+                  className="size-4 accent-primary"
                   checked={fMedical}
                   disabled={medicalLocked}
                   data-testid="custom-field-medical"
                   onChange={(event) => onMedicalChange(event.target.checked)}
                 />
-                <span>
-                  {t.cf_medical}
-                  <span className="block text-[11.5px] text-muted-foreground">
-                    {t.cf_medical_hint}
-                    {medicalLocked ? ` ${t.cf_medical_locked_hint}` : ""}
-                  </span>
-                </span>
+                <span>{t.cf_medical}</span>
               </label>
             </section>
           </AdminSheetScaffold>
@@ -855,8 +847,6 @@ export function AdminCustomFieldsPage() {
         onCreate={() => setShowCreate(true)}
         onRefresh={() => void load()}
       />
-
-      <Banner tone="warning">{t.cf_not_on_forms}</Banner>
 
       {msg ? <Banner tone="error">{msg}</Banner> : null}
 

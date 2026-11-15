@@ -669,7 +669,6 @@ describe("LeadPayerDeclarationSection: a minor's parent or legal representative 
     expect(card).toContain("Musterweg 1");
     expect(card).toContain("10115");
     expect(card).toContain("Berlin");
-    expect(card).toContain("блоке законных представителей");
     // No third-party form, no "paying parent" note of the old third-party rows.
     expect(html).not.toContain("Плательщик (третье лицо)");
     expect(html).not.toContain('data-testid="lead-payer-paying-parent"');

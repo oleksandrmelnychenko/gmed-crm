@@ -181,7 +181,7 @@ describe("PatientPayerSummaryCardView", () => {
     expect(block(html, "footer", "</div>")).toContain("Зафиксировано при конвертации обращения 06.10.2026");
     expect(html).not.toContain('data-testid="patient-payer-summary-open-lead"');
     expect(html).not.toContain("Открыть обращение");
-    expect(html).toContain("Плательщика заказа или счёта меняют в заказе и в счёте");
+    expect(html).not.toContain("Плательщика заказа или счёта меняют в заказе и в счёте");
   });
 
   it("minor with two representatives: each on a sub-line with the address, the paying parent badged, both identified", () => {
@@ -250,7 +250,7 @@ describe("PatientPayerSummaryCardView", () => {
     expect(html).toContain("Qualifizierte Signatur · 05.10.2026");
     expect(html).toContain("Bei der Umwandlung der Anfrage am 06.10.2026 festgehalten");
     expect(html).toContain("Anfrage öffnen");
-    expect(html).toContain("Der Zahler eines Auftrags oder einer Rechnung wird dort geändert");
+    expect(html).not.toContain("Der Zahler eines Auftrags oder einer Rechnung wird dort geändert");
   });
 
   it("self-payer adult: no third-party lines, the patient is party and recipient", () => {
@@ -296,7 +296,7 @@ describe("PatientPayerSummaryCardView", () => {
     expect(block(html, "recipient-minor-warning", "</span>")).toContain("Несовершеннолетний получит счёт — укажите плательщика");
     expect(html).not.toContain("Зафиксировано при конвертации");
     expect(html).not.toContain('data-testid="patient-payer-summary-open-lead"');
-    expect(html).toContain("Плательщика заказа или счёта меняют в заказе и в счёте");
+    expect(html).not.toContain('data-testid="patient-payer-summary-footer"');
   });
 
   it("section 7: the invoice goes to another address, with the staff fields, after line 1", () => {

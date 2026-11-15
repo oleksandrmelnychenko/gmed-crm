@@ -4,7 +4,6 @@
  */
 export interface GwgTrainingTranslations {
   sops_gwg_title: string;
-  sops_gwg_intro: string;
   sops_gwg_empty: string;
   sops_gwg_due_count: string;
   sops_gwg_column_employee: string;
@@ -68,14 +67,11 @@ export interface GwgTrainingTranslations {
   sops_gwg_notice_created: string;
   sops_gwg_notice_signed: string;
   sops_gwg_my_title: string;
-  sops_gwg_my_intro: string;
   sops_gwg_my_empty: string;
 }
 
 export const gwgTrainingRu: GwgTrainingTranslations = {
   sops_gwg_title: "GwG-инструктаж (§ 6 Abs. 2 GwG)",
-  sops_gwg_intro:
-    "Ежегодный инструктаж сотрудников по противодействию отмыванию денег и проверка их надёжности. Лист «Dokumentation interner Sicherungsmaßnahmen» формируется в оформлении GMED и хранится в личном деле сотрудника.",
   sops_gwg_empty:
     "Нет действующих сотрудников с личным делом. Сотрудников добавляют в разделе «Личные дела».",
   sops_gwg_due_count: "Нужен инструктаж: {count}",
@@ -146,15 +142,11 @@ export const gwgTrainingRu: GwgTrainingTranslations = {
   sops_gwg_notice_created: "Инструктаж сохранён, лист добавлен в личное дело.",
   sops_gwg_notice_signed: "Подписанный лист сохранён в личном деле.",
   sops_gwg_my_title: "Мои GwG-инструктажи",
-  sops_gwg_my_intro:
-    "Ваши инструктажи по противодействию отмыванию денег. Листы хранятся в вашем личном деле.",
   sops_gwg_my_empty: "Инструктажей пока не было.",
 };
 
 export const gwgTrainingDe: GwgTrainingTranslations = {
   sops_gwg_title: "GwG-Unterweisung (§ 6 Abs. 2 GwG)",
-  sops_gwg_intro:
-    "Jährliche Unterweisung der Beschäftigten zur Verhinderung von Geldwäsche und Prüfung ihrer Zuverlässigkeit. Der Bogen „Dokumentation interner Sicherungsmaßnahmen“ wird im GMED-Layout erstellt und in der Personalakte abgelegt.",
   sops_gwg_empty:
     "Keine aktiven Beschäftigten mit Personalakte. Beschäftigte werden unter „Personalakten“ angelegt.",
   sops_gwg_due_count: "Unterweisung fällig: {count}",
@@ -229,7 +221,5 @@ export const gwgTrainingDe: GwgTrainingTranslations = {
   sops_gwg_notice_created: "Unterweisung gespeichert, Bogen in der Personalakte abgelegt.",
   sops_gwg_notice_signed: "Unterschriebener Bogen in der Personalakte abgelegt.",
   sops_gwg_my_title: "Meine GwG-Unterweisungen",
-  sops_gwg_my_intro:
-    "Ihre Unterweisungen zur Verhinderung von Geldwäsche. Die Bögen liegen in Ihrer Personalakte.",
   sops_gwg_my_empty: "Noch keine Unterweisung.",
 };

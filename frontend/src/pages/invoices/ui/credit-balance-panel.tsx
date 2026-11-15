@@ -146,8 +146,7 @@ export function CreditBalancePanel({
   return (
     <div className="space-y-3">
       {hasCredit ? (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2">
-          <p className="max-w-2xl text-sm text-muted-foreground">{t.finance_credit_balance_description}</p>
+        <div className="flex flex-wrap items-start justify-end gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2">
           <div className="text-right">
             <div className="text-xs text-muted-foreground">{t.finance_credit_balance_amount}</div>
             <div className="font-mono font-semibold tabular-nums text-emerald-700">{money(credit)}</div>

@@ -13,7 +13,7 @@ import { ConciergeDialogHeader } from "./dialog-layout";
 
 const copy = {
   ru: {
-    title: "Процесс задачи", description: "Запускайте и приостанавливайте задачи и события по отдельности.",
+    title: "Процесс задачи",
     main: "Основная задача", mainEvent: "Событие", task: "Подзадача", event: "Событие", tasks: "Подзадачи", events: "События", completedCount: "Выполнено", total: "Всего", board: "Показать на доске",
     start: "Запустить", stop: "Остановить", resume: "Продолжить", stopHint: "Поставить на паузу",
     open: "Открыто", in_progress: "В работе", on_hold: "На паузе", review: "На проверке", completed: "Выполнено", cancelled: "Отменено", archived: "В архиве",
@@ -22,7 +22,7 @@ const copy = {
     startDate: "Начало", endDate: "Окончание",
   },
   de: {
-    title: "Aufgabenablauf", description: "Aufgaben und Termine einzeln starten oder pausieren.",
+    title: "Aufgabenablauf",
     main: "Hauptaufgabe", mainEvent: "Termin", task: "Unteraufgabe", event: "Termin", tasks: "Unteraufgaben", events: "Termine", completedCount: "Erledigt", total: "Gesamt", board: "Auf dem Board anzeigen",
     start: "Starten", stop: "Stoppen", resume: "Fortsetzen", stopHint: "Pausieren",
     open: "Offen", in_progress: "In Arbeit", on_hold: "Pausiert", review: "Zur Prüfung", completed: "Erledigt", cancelled: "Storniert", archived: "Archiviert",
@@ -82,7 +82,7 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
   return <Dialog open allowImplicitDismissal onOpenChange={open => { if (!open) onClose(); }}>
     <DialogContent data-testid="task-workflow-dialog" className="flex max-h-[min(42rem,calc(100dvh-1rem))] flex-col gap-0 overflow-hidden rounded-xl p-0 pb-0 sm:max-w-[34rem] sm:pb-0" finalFocus={() => document.querySelector<HTMLButtonElement>(`[data-workflow-task-id="${CSS.escape(rootId)}"]`)}>
       <div className="shrink-0">
-        <ConciergeDialogHeader icon={Workflow} title={labels.title} description={labels.description} />
+        <ConciergeDialogHeader icon={Workflow} title={labels.title} />
       </div>
       {children.length ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/70 bg-muted/20 px-4 py-3 sm:px-5" aria-label={`${labels.total}: ${children.length}`}>

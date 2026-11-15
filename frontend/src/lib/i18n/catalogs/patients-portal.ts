@@ -206,8 +206,6 @@ export interface PatientsPortalTranslations {
   patient_relation_link_patient: string;
   patient_relation_standalone_contact: string;
   patient_relation_loading_directory: string;
-  patient_relation_linked_sync_hint: string;
-  patient_relation_unlinked_hint: string;
   patient_relation_name: string;
   patient_relation_name_placeholder: string;
   patient_relation_type_label: string;
@@ -1202,8 +1200,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_relation_link_patient: "Связать пациента в системе",
   patient_relation_standalone_contact: "Отдельный контакт",
   patient_relation_loading_directory: "Загрузка справочника пациентов...",
-  patient_relation_linked_sync_hint: "Связанные отношения синхронизируются с существующей карточкой пациента.",
-  patient_relation_unlinked_hint: "Оставьте пустым для контактов, которые не являются пациентами в системе.",
   patient_relation_name: "Имя",
   patient_relation_name_placeholder: "Имя родственника или сопровождающего",
   patient_relation_type_label: "Тип связи",
@@ -1313,7 +1309,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_invoices_patient_approval: "Согласование пациента",
   patient_invoices_approve_overage: "Одобрить превышение",
   patient_invoices_withdraw_approved_overage: "Отклонить подтверждённое превышение",
-  patient_invoices_withdraw_approved_hint: "Превышение, которое ещё не в счёте, будет снято и не будет выставлено. Причина записывается в журнал.",
+  patient_invoices_withdraw_approved_hint: "Превышение будет снято и не будет выставлено.",
   patient_invoices_withdraw_approved_reason: "Причина",
   patient_invoices_decline: "Отклонить",
   patient_invoices_item: "Позиция",
@@ -2185,8 +2181,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_relation_link_patient: "Patient im System verknüpfen",
   patient_relation_standalone_contact: "Eigenständiger Kontakt",
   patient_relation_loading_directory: "Patientenverzeichnis wird geladen...",
-  patient_relation_linked_sync_hint: "Verknüpfte Beziehungen bleiben mit einem bestehenden Patientendatensatz synchronisiert.",
-  patient_relation_unlinked_hint: "Leer lassen für Kontakte, die keine Patienten im System sind.",
   patient_relation_name: "Name",
   patient_relation_name_placeholder: "Name eines Angehörigen oder Betreuers",
   patient_relation_type_label: "Beziehungstyp",
@@ -2296,7 +2290,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_invoices_patient_approval: "Patientenfreigabe",
   patient_invoices_approve_overage: "Mehrverbrauch genehmigen",
   patient_invoices_withdraw_approved_overage: "Genehmigten Mehrverbrauch ablehnen",
-  patient_invoices_withdraw_approved_hint: "Der noch nicht berechnete Mehrverbrauch wird zurückgenommen und nicht berechnet. Die Begründung wird im Protokoll festgehalten.",
+  patient_invoices_withdraw_approved_hint: "Der Mehrverbrauch wird zurückgenommen und nicht berechnet.",
   patient_invoices_withdraw_approved_reason: "Begründung",
   patient_invoices_decline: "Ablehnen",
   patient_invoices_item: "Position",

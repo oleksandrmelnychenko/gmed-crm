@@ -61,7 +61,6 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { BUILTIN_THEMES, DEFAULT_THEME, parseAppearancePreferences } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
-import { InfoHint } from "@/components/ui/info-hint";
 import { issuerTaxRegistrationText } from "@/components/issuer-tax-registration-banner";
 import { clearApiCache } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
@@ -184,7 +183,6 @@ type SettingsGroupId =
 type SettingsGroup = {
   id: SettingsGroupId;
   titleKey: string;
-  descriptionKey: string;
   fields: SettingFieldMeta[];
   icon: typeof KeyRound;
 };
@@ -311,21 +309,18 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: "tokens",
     titleKey: "settings_token_config",
-    descriptionKey: "settings_subtitle",
     fields: TOKEN_SETTING_FIELDS,
     icon: KeyRound,
   },
   {
     id: "agency",
     titleKey: "settings_agency_profile",
-    descriptionKey: "settings_agency_hint",
     fields: AGENCY_SETTING_FIELDS,
     icon: Building2,
   },
   {
     id: "portal_themes",
     titleKey: "settings_portal_themes",
-    descriptionKey: "settings_portal_themes_hint",
     fields: [
       { key: "patient_portal_default_theme", labelKey: "settings_patient_theme", inputType: "theme" },
       { key: "lead_portal_default_theme", labelKey: "settings_lead_theme", inputType: "theme" },
@@ -335,35 +330,30 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: "documents",
     titleKey: "settings_document_requirements",
-    descriptionKey: "settings_document_requirements_hint",
     fields: DOCUMENT_REQUIREMENT_SETTING_FIELDS,
     icon: ScrollText,
   },
   {
     id: "clinical",
     titleKey: "settings_clinical_data",
-    descriptionKey: "settings_clinical_data_hint",
     fields: CLINICAL_SETTING_FIELDS,
     icon: ShieldCheck,
   },
   {
     id: "concierge",
     titleKey: "settings_concierge_preparation",
-    descriptionKey: "settings_concierge_preparation_hint",
     fields: CONCIERGE_SETTING_FIELDS,
     icon: BellRing,
   },
   {
     id: "interpreter_access",
     titleKey: "settings_interpreter_access",
-    descriptionKey: "settings_interpreter_access_hint",
     fields: INTERPRETER_ACCESS_SETTING_FIELDS,
     icon: UserRoundCheck,
   },
   {
     id: "dunning",
     titleKey: "settings_dunning",
-    descriptionKey: "settings_dunning_hint",
     fields: DUNNING_SETTING_FIELDS,
     icon: Receipt,
   },
@@ -1080,7 +1070,6 @@ function useAdminSettingsPageContent() {
                       <section key={group.id} aria-labelledby={`settings-group-${group.id}`} className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
                         <header className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-2">
                           <h2 id={`settings-group-${group.id}`} className="min-w-0 flex-1 text-sm font-semibold leading-5"><SectionHeading icon={group.icon}>{tr[group.titleKey] ?? group.id}</SectionHeading></h2>
-                          <InfoHint label={tr[group.titleKey] ?? group.id}>{tr[group.descriptionKey]}</InfoHint>
                         </header>
                         <div className="flex flex-1 flex-col px-3 py-2">
                           <dl className="flex-1 divide-y divide-border/60">
@@ -1179,7 +1168,6 @@ function useAdminSettingsPageContent() {
         <AdminDialogScaffold icon={selectedGroup?.icon ?? Settings2} maxWidthClassName={selectedGroup && selectedGroup.fields.length > 3 ? "sm:max-w-[760px]" : "sm:max-w-[560px]"}
             bodyClassName="space-y-2 [&_label]:font-mono [&_label]:text-xs"
             title={selectedGroup ? tr[selectedGroup.titleKey] : t.settings_title}
-            description={selectedGroup ? tr[selectedGroup.descriptionKey] : t.settings_subtitle}
             footer={(
               <SheetActionsFooter>
                 <Button

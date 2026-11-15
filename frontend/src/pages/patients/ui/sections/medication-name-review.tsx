@@ -60,7 +60,5 @@ export function MedicationNameReview({ names, confirmation, onConfirm, onChoose,
     <label className="flex items-start gap-2 text-xs leading-relaxed">
       <input type="checkbox" className={`${checkboxClass} mt-0.5 shrink-0`} checked={checked} onChange={event => onConfirm(event.target.checked ? { handelsname, wirkstoff } : null)} />
       <span>{tx("Названия проверены. Запомнить эту пару в справочнике при сохранении.", "Namen geprüft. Diese Kombination beim Speichern ins Verzeichnis übernehmen.")}</span>
-    </label>
-    <p className="text-[11px] text-muted-foreground">{tx("Без подтверждения названия сохранятся только у пациента.", "Ohne Bestätigung werden die Namen nur beim Patienten gespeichert.")}</p>
-  </div>;
+    </label>  </div>;
 }

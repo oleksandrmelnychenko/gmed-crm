@@ -640,12 +640,6 @@ export function openRequestNote(tx: Tx): string {
   );
 }
 
-export function payerChangedElsewhereNote(tx: Tx): string {
-  return tx(
-    "Плательщика заказа или счёта меняют в заказе и в счёте",
-    "Der Zahler eines Auftrags oder einer Rechnung wird dort geändert",
-  );
-}
 
 export function openLeadLabel(tx: Tx): string {
   return tx("Открыть обращение", "Anfrage öffnen");

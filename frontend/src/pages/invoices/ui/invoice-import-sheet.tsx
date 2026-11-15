@@ -305,9 +305,6 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
               </div>
               {scope === "patient_order" && optionsError ? <Banner tone="error" withIcon>{tx("Не удалось загрузить клиентов и заказы. Обновите страницу.", "Patienten und Aufträge konnten nicht geladen werden. Seite neu laden.")}</Banner> : null}
               {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
-              {documentId && error ? <p className="text-xs text-muted-foreground">{scope === "company"
-                ? tx("Оригинал уже сохранён в документах компании. Повторная попытка использует тот же документ.", "Das Original ist bereits in den Unternehmensdokumenten gespeichert. Beim erneuten Versuch wird dasselbe Dokument verwendet.")
-                : tx("Оригинал уже сохранён у выбранного клиента. Повторная попытка использует тот же документ.", "Das Original ist beim gewählten Patienten gespeichert. Beim erneuten Versuch wird dasselbe Dokument verwendet.")}</p> : null}
               {scope === "patient_order" ? <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={Users}>{tx("Привязка к клиенту", "Patientenzuordnung")}</SectionHeading></h3>
                 {manualPatientId === null && patientMatch && !parsing ? <p className="text-xs text-muted-foreground" role="status">{patientMatch.status === "matched"

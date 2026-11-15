@@ -105,8 +105,8 @@ export function RepeatIntakePicker({ patientId, lang, onPick, onClose }: {
           <DialogTitle><SectionHeading icon={Trash2}>{tx("Удалить черновик?", "Entwurf löschen?")}</SectionHeading></DialogTitle>
           <DialogDescription>
             {tx(
-              "Черновик будет удалён из списка. Это действие нельзя отменить.",
-              "Der Entwurf wird aus der Liste entfernt. Diese Aktion kann nicht rückgängig gemacht werden.",
+              "Это действие нельзя отменить.",
+              "Diese Aktion kann nicht rückgängig gemacht werden.",
             )}
           </DialogDescription>
         </DialogHeader>

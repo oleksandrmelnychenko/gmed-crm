@@ -206,7 +206,6 @@ export function IntakeTab({
     <div className="space-y-3">
       {error ? <Banner tone="error">{error}</Banner> : null}
       <AdminTableCard icon={Inbox} title={t.personnel_tab_intake} count={loading && items.length === 0 ? undefined : items.length}>
-        <p className="px-1 text-xs text-muted-foreground">{t.personnel_intake_intro}</p>
         {loading && items.length === 0 ? (
           <TabLoader />
         ) : (

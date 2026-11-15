@@ -183,15 +183,14 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     comment: "Anmerkung auf der Rechnung", commentHint: "z. B. 2. und 3. Quartal 2026",
     actions: "Aktion", waived: "Trägt GMED", waive: "Nicht weiterberechnen", unwaive: "Wieder weiterberechnen",
     waiveTitle: "Kosten trägt GMED",
-    waiveDescription: (amount: string) => `Der nicht berechnete Rest von ${amount} ist keine Forderung an den Patienten mehr und verschwindet aus den weiterberechenbaren Kosten. Lieferantenrechnung, Zahlung und Buchung bleiben unverändert.`,
+    waiveDescription: (amount: string) => `Der nicht berechnete Rest von ${amount} ist keine Forderung an den Patienten mehr und verschwindet aus den weiterberechenbaren Kosten.`,
     unwaiveTitle: "Kosten wieder weiterberechnen",
     unwaiveDescription: (amount: string) => `${amount} sind wieder eine Forderung an den Patienten und erscheinen bei den weiterberechenbaren Kosten.`,
-    reason: "Grund", reasonHint: "3 bis 1000 Zeichen. Erscheint im Kontoauszug (nur für Mitarbeitende) und im Protokoll.",
+    reason: "Grund", reasonHint: "3 bis 1000 Zeichen.",
     cancel: "Abbrechen", waiverFailed: "Die Änderung konnte nicht gespeichert werden.",
     waivedBy: (amount: string, reason: string) => `${amount} trägt GMED: ${reason}`,
     concierge: "Concierge-Leistungen zur Abrechnung",
     conciergeEmpty: "Keine abrechnungsbereiten Concierge-Leistungen mit Verkaufspreis.",
-    conciergeHint: (rate: string) => `Verkaufspreis netto zzgl. ${rate} % MwSt.; mit der Ausstellung gilt die Leistung als berechnet.`,
     conciergeState: {
       in_draft: "Im Entwurf",
       other_order: "Anderer Auftrag",
@@ -200,7 +199,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       selectable: "",
     } satisfies Record<ConciergeServiceState, string>,
     conciergeNoPrice: (count: number) => `${count} abrechnungsbereite Concierge-Leistung(en) ohne Verkaufspreis werden nicht angeboten. Preis in der Leistung erfassen:`,
-    readOnly: "Nur Ansicht: Rechnungen erstellen Billing, CEO oder der Patientenmanager.",
+    readOnly: "Nur Ansicht.",
     noOrderShort: "Ohne Auftrag",
   } : {
     title: "Выставление пациенту",
@@ -223,15 +222,14 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     comment: "Примечание в счёте", commentHint: "например: за 2 и 3 квартал 2026",
     actions: "Действие", waived: "За счёт GMED", waive: "Не перевыставлять", unwaive: "Вернуть в перевыставление",
     waiveTitle: "Расход за счёт GMED",
-    waiveDescription: (amount: string) => `Невыставленный остаток ${amount} больше не будет долгом пациента и исчезнет из расходов для перевыставления. Счёт поставщика, его оплата и проводка не меняются.`,
+    waiveDescription: (amount: string) => `Невыставленный остаток ${amount} больше не будет долгом пациента и исчезнет из расходов для перевыставления.`,
     unwaiveTitle: "Вернуть расход в перевыставление",
     unwaiveDescription: (amount: string) => `${amount} снова станут долгом пациента и появятся в расходах для перевыставления.`,
-    reason: "Причина", reasonHint: "От 3 до 1000 символов. Видна сотрудникам в выписке пациента и в журнале.",
+    reason: "Причина", reasonHint: "От 3 до 1000 символов.",
     cancel: "Отмена", waiverFailed: "Не удалось сохранить изменение.",
     waivedBy: (amount: string, reason: string) => `${amount} за счёт GMED: ${reason}`,
     concierge: "Услуги Concierge к выставлению",
     conciergeEmpty: "Нет готовых к выставлению услуг Concierge с ценой продажи.",
-    conciergeHint: (rate: string) => `Цена продажи нетто плюс НДС ${rate} %; после выпуска счёта услуга считается выставленной.`,
     conciergeState: {
       in_draft: "В черновике",
       other_order: "Другой заказ",
@@ -240,7 +238,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       selectable: "",
     } satisfies Record<ConciergeServiceState, string>,
     conciergeNoPrice: (count: number) => `Готовые услуги Concierge без цены продажи (${count}) не предлагаются. Укажите цену в услуге:`,
-    readOnly: "Только просмотр: счёт создают Billing, CEO или менеджер пациента.",
+    readOnly: "Только просмотр.",
     noOrderShort: "Без заказа",
   };
 
@@ -504,7 +502,6 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const conciergeSection = <section className="overflow-hidden rounded-xl border border-border/70" data-testid="patient-billing-concierge">
     <div className="border-b border-border/60 px-4 py-3">
       <AdminSectionTitle icon={ConciergeBell}>{copy.concierge}</AdminSectionTitle>
-      {pricedConcierge.length && conciergeVatRate !== null && !readOnly ? <p className="mt-1 text-xs text-muted-foreground">{copy.conciergeHint(conciergeVatRate)}</p> : null}
     </div>
     {pricedConcierge.length === 0 ? <p className="px-4 py-5 text-sm text-muted-foreground">{copy.conciergeEmpty}</p> : <div className="divide-y divide-border/60">
       {pricedConcierge.map(service => {

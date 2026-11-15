@@ -578,15 +578,6 @@ export function OrderVisitPlanner({
 
   return (
     <div data-testid="order-visit-planner" data-mode={mode} className="space-y-3">
-      {draftMode ? (
-        <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
-          {tx(
-            "Заказ лида: пациента ещё нет, поэтому сохраняем черновик. Когда лид станет пациентом, блоки будут ждать здесь — останется нажать «Создать все приёмы».",
-            "Auftrag eines Leads: noch kein Patient, daher wird ein Entwurf gespeichert. Sobald der Lead Patient ist, stehen die Blöcke hier bereit – dann «Alle Termine anlegen».",
-          )}
-        </p>
-      ) : null}
-
       <div className="flex flex-wrap items-center justify-between gap-2">
         <ol className="flex flex-wrap gap-1.5" data-testid="order-visit-planner-steps">
           {steps.map((label, index) => {

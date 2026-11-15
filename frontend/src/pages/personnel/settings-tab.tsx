@@ -287,7 +287,6 @@ export function SettingsTab({
               value={form.late_days}
               onChange={(event) => setForm((current) => ({ ...current, late_days: event.target.value }))}
             />
-            <p className="text-xs text-muted-foreground">{t.personnel_late_days_hint}</p>
           </Field>
           <Field label={t.personnel_tsa_url} htmlFor="personnel-tsa-url">
             <Input
@@ -297,7 +296,6 @@ export function SettingsTab({
               value={form.tsa_url}
               onChange={(event) => setForm((current) => ({ ...current, tsa_url: event.target.value }))}
             />
-            <p className="text-xs text-muted-foreground">{t.personnel_tsa_url_hint}</p>
           </Field>
           <Banner tone="warning">
             <label className="flex items-center gap-2 font-medium">
@@ -328,7 +326,6 @@ export function SettingsTab({
       ) : null}
 
       <AdminTableCard icon={CalendarRange} title={t.personnel_retention_periods} count={categories.length}>
-        <p className="px-1 text-xs text-muted-foreground">{t.personnel_retention_periods_hint}</p>
         <DataTableSurface
           rows={categories}
           columns={retentionColumns}
