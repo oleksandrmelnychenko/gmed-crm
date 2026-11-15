@@ -68,6 +68,7 @@ type Copy = {
   language: string;
   access: string;
   documentDate: string;
+  validUntil: string;
   notSet: string;
   source: string;
   sourcePerson: string;
@@ -114,6 +115,7 @@ const COPY: Record<"de" | "ru", Copy> = {
     language: "Dokumentsprache",
     access: "Zugriffskategorie",
     documentDate: "Dokumentdatum",
+    validUntil: "Gültig bis",
     notSet: "Nicht festgelegt",
     source: "Verfasser, Institution und Adressat",
     sourcePerson: "Verfasser",
@@ -158,6 +160,7 @@ const COPY: Record<"de" | "ru", Copy> = {
     language: "Язык документа",
     access: "Категория доступа",
     documentDate: "Дата документа",
+    validUntil: "Действует до",
     notSet: "Не указано",
     source: "Автор, учреждение и адресат",
     sourcePerson: "Автор / составитель",
@@ -422,6 +425,8 @@ type EditForm = {
   paymentDueDate: string;
   paymentDate: string;
   paymentMethod: DocumentPaymentMethod | "";
+  /** «Действует до» (owner 2026-11-15), YYYY-MM-DD or "". */
+  validUntil: string;
 };
 
 function formFromDocument(document: DocumentItem): EditForm {
@@ -448,6 +453,7 @@ function formFromDocument(document: DocumentItem): EditForm {
     paymentDueDate: document.payment_due_date ?? "",
     paymentDate: document.payment_date ?? "",
     paymentMethod: document.payment_method ?? "",
+    validUntil: document.valid_until ?? "",
   };
 }
 
@@ -586,6 +592,7 @@ export function PatientDocumentEditSheet({
         payment_due_date: form.paymentDueDate || null,
         payment_date: form.paymentDate || null,
         payment_method: form.paymentMethod || null,
+        valid_until: form.validUntil || null,
       });
       toast.success(copy.saved);
       onOpenChange(false);
@@ -798,6 +805,20 @@ export function PatientDocumentEditSheet({
                   value={form.documentDate}
                   onChange={(event) =>
                     update("documentDate", event.target.value)
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <Field
+                label={copy.validUntil}
+                htmlFor="patient-document-edit-valid-until"
+              >
+                <Input
+                  id="patient-document-edit-valid-until"
+                  type="date"
+                  value={form.validUntil}
+                  onChange={(event) =>
+                    update("validUntil", event.target.value)
                   }
                   className={inputClass}
                 />

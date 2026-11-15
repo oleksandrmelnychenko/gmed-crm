@@ -99,6 +99,10 @@ export type DocumentItem = {
   version_number?: number | null;
   /** `false`: the order or its terms changed after this PDF was made (`document_terms_current`). */
   terms_current?: boolean | null;
+  /** Optional «Gültig bis» and its server status (owner 2026-11-15); null = not tracked. */
+  valid_until?: string | null;
+  validity_status?: "valid" | "expiring" | "expired" | null;
+  validity_days_left?: number | null;
   file_size?: number | null;
   is_medical?: boolean;
   art?: string | null;

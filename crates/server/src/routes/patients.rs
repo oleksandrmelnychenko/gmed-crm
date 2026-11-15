@@ -8441,6 +8441,7 @@ async fn list_patient_documents(
                   d.payment_due_date,
                   d.payment_date,
                   d.payment_method,
+                  d.valid_until,
                   u.name AS uploaded_by_name,
                   d.created_at,
                   EXISTS(
@@ -8524,6 +8525,12 @@ async fn list_patient_documents(
             continue;
         }
 
+        // Optional «Gültig bis» (owner 2026-11-15), staff only.
+        let valid_until = row
+            .try_get::<Option<chrono::NaiveDate>, _>("valid_until")
+            .unwrap_or_default();
+        let (validity_status, validity_days_left) =
+            crate::services::document_validity::validity_fields(valid_until);
         items.push(serde_json::json!({
                 "id": document_id,
                 "document_number": row.try_get::<String, _>("document_number").unwrap_or_default(),
@@ -8557,6 +8564,9 @@ async fn list_patient_documents(
                 "payment_due_date": row.try_get::<Option<chrono::NaiveDate>, _>("payment_due_date").unwrap_or_default(),
                 "payment_date": row.try_get::<Option<chrono::NaiveDate>, _>("payment_date").unwrap_or_default(),
                 "payment_method": row.try_get::<Option<String>, _>("payment_method").unwrap_or_default(),
+                "valid_until": valid_until,
+                "validity_status": validity_status,
+                "validity_days_left": validity_days_left,
                 "uploaded_by_name": row.try_get::<Option<String>, _>("uploaded_by_name").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             }));

@@ -2,6 +2,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import type { DocumentItem, TemplateCatalogResponse } from "../model/types";
 import { buildGenerateDocumentPayload, templateForDocument } from "../model/document-model";
 import { isOutdatedCurrentVersion, oneClickReplacementForm, regeneratesInOneClick } from "../model/outdated-document-version";
+import { needsValidityAttention } from "../model/document-validity";
 import { generateDocument } from "./document-api";
 
 export type RegeneratedDocument =
@@ -24,12 +25,21 @@ export class RegenerateDocumentError extends Error {
  * patient access, that the old one is still the newest version without an
  * open signature request, stores the old one as superseded and audits it.
  */
-export async function regenerateOutdatedDocument(documentId: string): Promise<RegeneratedDocument> {
+export async function regenerateOutdatedDocument(
+  documentId: string,
+  /**
+   * `outdated` needs `terms_current: false`; `expired` renews a template
+   * document whose «Gültig bis» passed or is near (owner 2026-11-15). The new
+   * version starts without a date unless the records know it.
+   */
+  reason: "outdated" | "expired" = "outdated",
+): Promise<RegeneratedDocument> {
   const [document, catalog] = await Promise.all([
     apiFetch<DocumentItem>(`/documents/${documentId}`, { forceFresh: true }),
     apiFetch<TemplateCatalogResponse>("/documents/templates", { cacheTtlMs: 300_000 }),
   ]);
-  if (!isOutdatedCurrentVersion(document)) {
+  const renewable = reason === "expired" ? needsValidityAttention(document) : isOutdatedCurrentVersion(document);
+  if (!renewable) {
     throw new RegenerateDocumentError("not_outdated", "document_not_outdated");
   }
   const template = templateForDocument(catalog.templates, document);

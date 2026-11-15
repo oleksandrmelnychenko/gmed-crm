@@ -2946,6 +2946,9 @@ struct DocumentListQuery {
     document_variant: Option<String>,
     access_category: Option<String>,
     financial_status: Option<String>,
+    /// `expired`, `expiring` or `attention` (both): documents by their
+    /// optional validity date (owner 2026-11-15).
+    validity: Option<String>,
     include_archived_versions: Option<bool>,
     /// `true`: answer `{ items, offset, has_more }` and page past the newest
     /// [`DOCUMENT_LIST_BATCH`] documents with `offset` / `limit` counted in
@@ -3042,6 +3045,9 @@ struct UpdateDocumentRequest {
     payment_date: NullableJsonField,
     #[serde(default)]
     payment_method: NullableJsonField,
+    /// «Действует до» / «Gültig bis» (owner 2026-11-15): optional; `null` clears it.
+    #[serde(default)]
+    valid_until: NullableJsonField,
 }
 
 #[derive(Deserialize)]
@@ -14355,6 +14361,11 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         )
     };
     let needs_categorization = document_needs_categorization(art.as_deref(), category.as_deref());
+    let valid_until = row
+        .try_get::<Option<NaiveDate>, _>("valid_until")
+        .unwrap_or_default();
+    let (validity_status, validity_days_left) =
+        crate::services::document_validity::validity_fields(valid_until);
 
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -14407,6 +14418,11 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "payment_due_date": row.try_get::<Option<NaiveDate>, _>("payment_due_date").unwrap_or_default(),
         "payment_date": row.try_get::<Option<NaiveDate>, _>("payment_date").unwrap_or_default(),
         "payment_method": row.try_get::<Option<String>, _>("payment_method").unwrap_or_default(),
+        // Optional «Gültig bis» (owner 2026-11-15): status by the Berlin day,
+        // all three `null` when the document is not tracked.
+        "valid_until": valid_until,
+        "validity_status": validity_status,
+        "validity_days_left": validity_days_left,
         "signed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "signed_by": row.try_get::<Option<Uuid>, _>("signed_by").unwrap_or_default(),
         "compliance_kind": row.try_get::<Option<String>, _>("compliance_kind").unwrap_or_default(),
@@ -14651,7 +14667,7 @@ async fn fetch_document_row(
                     ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
-                  d.payment_method, d.generated_template_id, d.generated_bindings,
+                  d.payment_method, d.valid_until, d.generated_template_id, d.generated_bindings,
                   d.generated_manual_text,
                   d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.extracted_text, d.text_extraction_status, d.text_extraction_method,
@@ -32799,6 +32815,12 @@ async fn list_documents(
             Ok(value) => value,
             Err(resp) => return resp,
         };
+    let Ok(validity_filter) =
+        crate::services::document_validity::parse_filter(query.validity.as_deref())
+    else {
+        return err(StatusCode::BAD_REQUEST, "Invalid validity filter");
+    };
+    let validity_today = crate::app_time::today();
 
     let paged = query.paged.unwrap_or(false);
     // A huge offset made the paged list read the whole table in batches
@@ -32846,7 +32868,7 @@ async fn list_documents(
                     ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
-                  d.payment_method, d.generated_template_id, d.generated_bindings,
+                  d.payment_method, d.valid_until, d.generated_template_id, d.generated_bindings,
                   d.generated_manual_text,
                   d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
@@ -33001,6 +33023,13 @@ async fn list_documents(
              AND ($21::boolean OR NOT EXISTS(
                    SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
                  ))
+             -- Validity filter (services::document_validity, 30 days =
+             -- EXPIRING_DAYS); $25 is the Berlin day.
+             AND ($24::text IS NULL
+                  OR ($24 = 'expired' AND d.valid_until < $25::date)
+                  OR ($24 = 'expiring' AND d.valid_until >= $25::date
+                      AND d.valid_until <= $25::date + 30)
+                  OR ($24 = 'attention' AND d.valid_until <= $25::date + 30))
            -- The id breaks ties, so batches read with OFFSET never skip or
            -- repeat a document.
            ORDER BY d.created_at DESC, d.id DESC
@@ -33029,6 +33058,8 @@ async fn list_documents(
     .bind(query.include_archived_versions.unwrap_or(false))
     .bind(DOCUMENT_LIST_BATCH)
     .bind(batch_offset)
+    .bind(validity_filter)
+    .bind(validity_today)
     .fetch_all(&state.db)
     .await
     {
@@ -33123,7 +33154,7 @@ async fn list_document_intake_queue(
                     ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
-                  d.payment_method, d.generated_template_id, d.generated_bindings,
+                  d.payment_method, d.valid_until, d.generated_template_id, d.generated_bindings,
                   d.generated_manual_text,
                   d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
@@ -33519,7 +33550,7 @@ async fn list_document_versions(
                     ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
-                  d.payment_method, d.generated_template_id, d.generated_bindings,
+                  d.payment_method, d.valid_until, d.generated_template_id, d.generated_bindings,
                   d.generated_manual_text,
                   d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
@@ -37202,6 +37233,9 @@ async fn upload_document_with_mode(
     let mut payment_method: Option<String> = None;
     let mut invoice_scope: Option<String> = None;
     let mut manual_intake = false;
+    // Optional «Gültig bis» (owner 2026-11-15); without it the known date of
+    // an identity document is prefilled (trigger documents_prefill_valid_until).
+    let mut valid_until: Option<NaiveDate> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or_default().to_string();
@@ -37337,6 +37371,12 @@ async fn upload_document_with_mode(
             }
             "payment_due_date" => {
                 payment_due_date = match parse_optional_date_field(field).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "valid_until" => {
+                valid_until = match parse_optional_date_field(field).await {
                     Ok(value) => value,
                     Err(resp) => return resp,
                 }
@@ -37753,6 +37793,16 @@ async fn upload_document_with_mode(
             Ok(value) => value,
             Err(resp) => return resp,
         };
+    if let Some(day) = valid_until
+        && let Err(error) = sqlx::query("UPDATE documents SET valid_until = $2 WHERE id = $1")
+            .bind(document_id)
+            .bind(day)
+            .execute(&state.db)
+            .await
+    {
+        // The file is stored; staff can set the date in the detail.
+        tracing::warn!(%error, %document_id, "store document validity on upload");
+    }
 
     let should_auto_name = !auto_name_was_supplied || auto_name_generated;
     let auto_naming_queued = if manual_intake {
@@ -37823,6 +37873,7 @@ async fn upload_document_with_mode(
             "is_medical": resolved_is_medical,
             "ursprung": ursprung.as_deref(),
             "classification_suggestion": classification_suggestion.clone(),
+            "valid_until": valid_until.map(|day| day.to_string()),
         }),
     ));
 
@@ -38285,6 +38336,14 @@ async fn update_document(
             .unwrap_or_default(),
         Err(resp) => return resp,
     };
+    let previous_valid_until = current
+        .try_get::<Option<NaiveDate>, _>("valid_until")
+        .unwrap_or_default();
+    let valid_until = match nullable_document_date(&body.valid_until, "Invalid valid until date") {
+        Ok(Some(value)) => value,
+        Ok(None) => previous_valid_until,
+        Err(resp) => return resp,
+    };
 
     // Filed under a medical category or document type (edit, intake review,
     // team lead review), the document is medical data whatever the request
@@ -38431,7 +38490,8 @@ async fn update_document(
                financial_status = $23,
                payment_due_date = $24,
                payment_date = $25,
-               payment_method = $26
+               payment_method = $26,
+               valid_until = $27
            WHERE id = $1"#,
     )
     .bind(id)
@@ -38460,6 +38520,7 @@ async fn update_document(
     .bind(payment_due_date)
     .bind(payment_date)
     .bind(payment_method.as_deref())
+    .bind(valid_until)
     .execute(&state.db)
     .await
     {
@@ -38488,19 +38549,27 @@ async fn update_document(
                     "mark background document naming as manually overridden"
                 );
             }
+            let mut audit_details = json!({
+                "patient_id": patient_id,
+                "order_id": order_id,
+                "appointment_id": appointment_id,
+                "status": body.status,
+                "visibility": body.visibility,
+                "is_medical": body.is_medical,
+            });
+            // A changed validity date is named with its previous value
+            // (owner 2026-11-15); `null` = cleared / was empty.
+            if valid_until != previous_valid_until {
+                audit_details["valid_until"] = json!(valid_until.map(|day| day.to_string()));
+                audit_details["valid_until_before"] =
+                    json!(previous_valid_until.map(|day| day.to_string()));
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "update_document",
                 Some(auth.user_id),
                 "document",
                 Some(id),
-                json!({
-                    "patient_id": patient_id,
-                    "order_id": order_id,
-                    "appointment_id": appointment_id,
-                    "status": body.status,
-                    "visibility": body.visibility,
-                    "is_medical": body.is_medical,
-                }),
+                audit_details,
             ));
             if medical.enforced {
                 state

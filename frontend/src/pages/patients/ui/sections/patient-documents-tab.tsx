@@ -72,6 +72,16 @@ import {
   useCanRenewOutdatedDocuments,
   useOutdatedDocumentRenewal,
 } from "@/pages/documents/ui/outdated-document-renewal";
+import {
+  DocumentValidityAction,
+  DocumentValidityChip,
+  validityFilterOptions,
+} from "@/pages/documents/ui/document-validity";
+import {
+  matchesValidityFilter,
+  parseValidityFilter,
+  type DocumentValidityFilter,
+} from "@/pages/documents/model/document-validity";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { DocumentPortalReleaseAction } from "@/pages/documents/ui/document-portal-release-action";
 
@@ -331,13 +341,27 @@ export function PatientDocumentsTab({
   const documentPreviewUrlRef = useRef<string | null>(null);
   const documentPreviewRequestRef = useRef(0);
   // Saved translations render as children of their source document.
+  // «Просроченные / Истекают» (owner 2026-11-15): offered once any document
+  // of the patient has a validity date.
+  const [validityFilter, setValidityFilter] = useState<DocumentValidityFilter>("");
+  const previewDocument = documentPreview
+    ? documents.find((doc) => doc.id === documentPreview.id) ?? null
+    : null;
+  const anyValidityTracked = useMemo(
+    () => documents.some((doc) => Boolean(doc.valid_until)),
+    [documents],
+  );
+  const validityFilteredDocuments = useMemo(
+    () => filteredDocuments.filter((doc) => matchesValidityFilter(doc, validityFilter)),
+    [filteredDocuments, validityFilter],
+  );
   const documentTree = useMemo(
-    () => splitTranslationTree(filteredDocuments),
-    [filteredDocuments],
+    () => splitTranslationTree(validityFilteredDocuments),
+    [validityFilteredDocuments],
   );
   const documentPagination = useDataTablePagination(
     documentTree.roots,
-    `${patientId ?? ""}:${documentStatusFilter}:${documentCategoryFilter}`,
+    `${patientId ?? ""}:${documentStatusFilter}:${documentCategoryFilter}:${validityFilter}`,
   );
   const pagedDocumentRows = useMemo(
     () => withTranslationChildren(documentPagination.pagedRows, documentTree.childrenByParent),
@@ -601,6 +625,8 @@ export function PatientDocumentsTab({
             {isOutdatedCurrentVersion(doc) ? (
               <OutdatedDocumentChip className="shrink-0 whitespace-nowrap" />
             ) : null}
+            {/* Optional validity date (owner 2026-11-15); nothing without one. */}
+            <DocumentValidityChip document={doc} compact className="shrink-0 whitespace-nowrap" />
           </span>
         ),
       },
@@ -717,6 +743,17 @@ export function PatientDocumentsTab({
                   documentId={doc.id}
                   busyId={renewal.busyId}
                   onRenew={(id) => void renewal.renew(id)}
+                  title={documentDisplayName(doc, l)}
+                  iconOnly
+                />
+              ) : canManageDocuments ? (
+                // Expiring or expired (owner 2026-11-15): a template document
+                // gets a new version, an uploaded scan the upload dialog.
+                <DocumentValidityAction
+                  document={doc}
+                  busyId={renewal.busyId}
+                  onRenew={canRenewOutdated ? (id) => void renewal.renew(id, "expired") : undefined}
+                  onUploadNew={onOpenUpload}
                   title={documentDisplayName(doc, l)}
                   iconOnly
                 />
@@ -856,13 +893,31 @@ export function PatientDocumentsTab({
                   </option>
                 ))}
               </NativeComboboxSelect>
-              {hasDocumentFilters ? (
+              {anyValidityTracked || validityFilter ? (
+                <NativeComboboxSelect
+                  value={validityFilter}
+                  aria-label={lang === "de" ? "Gültigkeit" : "Срок действия"}
+                  data-testid="patient-documents-validity-filter"
+                  onChange={(event) => setValidityFilter(parseValidityFilter(event.target.value))}
+                  className="h-8 w-[210px] shrink-0 rounded-lg bg-field text-[13px]"
+                >
+                  {validityFilterOptions(lang).map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              ) : null}
+              {hasDocumentFilters || validityFilter ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="xs"
                   className="shrink-0"
-                  onClick={onResetDocumentFilters}
+                  onClick={() => {
+                    setValidityFilter("");
+                    onResetDocumentFilters();
+                  }}
                 >
                   {l("patients_reset_filters")}
                 </Button>
@@ -912,6 +967,18 @@ export function PatientDocumentsTab({
                     documentId={documentPreview.id}
                     busyId={renewal.busyId}
                     onRenew={(id) => void renewal.renew(id)}
+                  />
+                ) : null}
+                {previewDocument ? <DocumentValidityChip document={previewDocument} className="shrink-0" /> : null}
+                {previewDocument && canManageDocuments && !outdatedIds.includes(previewDocument.id) ? (
+                  <DocumentValidityAction
+                    document={previewDocument}
+                    busyId={renewal.busyId}
+                    onRenew={canRenewOutdated ? (id) => void renewal.renew(id, "expired") : undefined}
+                    onUploadNew={() => {
+                      closeDocumentPreview();
+                      onOpenUpload();
+                    }}
                   />
                 ) : null}
                 <DocumentSignatureAction documentId={documentPreview.id} title={documentPreview.title} onDone={onDocumentGenerated} />

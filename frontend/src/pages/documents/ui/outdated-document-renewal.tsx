@@ -86,13 +86,13 @@ export function useOutdatedDocumentRenewal({
   const [renewed, setRenewed] = useState<RenewedDocument | null>(null);
   const running = useRef(false);
 
-  const renew = useCallback(async (documentId: string) => {
+  const renew = useCallback(async (documentId: string, reason: "outdated" | "expired" = "outdated") => {
     // One new version at a time: a second click must not race the first.
     if (running.current) return;
     running.current = true;
     setBusyId(documentId);
     try {
-      const result = await regenerateOutdatedDocument(documentId);
+      const result = await regenerateOutdatedDocument(documentId, reason);
       if (result.kind === "needs_form") {
         onNeedsForm?.(result.previousId);
         return;

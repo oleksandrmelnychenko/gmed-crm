@@ -214,6 +214,7 @@ import {
 } from "./model/client-signature";
 import { OrderResignAction } from "./ui/order-resign-action";
 import { OrderOutdatedDocuments } from "./ui/order-outdated-documents";
+import { OrderExpiringDocuments } from "./ui/order-expiring-documents";
 import { skipPassiveOrderRefresh } from "./model/order-realtime";
 import { billingSourceLabel } from "./model/billing-source";
 import {
@@ -4456,6 +4457,16 @@ function useOrdersPageContent() {
                       <div className="mt-3 empty:hidden">
                         <OrderOutdatedDocuments
                           orderId={orderDetail.id}
+                          documents={orderDocuments}
+                          lang={lang}
+                          onChanged={() => {
+                            clearApiCache(`/documents?order_id=${orderDetail.id}`);
+                            triggerReload();
+                          }}
+                        />
+                        <OrderExpiringDocuments
+                          orderId={orderDetail.id}
+                          patientId={orderDetail.patient_id}
                           documents={orderDocuments}
                           lang={lang}
                           onChanged={() => {

@@ -1,3 +1,5 @@
+import type { DocumentValidityStatus } from "./document-validity";
+
 export type DocumentStatus = "draft" | "active" | "archived";
 export type DocumentVisibility =
   | "internal"
@@ -78,6 +80,11 @@ export type DocumentItem = {
   payment_due_date: string | null;
   payment_date: string | null;
   payment_method: DocumentPaymentMethod | null;
+  /** Optional «Gültig bis» (owner 2026-11-15); null = not tracked. */
+  valid_until?: string | null;
+  /** Server status by the Berlin day; null without a date. */
+  validity_status?: DocumentValidityStatus | null;
+  validity_days_left?: number | null;
   generated_template_id: string | null;
   /**
    * Generated order documents only: `false` when the order's client terms (or
@@ -304,6 +311,8 @@ export type FiltersState = {
   documentVariant: string;
   accessCategory: string;
   financialStatus: string;
+  /** `attention` | `expired` | `expiring` | "" (`GET /documents?validity=`). */
+  validity: string;
 };
 
 export type UploadFormState = {
@@ -333,6 +342,8 @@ export type UploadFormState = {
   paymentDate: string;
   paymentMethod: DocumentPaymentMethod | "";
   notes: string;
+  /** «Действует до», YYYY-MM-DD or "" (none). */
+  validUntil: string;
 };
 
 export type EditFormState = {
@@ -361,6 +372,8 @@ export type EditFormState = {
   paymentDate: string;
   paymentMethod: DocumentPaymentMethod | "";
   notes: string;
+  /** «Действует до», YYYY-MM-DD or "" (none). */
+  validUntil: string;
 };
 
 export type ShareFormState = {

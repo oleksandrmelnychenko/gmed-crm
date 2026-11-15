@@ -291,6 +291,7 @@ export function buildDocumentsPath(filters: FiltersState) {
   if (filters.documentVariant) params.set("document_variant", filters.documentVariant);
   if (filters.accessCategory) params.set("access_category", filters.accessCategory);
   if (filters.financialStatus) params.set("financial_status", filters.financialStatus);
+  if (filters.validity) params.set("validity", filters.validity);
   return params.size ? `/documents?${params.toString()}` : "/documents";
 }
 
@@ -1245,6 +1246,7 @@ export function emptyUploadForm(patientId = ""): UploadFormState {
     paymentDate: "",
     paymentMethod: "",
     notes: "",
+    validUntil: "",
   };
 }
 
@@ -1318,6 +1320,7 @@ export function detailToEditForm(detail: DocumentItem): EditFormState {
     paymentDate: detail.payment_date ?? "",
     paymentMethod: detail.payment_method ?? "",
     notes: detail.notes ?? "",
+    validUntil: detail.valid_until ?? "",
   };
 }
 

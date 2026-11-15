@@ -928,6 +928,11 @@ export type SupportingDocumentOption = {
   is_latest_version?: boolean | null;
   /** `false`: the order or its terms changed after this PDF was made (`document_terms_current`). */
   terms_current?: boolean | null;
+  generated_template_id?: string | null;
+  /** Optional «Gültig bis» and its server status (owner 2026-11-15). */
+  valid_until?: string | null;
+  validity_status?: "valid" | "expiring" | "expired" | null;
+  validity_days_left?: number | null;
 };
 
 export type ExternalInvoiceFormState = {

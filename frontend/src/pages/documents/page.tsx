@@ -279,6 +279,12 @@ import {
   useCanRenewOutdatedDocuments,
   useOutdatedDocumentRenewal,
 } from "./ui/outdated-document-renewal";
+import { parseValidityFilter } from "./model/document-validity";
+import {
+  DocumentValidityAction,
+  DocumentValidityChip,
+  validityFilterOptions,
+} from "./ui/document-validity";
 import { DocumentPreviewSurface } from "./ui/document-preview-surface";
 import {
   DocumentTranslationDialog,
@@ -1072,6 +1078,7 @@ function StaffDocumentsPage({
       lang === "ru" ? "Адресат: учреждение" : "Adressat: Institution",
     financialStatus:
       lang === "ru" ? "Финансовый статус" : "Finanzstatus",
+    validUntil: lang === "ru" ? "Действует до" : "Gültig bis",
     allDirections: lang === "ru" ? "Все направления" : "Alle Richtungen",
     allVariants: lang === "ru" ? "Все варианты" : "Alle Varianten",
     allAccessCategories:
@@ -1193,6 +1200,7 @@ function StaffDocumentsPage({
     documentVariant: searchParams.get("document_variant") ?? "",
     accessCategory: searchParams.get("access_category") ?? "",
     financialStatus: searchParams.get("financial_status") ?? "",
+    validity: parseValidityFilter(searchParams.get("validity")),
   }));
   const deferredSearch = useDeferredValue(filters.search);
   const [mobileDocumentFiltersOpen, setMobileDocumentFiltersOpen] = useState(false);
@@ -2531,6 +2539,8 @@ function StaffDocumentsPage({
         formData.append("payment_method", uploadForm.paymentMethod);
       if (uploadForm.notes.trim())
         formData.append("notes", uploadForm.notes.trim());
+      if (uploadForm.validUntil)
+        formData.append("valid_until", uploadForm.validUntil);
       const response = await uploadDocument(formData);
       setNotice(
         constrainedUpload
@@ -3262,6 +3272,7 @@ function StaffDocumentsPage({
             payment_date: editForm.paymentDate || null,
             payment_method: editForm.paymentMethod || null,
             notes: editForm.notes.trim() || null,
+            valid_until: editForm.validUntil || null,
           }
         : {
             art: editForm.art.trim(),
@@ -3969,6 +3980,26 @@ function StaffDocumentsPage({
                 </option>
               ))}
             </NativeComboboxSelect>
+            {/* Optional «Gültig bis» (owner 2026-11-15): expired / expiring documents. */}
+            <NativeComboboxSelect
+              value={filters.validity}
+              data-readonly="exempt"
+              aria-label={metaText.validUntil}
+              data-testid="documents-validity-filter"
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  validity: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, documentFilterControlClassName)}
+            >
+              {validityFilterOptions(lang).map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeComboboxSelect>
             <Button
               variant="ghost"
               size="sm"
@@ -3991,6 +4022,7 @@ function StaffDocumentsPage({
                   documentVariant: "",
                   accessCategory: "",
                   financialStatus: "",
+                  validity: "",
                 })
               }
             >
@@ -5385,6 +5417,20 @@ function StaffDocumentsPage({
                         className={shellInputClassName}
                       />
                     </Field>
+                    <Field label={metaText.validUntil}>
+                      <Input
+                        type="date"
+                        value={uploadForm.validUntil}
+                        data-testid="document-upload-valid-until"
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            validUntil: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
                     <Field label={metaText.sourcePerson}>
                       <Input
                         value={uploadForm.sourcePerson}
@@ -6210,6 +6256,21 @@ function StaffDocumentsPage({
                       className={shellInputClassName}
                     />
                   </Field>
+                  <Field label={metaText.validUntil}>
+                    <Input
+                      type="date"
+                      value={editForm.validUntil}
+                      data-testid="document-edit-valid-until"
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, validUntil: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
                   <Field label={metaText.sourcePerson}>
                     <Input
                       value={editForm.sourcePerson}
@@ -6755,6 +6816,29 @@ function StaffDocumentsPage({
                           onRenew={(id) => void outdatedRenewal.renew(id)}
                         />
                       ) : null}
+                      {/* Optional «Gültig bis» (owner 2026-11-15): status, and for an
+                          expiring or expired scan «Загрузить новый»; a template
+                          document gets «Новая версия» beside it. */}
+                      <DocumentValidityChip document={detail} className="shrink-0" />
+                      {canUpload && !detail.generated_template_id ? (
+                        <DocumentValidityAction
+                          document={detail}
+                          busyId={null}
+                          onUploadNew={() => {
+                            setUploadForm((current) => ({
+                              ...current,
+                              file: null,
+                              patientId: detail.patient_id ?? "",
+                              orderId: detail.order_id ?? "",
+                              appointmentId: detail.appointment_id ?? "",
+                              art: detail.art,
+                              category: detail.category ?? "",
+                              validUntil: "",
+                            }));
+                            setUploadOpen(true);
+                          }}
+                        />
+                      ) : null}
                       {/* The server only replaces the newest, non-archived version. */}
                       {canManage &&
                       currentDetailTemplate &&
@@ -6950,6 +7034,10 @@ function StaffDocumentsPage({
                           <DocumentMetaFact
                             label={metaText.documentDate}
                             value={formatDate(detail.document_date)}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.validUntil}
+                            value={detail.valid_until ? formatDate(detail.valid_until) : t.common_not_set}
                           />
                           <DocumentMetaFact
                             label={metaText.sourcePerson}

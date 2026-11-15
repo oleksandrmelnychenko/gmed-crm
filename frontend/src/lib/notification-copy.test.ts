@@ -399,3 +399,28 @@ describe("timed lead and patient notices (owner request 2026-10-26)", () => {
     expect(notificationCopyFromFacts(item, "ru")).toBeNull();
   });
 });
+
+describe("document validity notices (owner 2026-11-15)", () => {
+  const params = {
+    stage: "expiring",
+    patient_label: "P-0042 · Erika Muster",
+    document_name: "Reisepass",
+    valid_until: "2026-12-15",
+    days_left: 30,
+  };
+
+  it("words the advance notice with DD.MM.YYYY", () => {
+    const copy = notificationCopyFromFacts(notice("document_validity", "Document expires", null, params), "ru");
+    expect(copy?.title).toBe("Документ пациента P-0042 · Erika Muster истекает через 30 дн.");
+    expect(copy?.body).toContain("Reisepass: Действует до 15.12.2026.");
+    const de = notificationCopyFromFacts(notice("document_validity", "Document expires", null, params), "de");
+    expect(de?.title).toBe("Dokument von P-0042 · Erika Muster läuft in 30 Tagen ab");
+  });
+
+  it("words the notice on the last day and after", () => {
+    const today = notificationCopyFromFacts(notice("document_validity", "x", null, { ...params, stage: "expired", days_left: 0 }), "ru");
+    expect(today?.title).toBe("Документ пациента P-0042 · Erika Muster истекает сегодня");
+    const late = notificationCopyFromFacts(notice("document_validity", "x", null, { ...params, stage: "expired", days_left: -2 }), "de");
+    expect(late?.title).toBe("Dokument von P-0042 · Erika Muster ist abgelaufen");
+  });
+});

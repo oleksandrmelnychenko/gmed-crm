@@ -7,6 +7,7 @@ pub mod compliance_digest;
 pub mod concierge_service_tasks;
 pub mod contracting_party;
 pub mod contracting_party_backfill;
+pub mod document_validity;
 pub mod drug_matching;
 pub mod gba_ais;
 pub mod identity_document;

@@ -109,6 +109,7 @@ async fn main() {
     gmed_server::routes::personnel::integrity::spawn_scheduler(app_state.clone());
     // A minor patient turns 18: the parents' access ends (owner decision 2026-10-20).
     gmed_server::services::coming_of_age::spawn_scheduler(app_state.clone());
+    gmed_server::services::document_validity::spawn_scheduler(app_state.clone());
     // EU sanctions list: daily download, screening queue worker.
     gmed_server::sanctions::download::spawn_list_scheduler(app_state.clone());
     gmed_server::sanctions::screening::spawn_screening_worker(app_state.clone());

@@ -20,6 +20,7 @@ import {
 } from "../model/detail-model";
 
 import { patientWorkspaceNavigation } from "../model/patient-navigation";
+import { usePatientDocumentValidityCount } from "@/pages/documents/data/use-document-validity-count";
 
 const icons = { profile: UserRound, clinical: Stethoscope, "medication-ai": AiMark, relations: UsersRound, orders: ClipboardList, appointments: CalendarClock, documents: FolderOpen, contracts: FileSignature, billing: FilePlus2, invoices: ReceiptText, finance: Wallet, workflow: BadgeCheck, curators: ShieldCheck, timeline: History };
 
@@ -61,6 +62,8 @@ export function PatientWorkspaceNav() {
 
   const items = patientWorkspaceNavigation(user, lang, t);
   const groups = [...new Map(items.map(item => [item.group, item.groupLabel])).entries()];
+  // Expiring or expired documents (owner 2026-11-15): a count on the tab.
+  const validityCount = usePatientDocumentValidityCount(id, canViewDocuments);
 
   if (!id) return null;
 
@@ -107,6 +110,17 @@ export function PatientWorkspaceNav() {
                       strokeWidth={isActive ? 1.85 : 1.7}
                     />
                     <span className="truncate font-medium leading-5">{item.label}</span>
+                    {item.key === "documents" && validityCount > 0 ? (
+                      <span
+                        className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/60 dark:text-amber-200"
+                        title={lang === "de"
+                          ? `Dokumente, die ablaufen oder abgelaufen sind: ${validityCount}`
+                          : `Документы, которые истекают или просрочены: ${validityCount}`}
+                        data-testid="patient-documents-validity-count"
+                      >
+                        {validityCount}
+                      </span>
+                    ) : null}
                   </StaffLink>
                 );
               })}

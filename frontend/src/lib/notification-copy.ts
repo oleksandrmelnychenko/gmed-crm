@@ -887,6 +887,33 @@ function sop(item: NotificationFacts, lang: Lang): NotificationCopy | null {
   return null;
 }
 
+// A document's optional «Gültig bis» is 30 days away or reached
+// (crates/server/src/services/document_validity.rs, owner 2026-11-15).
+function documentValidity(item: NotificationFacts, lang: Lang): NotificationCopy | null {
+  const until = day(text(item, "valid_until"));
+  const days = num(item, "days_left");
+  if (!until || days === null) return null;
+  const patient = text(item, "patient_label");
+  const document = text(item, "document_name");
+  const title = days < 0
+    ? patient
+      ? fill({ ru: "Документ пациента {patient} просрочен", de: "Dokument von {patient} ist abgelaufen" }, lang, { patient })
+      : pick({ ru: "Документ просрочен", de: "Dokument ist abgelaufen" }, lang)
+    : days === 0
+      ? patient
+        ? fill({ ru: "Документ пациента {patient} истекает сегодня", de: "Dokument von {patient} läuft heute ab" }, lang, { patient })
+        : pick({ ru: "Документ истекает сегодня", de: "Dokument läuft heute ab" }, lang)
+      : patient
+        ? fill({ ru: "Документ пациента {patient} истекает через {days} дн.", de: "Dokument von {patient} läuft in {days} Tagen ab" }, lang, { patient, days })
+        : fill({ ru: "Документ истекает через {days} дн.", de: "Dokument läuft in {days} Tagen ab" }, lang, { days });
+  const validity = fill({ ru: "Действует до {date}.", de: "Gültig bis {date}." }, lang, { date: until });
+  const action = pick({
+    ru: "Создайте новую версию или загрузите новый документ.",
+    de: "Erstellen Sie eine neue Version oder laden Sie ein neues Dokument hoch.",
+  }, lang);
+  return { title, body: `${document ? `${document}: ` : ""}${validity} ${action}` };
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -942,6 +969,8 @@ export function notificationCopyFromFacts(
       return interpreterUpload(item, lang);
     case "document_release":
       return documentRelease(item, lang);
+    case "document_validity":
+      return documentValidity(item, lang);
     case "direct_message":
     case "direct_message_attachment":
       return directMessage(item, lang);

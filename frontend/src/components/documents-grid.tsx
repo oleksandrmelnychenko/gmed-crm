@@ -25,6 +25,8 @@ import { uiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { documentPartyUploadTypeLabel } from "@/pages/documents/model/document-model";
 import { isOutdatedCurrentVersion } from "@/pages/documents/model/outdated-document-version";
+import type { DocumentValidityStatus } from "@/pages/documents/model/document-validity";
+import { DocumentValidityChip } from "@/pages/documents/ui/document-validity";
 import {
   DEFAULT_DOCUMENT_PAGE_SIZE,
   DOCUMENT_PAGE_SIZE_OPTIONS,
@@ -42,6 +44,10 @@ type DocumentsGridItem = {
   is_latest_version: boolean;
   /** `false`: the order or its terms changed after this PDF was made. */
   terms_current?: boolean | null;
+  /** Optional «Gültig bis» and its server status (owner 2026-11-15). */
+  valid_until?: string | null;
+  validity_status?: DocumentValidityStatus | null;
+  validity_days_left?: number | null;
   patient_name: string | null;
   patient_pid: string | null;
   /** A lead's document has no patient yet: the lead names it. */
@@ -524,6 +530,8 @@ export function DocumentsGrid({
               {lang === "de" ? "Veraltet" : "Устарел"}
             </Badge>
           ) : null}
+          {/* Optional validity date (owner 2026-11-15); nothing without one. */}
+          <DocumentValidityChip document={item} compact className="min-w-0" />
         </div>
       ),
     },
