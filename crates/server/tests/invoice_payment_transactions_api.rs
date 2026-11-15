@@ -1641,19 +1641,33 @@ async fn released_final_invoice_takes_paid_advances_and_to_pay_figures_are_net()
     assert_eq!(statement["summary"]["total_due"], "100");
     assert_eq!(statement["summary"]["calculated_balance"], "100");
 
-    // Released manually: an advance still unapplied is netted, not demanded.
-    let (status, released_allocation) = json_request(
+    // An advance deducted on the issued final is part of it: no release by
+    // one click (money QA 2026-11-15, S1-2).
+    let second_allocation = allocations[1]["id"].as_str().unwrap().to_string();
+    let (status, refused) = json_request(
         &app,
         "DELETE",
-        &format!(
-            "/api/v1/invoices/{final_invoice}/prepayment-allocations/{}",
-            allocations[1]["id"].as_str().unwrap()
-        ),
+        &format!("/api/v1/invoices/{final_invoice}/prepayment-allocations/{second_allocation}"),
         &billing,
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{released_allocation:?}");
+    assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
+    assert_eq!(refused["error"], "prepayment_locked_by_issued_final");
+    // Released by a correction document (as a credit note on the final
+    // does): an advance still unapplied is netted, not demanded.
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('gmed.prepayment_release_context', 'correction', true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE id = $1")
+        .bind(Uuid::parse_str(&second_allocation).unwrap())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let released_allocation = invoice_detail(&app, &billing, final_invoice).await;
     assert_eq!(released_allocation["balance_due"], "400");
     let (_, list) = json_request(
         &app,
@@ -2239,4 +2253,201 @@ async fn historical_waiver_reversal_preserves_prior_balance() {
         historical_summary["external_receivable_gross"], "0",
         "{historical_summary}"
     );
+}
+
+/// Money QA 2026-11-15 (money-C S2-2): recording the advance payment and
+/// releasing the final invoice at the same time never miss the set-off and
+/// never deadlock: both take the order's advance lock first.
+#[tokio::test]
+async fn advance_payment_and_final_release_at_once_always_set_off_the_advance() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    for round in 0..3 {
+        let tag = unique_tag(&format!("advance-race-{round}"));
+        let patient_id = seed_patient(&pool, admin_id, &tag).await;
+        let billing_id = seed_user(&pool, &tag, "billing").await;
+        seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+        let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+        let advance = seed_invoice(
+            &pool,
+            order_id,
+            patient_id,
+            admin_id,
+            &format!("{tag}-adv"),
+            "advance",
+            500,
+            false,
+        )
+        .await;
+        sqlx::query("UPDATE invoices SET issued_at = now() - interval '1 day' WHERE id = $1")
+            .bind(advance)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let final_invoice = seed_invoice_in_status(
+            &pool,
+            order_id,
+            patient_id,
+            admin_id,
+            &format!("{tag}-final"),
+            "final",
+            1000,
+            false,
+            "draft",
+        )
+        .await;
+        let billing = auth_header_for(billing_id, "billing");
+        let payment_path = format!("/api/v1/invoices/{advance}/payments");
+        let release_path = format!("/api/v1/invoices/{final_invoice}/status");
+        let payment = json_request(
+            &app,
+            "POST",
+            &payment_path,
+            &billing,
+            Some(json!({
+                "request_id": Uuid::new_v4(),
+                "amount_gross": 500,
+                "payment_method": "bank_transfer",
+                "received_on": gmed_server::app_time::today().to_string(),
+            })),
+        );
+        let release = json_request(
+            &app,
+            "POST",
+            &release_path,
+            &billing,
+            Some(json!({ "status": "sent" })),
+        );
+        let ((payment_status, payment_body), (release_status, release_body)) =
+            tokio::join!(payment, release);
+        assert_eq!(release_status, StatusCode::OK, "{release_body:?}");
+        let detail = invoice_detail(&app, &billing, final_invoice).await;
+        if payment_status == StatusCode::CREATED {
+            // Paid first or after the release: the money is set off either way.
+            assert_eq!(detail["prepayment_applied_amount"], "500", "round {round}");
+            assert_eq!(detail["balance_due"], "500", "round {round}");
+        } else {
+            // Released first: the unpaid advance was closed by a credit note
+            // (QA D-56), so the payment reads as an overpayment; nothing lost.
+            assert_eq!(payment_status, StatusCode::CONFLICT, "{payment_body:?}");
+            assert_eq!(payment_body["error"], "payment_exceeds_balance");
+            assert_eq!(detail["balance_due"], "1000", "round {round}");
+            let advance_detail = invoice_detail(&app, &billing, advance).await;
+            assert_eq!(advance_detail["credited_amount"], "500", "round {round}");
+        }
+    }
+}
+
+/// Owner 2026-11-15: a part payment on an advance may be split over its VAT
+/// categories by hand; the booking follows the split, the server refuses a
+/// split that does not add up or exceeds a category.
+#[tokio::test]
+async fn a_part_payment_on_an_advance_can_be_split_by_hand() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("advance-split");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let advance: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, $3, 'advance', 'sent', CURRENT_DATE + 14, 400, 19, 419, 0, $4, $5)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-adv"))
+    .bind(json!([
+        {"description": "Anzahlung – Anteil 19 % USt.", "quantity": "1", "unit_price": "100",
+         "vat_rate": "19", "is_cost_passthrough": false, "line_net": "100", "line_vat": "19",
+         "line_gross": "119", "source": "advance_prepayment"},
+        {"description": "Anzahlung – Anteil Auslagen", "quantity": "1", "unit_price": "300",
+         "vat_rate": "0", "is_cost_passthrough": true, "line_net": "300", "line_vat": "0",
+         "line_gross": "300", "source": "advance_prepayment"}
+    ]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let pay = |amount: &str, split: Value| {
+        let app = app.clone();
+        let billing = billing.clone();
+        let body = json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": amount,
+            "payment_method": "bank_transfer",
+            "received_on": gmed_server::app_time::today().to_string(),
+            "category_split": split,
+        });
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/invoices/{advance}/payments"),
+                &billing,
+                Some(body),
+            )
+            .await
+        }
+    };
+    let (status, body) = pay(
+        "200",
+        json!([
+            {"kind": "taxed", "vat_rate": "19", "amount_gross": "119"},
+            {"kind": "passthrough", "amount_gross": "50"}
+        ]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    let (status, body) = pay(
+        "200",
+        json!([
+            {"kind": "taxed", "vat_rate": "19", "amount_gross": "119"},
+            {"kind": "passthrough", "amount_gross": "81"}
+        ]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let totals = category_totals(&pool, advance).await;
+    assert!(
+        totals.contains(&("service_revenue".to_string(), Decimal::new(119, 0))),
+        "{totals:?}"
+    );
+    assert!(
+        totals.contains(&("cost_passthrough_revenue".to_string(), Decimal::new(81, 0))),
+        "{totals:?}"
+    );
+    let service_vat: Decimal = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_vat), 0) FROM accounting_entries WHERE source_invoice_id = $1",
+    )
+    .bind(advance)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(service_vat, Decimal::new(19, 0));
+    // The 19 % category is paid in full: nothing more fits there.
+    let (status, body) = pay(
+        "100",
+        json!([
+            {"kind": "taxed", "vat_rate": "19", "amount_gross": "50"},
+            {"kind": "passthrough", "amount_gross": "50"}
+        ]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    let detail = invoice_detail(&app, &billing, advance).await;
+    let categories = detail["advance_categories"]["categories"]
+        .as_array()
+        .unwrap();
+    let taxed = categories
+        .iter()
+        .find(|category| category["kind"] == "taxed")
+        .unwrap();
+    assert_eq!(taxed["open_gross"], "0");
 }

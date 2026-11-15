@@ -71,7 +71,7 @@ pub(crate) async fn apply_available_advances_tx(
             .await?
             .flatten();
     if let Some(order_id) = order_id {
-        super::advance_rows::lock_order_advances(&mut **transaction, order_id).await?;
+        super::advance_rows::lock_order_advances(transaction, order_id).await?;
     }
     let Some(target) = sqlx::query(
         r#"SELECT order_id, patient_id, invoice_type, status, total_gross, credited_amount,
@@ -153,7 +153,7 @@ pub(crate) async fn apply_available_advances_tx(
         // category (money QA 2026-11-15, S1-1); the rest stays advance
         // credit for the credit-note / refund path.
         let rows = super::advance_rows::plan_allocation(
-            &mut **transaction,
+            transaction,
             advance_invoice_id,
             target_invoice_id,
             max,
@@ -167,7 +167,7 @@ pub(crate) async fn apply_available_advances_tx(
         }
         let request_id = Uuid::new_v4();
         let allocation_id = super::advance_rows::insert_allocation(
-            &mut **transaction,
+            transaction,
             request_id,
             advance_invoice_id,
             target_invoice_id,

@@ -17,13 +17,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_quote_advance_draft
 ALTER TABLE invoice_prepayment_allocations ADD COLUMN IF NOT EXISTS vat_rows JSONB;
 ALTER TABLE invoice_prepayment_allocation_releases ADD COLUMN IF NOT EXISTS vat_rows JSONB;
 
+-- The VAT rate of a line as the invoice code reads it
+-- (`credit_notes::effective_vat_rate`): the stored rate, else implied by its
+-- VAT and net (seeded and early lines).
+CREATE OR REPLACE FUNCTION invoice_line_vat_rate(line JSONB)
+RETURNS NUMERIC
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT COALESCE(
+        round(NULLIF(line ->> 'vat_rate', '')::NUMERIC, 2),
+        CASE WHEN COALESCE(NULLIF(line ->> 'line_net', '')::NUMERIC, 0) > 0
+             THEN round(COALESCE(NULLIF(line ->> 'line_vat', '')::NUMERIC, 0) * 100
+                        / NULLIF(line ->> 'line_net', '')::NUMERIC, 2)
+             ELSE 0 END)
+$$;
+
 CREATE OR REPLACE FUNCTION invoice_line_vat_category(line JSONB)
 RETURNS TEXT
 LANGUAGE sql
 IMMUTABLE
 AS $$
     SELECT CASE
-        WHEN COALESCE(NULLIF(line ->> 'vat_rate', '')::NUMERIC, 0) > 0 THEN 'taxed'
+        WHEN invoice_line_vat_rate(line) > 0 THEN 'taxed'
         WHEN COALESCE((line ->> 'is_cost_passthrough')::BOOLEAN, false) THEN 'passthrough'
         ELSE 'zero_rated'
     END
@@ -69,7 +85,7 @@ BEGIN
     WITH category AS (
         SELECT invoice_line_vat_category(line) AS kind,
                CASE WHEN invoice_line_vat_category(line) = 'taxed'
-                    THEN NULLIF(line ->> 'vat_rate', '')::NUMERIC ELSE 0 END AS rate,
+                    THEN invoice_line_vat_rate(line) ELSE 0 END AS rate,
                SUM(COALESCE(NULLIF(line ->> 'line_gross', '')::NUMERIC, 0)) AS gross,
                SUM(COALESCE(NULLIF(line ->> 'line_vat', '')::NUMERIC, 0)) AS vat
         FROM jsonb_array_elements(target.line_items) AS line

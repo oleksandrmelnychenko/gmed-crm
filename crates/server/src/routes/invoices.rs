@@ -505,7 +505,7 @@ async fn checked_payment_category_split(
             json!({}),
         ));
     }
-    let (rows, paid) = advance_rows::advance_paid(&mut **transaction, invoice_id)
+    let (rows, paid) = advance_rows::advance_paid(transaction, invoice_id)
         .await
         .map_err(failed)?;
     advance_rows::validate_payment_split(&rows, &paid, amount_gross, &parts)
@@ -1010,7 +1010,7 @@ fn is_valid_invoice_status_filter(value: &str) -> bool {
 }
 
 /// Display status of a released invoice whose credit notes cover its whole
-/// total (RU "Сторнирован", DE "Storniert"); SQL `invoice_display_status`.
+/// total (RU "Закрыт кредит-нотой", DE "Gutgeschrieben"); SQL `invoice_display_status`.
 pub(crate) const INVOICE_DISPLAY_CREDITED: &str = "credited";
 
 /// The status shown to users: `credited` for a released invoice fully

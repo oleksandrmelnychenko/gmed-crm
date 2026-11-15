@@ -916,3 +916,248 @@ async fn credited_service_lines_are_not_shown_as_billed_or_paid() {
         );
     }
 }
+
+fn dec(value: &Value) -> rust_decimal::Decimal {
+    match value {
+        Value::String(text) => text.parse().unwrap(),
+        Value::Number(number) => number.to_string().parse().unwrap(),
+        other => panic!("not a decimal: {other}"),
+    }
+}
+
+async fn pay(app: &axum::Router, bearer: &str, invoice_id: &str, amount: &str) -> Value {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": amount,
+            "payment_method": "bank_transfer",
+            "received_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "payment: {body:?}");
+    body
+}
+
+async fn release(app: &axum::Router, bearer: &str, invoice_id: &str) -> Value {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "release: {body:?}");
+    body
+}
+
+async fn create_prepayment_advance(
+    app: &axum::Router,
+    bearer: &str,
+    quote_id: &str,
+    expect: StatusCode,
+) -> Value {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        bearer,
+        Some(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })),
+    )
+    .await;
+    assert_eq!(status, expect, "advance: {body:?}");
+    body
+}
+
+async fn set_prepayment(pool: &PgPool, order_id: Uuid, amount: i64) {
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = $2 WHERE id = $1",
+    )
+    .bind(order_id)
+    .bind(rust_decimal::Decimal::from(amount))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Money QA 2026-11-15 (money-B S1-1, S1-2, S2-2): a raised prepayment is
+/// billed as the difference on the same quote, own services are never billed
+/// twice, the final invoice deducts per VAT category no more than it bills,
+/// and an advance deducted on the issued final is released only by its
+/// Storno.
+#[tokio::test]
+async fn supplementary_advance_bills_the_difference_and_the_final_deducts_per_vat_category() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("phase2-supplement");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_line(&pool, order_id, "Concierge", 1, 100).await;
+    let manager = auth_header_for(manager_id, "patient_manager");
+    let billing = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &manager, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+    // A mixed estimate: own services at 19 % and 0 %, pass-through costs.
+    sqlx::query(
+        r#"UPDATE quotes
+           SET line_items = $2, total_net = 350, total_vat = 19, total_gross = 369
+           WHERE id = $1"#,
+    )
+    .bind(Uuid::parse_str(&quote_id).unwrap())
+    .bind(json!([
+        {"description": "Concierge", "quantity": "1", "unit_price": "100", "vat_rate": "19",
+         "is_cost_passthrough": false, "line_net": "100", "line_vat": "19", "line_gross": "119"},
+        {"description": "Organisation", "quantity": "1", "unit_price": "50", "vat_rate": "0",
+         "is_cost_passthrough": false, "line_net": "50", "line_vat": "0", "line_gross": "50"},
+        {"description": "Klinik", "quantity": "1", "unit_price": "200", "vat_rate": "0",
+         "is_cost_passthrough": true, "line_net": "200", "line_vat": "0", "line_gross": "200"}
+    ]))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    set_prepayment(&pool, order_id, 100).await;
+    let first = create_prepayment_advance(&app, &billing, &quote_id, StatusCode::CREATED).await;
+    assert_eq!(dec(&first["total_gross"]), dec(&json!("100")));
+    let first_id = first["id"].as_str().unwrap().to_string();
+    // A second advance while the first is a draft is refused.
+    create_prepayment_advance(&app, &billing, &quote_id, StatusCode::CONFLICT).await;
+    release(&app, &billing, &first_id).await;
+    pay(&app, &billing, &first_id, "100").await;
+
+    // Raised to 300: the preview and the advance ask for the 200 missing.
+    set_prepayment(&pool, order_id, 300).await;
+    let (status, preview) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}/advance-preview"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview:?}");
+    assert_eq!(dec(&preview["total_gross"]), dec(&json!("200")));
+    let second = create_prepayment_advance(&app, &billing, &quote_id, StatusCode::CREATED).await;
+    assert_eq!(dec(&second["total_gross"]), dec(&json!("200")));
+    assert_eq!(dec(&preview["total_vat"]), dec(&second["total_vat"]));
+    // Own services first, counting what the first advance holds: both
+    // advances together bill the 19 % group at most once (119).
+    let own_19: rust_decimal::Decimal = [&first, &second]
+        .iter()
+        .flat_map(|invoice| invoice["line_items"].as_array().unwrap().clone())
+        .filter(|line| {
+            line["is_cost_passthrough"] == json!(false)
+                && dec(&line["vat_rate"]) > rust_decimal::Decimal::ZERO
+        })
+        .map(|line| dec(&line["line_gross"]))
+        .sum();
+    assert_eq!(own_19, dec(&json!("119")), "{first:?} {second:?}");
+    let second_id = second["id"].as_str().unwrap().to_string();
+    release(&app, &billing, &second_id).await;
+    pay(&app, &billing, &second_id, "200").await;
+    // Billed in full now: no third advance.
+    let refused = create_prepayment_advance(&app, &billing, &quote_id, StatusCode::CONFLICT).await;
+    assert_eq!(refused["error"], "advance_prepayment_already_billed");
+
+    // The final invoice bills the whole quote and deducts the 300 per VAT
+    // category: never more VAT than it bills.
+    let (status, final_draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "final: {final_draft:?}");
+    let final_id = final_draft["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        dec(&final_draft["expected_prepayment_gross"]),
+        dec(&json!("300"))
+    );
+    let released = release(&app, &billing, &final_id).await;
+    assert_eq!(
+        dec(&released["prepayment_applied_amount"]),
+        dec(&json!("300"))
+    );
+    assert_eq!(dec(&released["balance_due"]), dec(&json!("69")));
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT vat_rows FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
+    )
+    .bind(Uuid::parse_str(&final_id).unwrap())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let mut deducted_vat = rust_decimal::Decimal::ZERO;
+    let mut deducted_19 = rust_decimal::Decimal::ZERO;
+    for row in rows
+        .iter()
+        .flat_map(|rows| rows.as_array().unwrap().clone())
+    {
+        deducted_vat += dec(&row["vat"]);
+        if row["kind"] == "taxed" {
+            deducted_19 += dec(&row["gross"]);
+        }
+    }
+    assert_eq!(deducted_vat, dec(&json!("19")));
+    assert_eq!(deducted_19, dec(&json!("119")));
+
+    // The deduction is part of the issued final: no release by one click,
+    // no Storno of the advance, not even directly in the database.
+    let allocation_id = released["prepayment_allocations"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, locked) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/invoices/{final_id}/prepayment-allocations/{allocation_id}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{locked:?}");
+    assert_eq!(locked["error"], "prepayment_locked_by_issued_final");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{first_id}/status"),
+        &billing,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let deleted = sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE id = $1")
+        .bind(Uuid::parse_str(&allocation_id).unwrap())
+        .execute(&pool)
+        .await;
+    assert!(deleted.is_err(), "the database refuses it as well");
+
+    // The Storno of the final releases its deductions.
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_id}/status"),
+        &billing,
+        Some(json!({ "status": "cancelled", "reason": "Neu ausstellen" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "storno: {cancelled:?}");
+    let left: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
+    )
+    .bind(Uuid::parse_str(&final_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(left, 0);
+}

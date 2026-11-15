@@ -811,7 +811,7 @@ async fn audit_released_advance_remains_in_historical_statement() {
         patient,
         admin,
         &unique_tag("history-target"),
-        "final",
+        "interim",
         100,
         false,
     )

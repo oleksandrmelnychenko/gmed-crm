@@ -3495,10 +3495,11 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
             .await
             .unwrap();
 
-    // Advance for the required prepayment of 500, split over the quote's VAT
+    // Advance for the required prepayment of 300 (within what the final bills
+    // per VAT group, money QA 2026-11-15), split over the quote's VAT
     // groups, paid in full.
     sqlx::query(
-        "UPDATE orders SET prepayment_required = true, prepayment_amount = 500 WHERE id = $1",
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = 300 WHERE id = $1",
     )
     .bind(order_id)
     .execute(&pool)
@@ -3571,7 +3572,7 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
     let final_id = final_invoice["id"].as_str().unwrap().to_string();
     let released = release_invoice(&app, &billing_bearer, &final_id).await;
     assert_eq!(released["total_gross"], "969", "{released}");
-    assert_eq!(released["prepayment_applied_amount"], "500", "{released}");
+    assert_eq!(released["prepayment_applied_amount"], "300", "{released}");
 
     // The issued document names the advance invoice and deducts its VAT.
     let (status, _, bytes) = binary_request(
@@ -3597,7 +3598,7 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
         "advance VAT {advance_vat}: {text}"
     );
     assert!(text.contains("Verbleibender Zahlbetrag"), "{text}");
-    assert!(text.contains("469,00 €"), "{text}");
+    assert!(text.contains("669,00 €"), "{text}");
     let (status, _, xml) = binary_request(
         &app,
         "GET",
@@ -3613,7 +3614,7 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
         )),
         "{xml}"
     );
-    assert!(xml.contains("<ram:GrandTotalAmount>969.00</ram:GrandTotalAmount><ram:TotalPrepaidAmount>500.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>469.00</ram:DuePayableAmount>"), "{xml}");
+    assert!(xml.contains("<ram:GrandTotalAmount>969.00</ram:GrandTotalAmount><ram:TotalPrepaidAmount>300.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>669.00</ram:DuePayableAmount>"), "{xml}");
     assert!(
         xml.contains("Abzüglich geleisteter Anzahlungen (§ 14 Abs. 5 Satz 2 UStG)"),
         "{xml}"
@@ -3646,7 +3647,7 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
     assert_eq!(status, StatusCode::CREATED, "{credit}");
     assert_eq!(credit["amount_vat"], "9.5", "{credit}");
     let paid = pay_invoice_in_full(&app, &billing_bearer, &final_id, "FINAL").await;
-    assert_eq!(paid["balance_due"], "409.5", "{paid}");
+    assert_eq!(paid["balance_due"], "609.5", "{paid}");
 
     // Over the order, the ledger books what was invoiced: 238 + 909.50 gross,
     // the 300 pass-through cost once, and 38 + 9.50 VAT, though the advance

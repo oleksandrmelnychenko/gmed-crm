@@ -487,11 +487,13 @@ pub(super) async fn allocation_rows(
         let rows = match stored {
             Some(rows) => rows,
             None => {
-                if !legacy.contains_key(&advance_invoice_id) {
-                    let rows = advance_rows(conn, advance_invoice_id).await?;
-                    legacy.insert(advance_invoice_id, rows);
-                }
-                deducted_advance_rows(&legacy[&advance_invoice_id], amount_gross)
+                let rows = match legacy.entry(advance_invoice_id) {
+                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(advance_rows(conn, advance_invoice_id).await?)
+                    }
+                };
+                deducted_advance_rows(rows, amount_gross)
             }
         };
         result.push(AllocationRows {
@@ -616,6 +618,11 @@ pub(super) async fn plan_allocation_detail(
     let Some(target_open) = target_open_rows(conn, target_id).await? else {
         return Ok(None);
     };
+    // An early advance without line amounts has no VAT categories to match:
+    // it is set off by its gross balance, as before.
+    if settlement_rows(conn, advance_id).await?.is_none() {
+        return Ok(None);
+    }
     let available = advance_available_rows(conn, advance_id).await?;
     Ok(Some(AllocationPlan {
         rows: plan_allocation_rows(&available, &target_open, max),
