@@ -13,7 +13,10 @@
 //! 3. row 5: salutation, name and date of birth, 12.5 pt;
 //! 4. row 6: name and date of birth with the GMED postal address
 //!    («c/o <contact person>», street, ZIP city), 8.5 pt;
-//! 5. rows 7–8: the same plus the GMED phone and e-mail, 8.5 pt.
+//! 5. rows 7–8: the same plus the GMED phone and e-mail, 8 pt.
+//!
+//! The text sits 1.5 mm below the label grid: the agency's printer prints
+//! the sheet a little high.
 //!
 //! The compact (90 × 48 mm) and standard (105 × 74 mm) formats print one full
 //! patient label per page in the largest type that fits. Text never leaves
@@ -67,6 +70,9 @@ const SHEET_ROWS: usize = 8;
 /// Text inset inside a label: the Word sheet put its first column's text 3 mm
 /// from the paper edge, which also keeps it clear of the printer's margin.
 const SHEET_CELL_PADDING_MM: f32 = 3.0;
+/// The agency's printer puts the sheet a little high (owner photo
+/// 2026-11-15): every label's text moves this much down.
+const SHEET_PRINT_SHIFT_MM: f32 = 1.5;
 /// Word's single line spacing for Arial.
 const LINE_SPACING: f32 = 1.15;
 /// Arial's ascender, as a share of the font size.
@@ -99,7 +105,9 @@ impl LabelKind {
         match self {
             LabelKind::Full => 9.5,
             LabelKind::NumberOnly | LabelKind::NameAndBirthDate => 12.5,
-            LabelKind::Address | LabelKind::AddressAndContact => 8.5,
+            LabelKind::Address => 8.5,
+            // Nine lines: 8 pt keeps them clear of the label edges.
+            LabelKind::AddressAndContact => 8.0,
         }
     }
 
@@ -534,7 +542,7 @@ pub fn build_label_sheet_pdf(
                 &fonts,
                 &label,
                 column_left + SHEET_CELL_PADDING_MM,
-                row_top - 0.5,
+                row_top - 0.5 - SHEET_PRINT_SHIFT_MM,
                 box_width,
                 box_height,
                 kind.centred(),
