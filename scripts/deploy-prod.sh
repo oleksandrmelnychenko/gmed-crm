@@ -73,9 +73,17 @@ readonly cosign_oidc_issuer="${COSIGN_OIDC_ISSUER:-https://token.actions.githubu
 # Pinned tool versions with the checksums published by the upstream projects
 # (cosign_checksums.txt of the sigstore/cosign release). Changing the version
 # means changing the checksums in the same commit.
-readonly cosign_version="v2.4.1"
-readonly cosign_sha256_amd64="8b24b946dd5809c6bd93de08033bcf6bc0ed7d336b7785787c080f574b89249b"
-readonly cosign_sha256_arm64="3b2e2e3854d0356c45fe6607047526ccd04742d20bd44afb5be91fa2a6e7cb4a"
+#
+# cosign 3 is required since the Release Build signs with cosign 3 (Sigstore
+# bundle stored as an OCI 1.1 referrer). `cosign verify` in 3.x looks for such
+# a bundle first and, when the image has none, falls back to the legacy
+# `sha256-<digest>.sig` signature written by cosign 2 — so older release
+# digests (rollback targets) still verify, under the same identity and issuer
+# checks. cosign 2 cannot read the new bundles ("no signatures found").
+# Keep this version equal to `cosign-release` in .github/workflows/release.yml.
+readonly cosign_version="v3.1.4"
+readonly cosign_sha256_amd64="424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
+readonly cosign_sha256_arm64="ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2"
 RCLONE_VERSION="${RCLONE_VERSION:-v1.75.0}"
 
 # Run as root: needs to read /etc/gmed/age.key and run `docker compose`.

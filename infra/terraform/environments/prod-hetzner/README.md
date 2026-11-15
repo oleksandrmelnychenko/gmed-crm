@@ -541,7 +541,9 @@ The script will:
 
 1. Pull the repo with the updated pin.
 2. Decrypt secrets, validate required keys.
-3. Install `cosign` (idempotent, pinned version `v2.4.1`).
+3. Install `cosign` (idempotent, pinned version `v3.1.4`, checked against
+   the sha256 from the upstream `cosign_checksums.txt`; a different binary
+   on the host, including the old `v2.4.1`, is replaced).
 4. `cosign verify` all four digests against the repo's release workflow
    identity. **Refuses to proceed if verification fails or if a pin
    is not digest-form (`@sha256:...`).**
@@ -566,10 +568,42 @@ The script exits before compose. Investigate:
 - Signature missing? Check the workflow run — did the `Sign image`
   step succeed? A missing signature is a build-pipeline incident,
   not a deploy-time fix.
+- `no signatures found` on a new release while the host still runs
+  cosign 2? See "Signature formats" below — the deploy that installed
+  the new script was still running the old one; run it again.
 - Rekor unavailable? Cosign keyless checks the Sigstore transparency
-  log; if Rekor is down, set `COSIGN_EXPERIMENTAL=1` and use
-  `--insecure-ignore-tlog` only as break-glass while Sigstore
-  recovers — and re-verify normally after.
+  log; if Rekor is down, use `--insecure-ignore-tlog` only as
+  break-glass while Sigstore recovers — and re-verify normally after.
+
+#### Signature formats (cosign 2 → cosign 3)
+
+Since the switch to `sigstore/cosign-installer` v4 the Release Build signs
+with cosign 3. The signature is a Sigstore bundle attached to the image
+digest as an OCI 1.1 referrer (in GHCR: an index under the
+`sha256-<digest>` tag), not the old `sha256-<digest>.sig` tag. Release
+digests built earlier keep their old signatures.
+
+- `deploy-prod.sh` pins cosign `v3.1.4` (the same version the workflow
+  signs with). cosign 3 `verify` uses the bundle when the image has one and
+  otherwise falls back to the old `.sig` signature, with the same identity
+  regexp and issuer checks in both cases. A rollback to a digest signed by
+  cosign 2 therefore still verifies; a release signed by cosign 3 does NOT
+  verify with cosign 2 (`no signatures found`).
+- The workflow verifies every signed digest with the PROD identity regexp
+  right after signing (`Verify signature as PROD does`), so a signature PROD
+  would refuse fails the release run instead of the deploy.
+- **First deploy after the switch.** `deploy-prod.sh` refreshes
+  `/opt/gmed/repo` part-way through, but the copy of the script that is
+  already running stays the old one, so the run that pulls the new script
+  still uses cosign `v2.4.1` and stops at `cosign verify` with
+  `no signatures found` for images signed by cosign 3 — before `docker
+  compose`, after the pre-upgrade backup. Either run `deploy-prod.sh
+  --upgrade-only` once more (the second run is the new script, installs
+  cosign 3 and continues), or deploy the script change first with the
+  current pins unchanged and pin the new release afterwards.
+- Never roll `deploy-prod.sh` itself back to a commit that pins cosign 2
+  while the pins point to a release signed by cosign 3; roll back only the
+  pins.
 
 ### Tailscale bootstrap (closing public SSH)
 

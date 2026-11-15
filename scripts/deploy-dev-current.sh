@@ -97,6 +97,9 @@ verify_dev_image_pins() {
     echo "ERROR: all four DEV image digests are required." >&2
     return 1
   fi
+  # Dev Build signs with cosign 3 (Sigstore bundle as an OCI referrer); the
+  # host's cosign must be 3.x or newer, which also still accepts older images
+  # signed by cosign 2. cosign 2 reports "no signatures found" for new ones.
   for key in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE GMED_INVOICE_PARSER_IMAGE; do
     "${COSIGN_BIN:-cosign}" verify \
       --certificate-identity https://github.com/oleksandrmelnychenko/gmed-crm/.github/workflows/dev.yml@refs/heads/main \
