@@ -64,6 +64,7 @@ pub fn validity_fields(valid_until: Option<NaiveDate>) -> (Value, Value) {
 
 /// The filter of the document lists: `expired`, `expiring` or `attention`
 /// (both). `Err` for an unknown value, `Ok(None)` for none.
+#[allow(clippy::result_unit_err)]
 pub fn parse_filter(value: Option<&str>) -> Result<Option<&'static str>, ()> {
     match value.map(str::trim).filter(|value| !value.is_empty()) {
         None => Ok(None),

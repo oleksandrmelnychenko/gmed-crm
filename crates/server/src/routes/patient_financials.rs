@@ -306,6 +306,7 @@ struct SettlementLedger {
     movements: Vec<Value>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn load_patient_settlement_ledger(
     state: &AppState,
     patient_id: Uuid,

@@ -208,6 +208,7 @@ async fn default_tax_profile(
 /// Locks the chosen services, checks each, and appends one invoice line per
 /// service. Fills the invoice currency from the first service when nothing
 /// else set it.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn append_lines(
     conn: &mut PgConnection,
     patient_id: Uuid,
