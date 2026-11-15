@@ -80,7 +80,7 @@ pub fn issue_session_access_token(
     jsonwebtoken::encode(
         &Header::new(Algorithm::HS512),
         &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
+        &EncodingKey::from_secret(secret.as_bytes())?,
     )
 }
 
@@ -93,7 +93,7 @@ pub fn verify_access_token(
 
     jsonwebtoken::decode::<Claims>(
         token,
-        &DecodingKey::from_secret(secret.as_bytes()),
+        &DecodingKey::from_secret(secret.as_bytes())?,
         &validation,
     )
 }

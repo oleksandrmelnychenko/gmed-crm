@@ -6,7 +6,7 @@ set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/home/gmed/gmed-crm}"
 POSTGRES_IMAGE="${TEST_DATABASE_IMAGE:-postgres:16-alpine}"
-RUST_IMAGE="${RUST_TEST_IMAGE:-rust:slim-bookworm}"
+RUST_IMAGE="${RUST_TEST_IMAGE:-rust:1.100-slim-bookworm}"
 TEST_THREADS="${RUST_TEST_THREADS:-2}"
 SOURCE_OVERLAY="${TEST_SOURCE_OVERLAY:-}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

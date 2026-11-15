@@ -173,7 +173,7 @@ services:
         max-file: "3"
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    image: gcr.io/cadvisor/cadvisor:v0.49.2
     container_name: gmed-cadvisor
     restart: unless-stopped
     network_mode: host
@@ -206,7 +206,7 @@ services:
     # keyless pipeline of the prometheus-community org (verify with
     # `cosign verify --certificate-identity-regexp=...` if you want
     # belt-and-suspenders before flipping the digest pin).
-    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.0
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
     container_name: gmed-postgres-exporter
     restart: unless-stopped
     environment:
@@ -240,7 +240,7 @@ services:
     # containerd would let promtail enumerate / read other containers).
     # Hardening path: replace with `tecnativa/docker-socket-proxy`
     # restricting endpoints to /containers and /events only.
-    image: grafana/promtail:3.3.1
+    image: grafana/promtail:3.3.4
     container_name: gmed-promtail
     restart: unless-stopped
     user: "0:0"   # needs root to read /var/lib/docker/containers/*/*.log

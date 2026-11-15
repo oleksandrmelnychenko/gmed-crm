@@ -118,7 +118,7 @@ services:
         max-file: "3"
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    image: gcr.io/cadvisor/cadvisor:v0.49.2
     container_name: gmed-cadvisor
     restart: unless-stopped
     network_mode: host
@@ -144,7 +144,7 @@ services:
         max-file: "3"
 
   postgres-exporter:
-    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.0
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
     container_name: gmed-postgres-exporter
     restart: unless-stopped
     environment:
@@ -170,7 +170,7 @@ services:
   promtail:
     # See SECURITY NOTE in docker-compose.prod-hetzner.yml about the
     # docker socket mount. The same caveat applies on DEV.
-    image: grafana/promtail:3.3.1
+    image: grafana/promtail:3.3.4
     container_name: gmed-promtail
     restart: unless-stopped
     user: "0:0"
