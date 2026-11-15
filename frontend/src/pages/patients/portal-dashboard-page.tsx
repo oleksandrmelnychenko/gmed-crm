@@ -399,7 +399,6 @@ function usePatientDashboardPageContent() {
     <TabShell className="portal-dashboard mt-0 w-full min-h-0 max-w-none space-y-3">
       <PageHeader
         title={`${greeting}, ${user?.name ?? patientLabel}`}
-        description={t.portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho}
         actions={
           // Two actions and a menu: the sections are in the side navigation
           // too, and eight buttons drew over the bell and the language

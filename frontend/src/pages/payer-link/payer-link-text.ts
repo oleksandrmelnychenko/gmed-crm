@@ -131,13 +131,11 @@ export type PayerLinkText = {
   organisationFields: Record<OrganisationQuestionField, string>;
   missing: Record<MissingLabelKey, string>;
   legalTopics: Record<LegalQuestion, string>;
-  identityIntroOrganisation: string;
   identityExtractOnFile: string;
   identityExtractLabel: string;
   identityExtractOnFileShort: string;
   /** An organisation may upload its register extract instead of the representative's ID (owner 2026-11-10). */
   identityExtractUpload: string;
-  identityExtractUploadHint: string;
   identityExtractUploadButton: string;
   idDocumentTypes: Record<IdDocumentType, string>;
   identityFiles: string;
@@ -146,7 +144,6 @@ export type PayerLinkText = {
   recognition: {
     run: string;
     again: string;
-    hint: string;
     running: string;
     notFound: string;
     failed: string;
@@ -155,7 +152,6 @@ export type PayerLinkText = {
     unverified: string;
     same: string;
     current: string;
-    authorityHint: string;
     apply: string;
     dismiss: string;
     applied: string;
@@ -191,7 +187,6 @@ export type PayerLinkText = {
   /** The list of a company, organisation or insurer (QA 2026-10-11 A-36c). */
   organisationRelationshipKinds: Record<"employer" | "business_partner" | "other", string>;
   fundsSources: Record<FundsSource, string>;
-  fundsDescriptionHint: string;
   fundsProof: string;
   fundsProofOptional: string;
   fundsProofHint: string;
@@ -212,8 +207,6 @@ export type PayerLinkText = {
   thanksTitle: string;
   thanksBody: string;
   submittedAt: (dateTime: string) => string;
-  thanksNext: string;
-  completionClose: string;
   viewSubmitted: string;
   /**
    * The documents for the payer's signature (phase 3b, 6.3): sent through
@@ -420,34 +413,28 @@ const de: PayerLinkText = {
     pep_related: "Politisch exponierte nahestehende Person",
     sanctions_links: "Sanktionen",
   },
-  identityExtractOnFile:
-    "GMED liegt der Handelsregisterauszug der Organisation vor. Die Angaben zum Ausweis sind daher freiwillig; Sie können diesen Schritt überspringen.",
+  identityExtractOnFile: "GMED liegt der Handelsregisterauszug der Organisation vor: Sie können diesen Schritt überspringen.",
   identityExtractLabel: "Handelsregisterauszug",
   identityExtractOnFileShort: "Liegt GMED vor",
   identityExtractUpload: "Handelsregisterauszug (statt Ausweis)",
-  identityExtractUploadHint: "Laden Sie einen aktuellen Handelsregisterauszug der Organisation hoch. Dann sind die Angaben zum Ausweis der vertretenden Person freiwillig.",
   identityExtractUploadButton: "Handelsregisterauszug hochladen",
-  identityIntroOrganisation:
-    "Bitte geben Sie die Daten des Ausweisdokuments der Person an, die die Organisation vertritt, und laden Sie ein Foto oder einen Scan hoch.",
   idDocumentTypes: { passport: "Reisepass", id_card: "Personalausweis", residence_permit: "Aufenthaltstitel" },
   identityFiles: "Foto oder Scan des Ausweises",
   identityUploadButton: "Foto oder Scan hochladen",
   recognition: {
     run: "Daten aus dem Scan lesen",
     again: "Erneut lesen",
-    hint: "Liest die maschinenlesbare Zone des Ausweises und schlägt die Werte vor. Nichts wird ohne Ihre Bestätigung übernommen.",
     running: "Die maschinenlesbare Zone wird gelesen…",
-    notFound: "Auf dem Scan wurde keine maschinenlesbare Zone gefunden. Bitte geben Sie die Daten manuell ein. Am besten lesbar ist ein gerader Scan der ganzen Datenseite ohne Reflexionen.",
+    notFound: "Auf dem Scan wurde keine maschinenlesbare Zone gefunden. Bitte geben Sie die Daten manuell ein.",
     failed: "Das Dokument konnte nicht gelesen werden. Bitte geben Sie die Daten manuell ein.",
     title: "Aus dem Scan gelesen",
     verified: "Prüfziffern stimmen",
-    unverified: "Der Scan wurde fehlerhaft gelesen (Prüfziffern stimmen nicht). Die Werte können falsch sein: Bitte vergleichen Sie jeden Wert mit dem Dokument, bevor Sie ihn übernehmen.",
+    unverified: "Der Scan wurde fehlerhaft gelesen (Prüfziffern stimmen nicht): die Werte können falsch sein.",
     same: "stimmt überein",
     current: "im Formular",
-    authorityHint: "Ausstellende Behörde und Ausstellungsdatum werden aus dem gedruckten Text gelesen – bitte mit dem Dokument vergleichen; was fehlt, selbst eintragen.",
     apply: "Angekreuztes übernehmen",
     dismiss: "Ausblenden",
-    applied: "Übernommen. Bitte prüfen Sie die Felder und ergänzen Sie die Behörde.",
+    applied: "Übernommen.",
   },
   uploadHint: "PDF, JPG oder PNG, bis 25 MB pro Datei.",
   uploading: "Wird hochgeladen…",
@@ -516,7 +503,6 @@ const de: PayerLinkText = {
     donation: "Spende / Zuwendung",
     other: "Sonstiges",
   },
-  fundsDescriptionHint: "Bei „Sonstiges“ bitte beschreiben, sonst freiwillig.",
   fundsProof: "Nachweis der Herkunft der Mittel",
   fundsProofOptional: "freiwillig",
   fundsProofHint:
@@ -545,8 +531,6 @@ const de: PayerLinkText = {
   thanksTitle: "Vielen Dank.",
   thanksBody: "Ihre Angaben sind bei GMED eingegangen.",
   submittedAt: (dateTime) => `Gesendet am ${dateTime}`,
-  thanksNext: "Wenn sich etwas ändert, wenden Sie sich bitte an GMED.",
-  completionClose: "Sie können diese Seite jetzt schließen.",
   viewSubmitted: "Gesendete Angaben ansehen",
   signatureSent: (date) =>
     `Unterlagen zur Unterschrift: Wir haben Ihnen ${date ? `am ${date} ` : ""}die Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.`,
@@ -748,34 +732,28 @@ const en: PayerLinkText = {
     pep_related: "Politically exposed close person",
     sanctions_links: "Sanctions",
   },
-  identityExtractOnFile:
-    "GMED already holds the organisation's commercial register extract. The ID details are therefore optional, and you can skip this step.",
+  identityExtractOnFile: "GMED already holds the organisation's commercial register extract: you can skip this step.",
   identityExtractLabel: "Commercial register extract",
   identityExtractOnFileShort: "Held by GMED",
   identityExtractUpload: "Commercial register extract (instead of an ID)",
-  identityExtractUploadHint: "Upload a current commercial register extract of the organisation. The ID details of the representative are then optional.",
   identityExtractUploadButton: "Upload register extract",
-  identityIntroOrganisation:
-    "Please enter the details of the identity document of the person who represents the organisation, and upload a photo or scan of it.",
   idDocumentTypes: { passport: "Passport", id_card: "Identity card", residence_permit: "Residence permit" },
   identityFiles: "Photo or scan of the identity document",
   identityUploadButton: "Upload a photo or scan",
   recognition: {
     run: "Read the data from the scan",
     again: "Read again",
-    hint: "Reads the machine-readable zone of the document and proposes the values. Nothing is taken over without your confirmation.",
     running: "Reading the machine-readable zone…",
-    notFound: "No machine-readable zone was found on the scan. Please enter the data by hand. A straight scan of the whole data page without glare reads best.",
+    notFound: "No machine-readable zone was found on the scan. Please enter the data by hand.",
     failed: "The document could not be read. Please enter the data by hand.",
     title: "Read from the scan",
     verified: "Check digits match",
-    unverified: "The scan was read with errors (check digits do not match). The values may be wrong: please compare each one with the document before you take it over.",
+    unverified: "The scan was read with errors (check digits do not match): the values may be wrong.",
     same: "matches",
     current: "in the form",
-    authorityHint: "The issuing authority and the date of issue are read from the printed text – please compare them with the document and enter what is missing.",
     apply: "Take over the ticked values",
     dismiss: "Hide",
-    applied: "Taken over. Please check the fields and add the issuing authority.",
+    applied: "Taken over.",
   },
   uploadHint: "PDF, JPG or PNG, up to 25 MB per file.",
   uploading: "Uploading…",
@@ -844,7 +822,6 @@ const en: PayerLinkText = {
     donation: "Donation / grant",
     other: "Other",
   },
-  fundsDescriptionHint: "If you choose “Other”, please describe; otherwise optional.",
   fundsProof: "Proof of the source of funds",
   fundsProofOptional: "optional",
   fundsProofHint:
@@ -873,8 +850,6 @@ const en: PayerLinkText = {
   thanksTitle: "Thank you.",
   thanksBody: "GMED has received your details.",
   submittedAt: (dateTime) => `Sent on ${dateTime}`,
-  thanksNext: "If anything changes, please contact GMED.",
-  completionClose: "You can now close this page.",
   viewSubmitted: "View submitted details",
   signatureSent: (date) =>
     `Documents for signature: ${date ? `On ${date} we` : "We"} sent you the documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.`,
@@ -1075,15 +1050,11 @@ const uk: PayerLinkText = {
     pep_related: "Політично значуща близька особа",
     sanctions_links: "Санкції",
   },
-  identityExtractOnFile:
-    "GMED уже має витяг із торгового реєстру організації. Тому дані документа необов’язкові, цей крок можна пропустити.",
+  identityExtractOnFile: "GMED уже має витяг із торгового реєстру організації: цей крок можна пропустити.",
   identityExtractLabel: "Витяг із торгового реєстру",
   identityExtractOnFileShort: "Є в GMED",
   identityExtractUpload: "Витяг із торгового реєстру (замість документа)",
-  identityExtractUploadHint: "Завантажте актуальний витяг із торгового реєстру організації. Тоді дані документа представника необов’язкові.",
   identityExtractUploadButton: "Завантажити витяг",
-  identityIntroOrganisation:
-    "Будь ласка, вкажіть дані документа особи, яка представляє організацію, і завантажте його фото або скан.",
   idDocumentTypes: {
     passport: "Паспорт (закордонний)",
     id_card: "Посвідчення особи (ID-картка)",
@@ -1094,19 +1065,17 @@ const uk: PayerLinkText = {
   recognition: {
     run: "Розпізнати дані зі скану",
     again: "Розпізнати ще раз",
-    hint: "Читає машинозчитувану зону документа і пропонує значення. Нічого не підставляється без вашого підтвердження.",
     running: "Читаємо машинозчитувану зону документа…",
-    notFound: "Машинозчитувану зону на скані не знайдено. Введіть дані вручну. Найкраще читається рівний скан сторінки з фото повністю, без відблисків.",
+    notFound: "Машинозчитувану зону на скані не знайдено. Введіть дані вручну.",
     failed: "Не вдалося розпізнати документ. Введіть дані вручну.",
     title: "Розпізнано зі скану",
     verified: "Контрольні цифри зійшлися",
-    unverified: "Скан прочитано з помилками (контрольні цифри не зійшлися). Значення можуть бути хибними: звірте кожне з документом, перш ніж підставляти.",
+    unverified: "Скан прочитано з помилками (контрольні цифри не зійшлися): значення можуть бути хибними.",
     same: "те саме значення",
     current: "зараз у формі",
-    authorityHint: "«Ким видано» і дата видачі читаються з тексту документа — звірте їх із документом; чого немає, внесіть самостійно.",
     apply: "Підставити позначене",
     dismiss: "Сховати",
-    applied: "Підставлено. Перевірте поля і додайте, ким видано документ.",
+    applied: "Підставлено.",
   },
   uploadHint: "PDF, JPG або PNG, до 25 МБ на файл.",
   uploading: "Завантажується…",
@@ -1175,7 +1144,6 @@ const uk: PayerLinkText = {
     donation: "Пожертва / грант",
     other: "Інше",
   },
-  fundsDescriptionHint: "Для «Інше» опишіть, будь ласка; в інших випадках необов’язково.",
   fundsProof: "Підтвердження походження коштів",
   fundsProofOptional: "необов’язково",
   fundsProofHint:
@@ -1203,8 +1171,6 @@ const uk: PayerLinkText = {
   thanksTitle: "Дякуємо.",
   thanksBody: "Ваші дані надійшли до GMED.",
   submittedAt: (dateTime) => `Надіслано ${dateTime}`,
-  thanksNext: "Якщо щось зміниться, зверніться, будь ласка, до GMED.",
-  completionClose: "Тепер цю сторінку можна закрити.",
   viewSubmitted: "Переглянути надіслані дані",
   signatureSent: (date) =>
     `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
@@ -1405,15 +1371,11 @@ const ru: PayerLinkText = {
     pep_related: "Политически значимое близкое лицо",
     sanctions_links: "Санкции",
   },
-  identityExtractOnFile:
-    "У GMED уже есть выписка из торгового реестра организации. Поэтому данные документа необязательны, этот шаг можно пропустить.",
+  identityExtractOnFile: "У GMED уже есть выписка из торгового реестра организации: этот шаг можно пропустить.",
   identityExtractLabel: "Выписка из торгового реестра",
   identityExtractOnFileShort: "Есть в GMED",
   identityExtractUpload: "Выписка из торгового реестра (вместо документа)",
-  identityExtractUploadHint: "Загрузите актуальную выписку из торгового реестра организации. Тогда данные документа представителя необязательны.",
   identityExtractUploadButton: "Загрузить выписку",
-  identityIntroOrganisation:
-    "Пожалуйста, укажите данные документа лица, которое представляет организацию, и загрузите его фото или скан.",
   idDocumentTypes: {
     passport: "Паспорт (заграничный)",
     id_card: "Удостоверение личности (ID-карта)",
@@ -1424,19 +1386,17 @@ const ru: PayerLinkText = {
   recognition: {
     run: "Распознать данные со скана",
     again: "Распознать ещё раз",
-    hint: "Читает машиночитаемую зону документа и предлагает значения. Ничего не подставляется без вашего подтверждения.",
     running: "Читаем машиночитаемую зону документа…",
-    notFound: "Машиночитаемая зона на скане не найдена. Введите данные вручную. Лучше всего читается ровный скан страницы с фото целиком, без бликов.",
+    notFound: "Машиночитаемая зона на скане не найдена. Введите данные вручную.",
     failed: "Не удалось распознать документ. Введите данные вручную.",
     title: "Распознано со скана",
     verified: "Контрольные цифры совпали",
-    unverified: "Скан прочитан с ошибками (контрольные цифры не совпали). Значения могут быть неверными: сверьте каждое с документом, прежде чем подставлять.",
+    unverified: "Скан прочитан с ошибками (контрольные цифры не совпали): значения могут быть неверными.",
     same: "совпадает",
     current: "сейчас в форме",
-    authorityHint: "«Кем выдан» и дата выдачи читаются из текста документа — сверьте их с документом; чего нет, внесите сами.",
     apply: "Подставить отмеченное",
     dismiss: "Скрыть",
-    applied: "Подставлено. Проверьте поля и укажите, кем выдан документ.",
+    applied: "Подставлено.",
   },
   uploadHint: "PDF, JPG или PNG, до 25 МБ на файл.",
   uploading: "Загружается…",
@@ -1505,7 +1465,6 @@ const ru: PayerLinkText = {
     donation: "Пожертвование / грант",
     other: "Другое",
   },
-  fundsDescriptionHint: "Для «Другое» опишите, пожалуйста; в остальных случаях необязательно.",
   fundsProof: "Подтверждение происхождения средств",
   fundsProofOptional: "необязательно",
   fundsProofHint:
@@ -1533,8 +1492,6 @@ const ru: PayerLinkText = {
   thanksTitle: "Спасибо.",
   thanksBody: "Ваши данные поступили в GMED.",
   submittedAt: (dateTime) => `Отправлено ${dateTime}`,
-  thanksNext: "Если что-то изменится, обратитесь, пожалуйста, в GMED.",
-  completionClose: "Теперь эту страницу можно закрыть.",
   viewSubmitted: "Просмотреть отправленные данные",
   signatureSent: (date) =>
     `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам документы для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,

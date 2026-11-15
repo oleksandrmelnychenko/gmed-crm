@@ -77,7 +77,6 @@ export interface PatientsPortalTranslations {
   portal_privacy_request_submitted: string;
   portal_privacy_failed_to_submit_request: string;
   portal_privacy_title: string;
-  portal_privacy_description: string;
   portal_privacy_patient_portal: string;
   portal_privacy_open_requests: string;
   portal_privacy_refresh: string;
@@ -122,7 +121,6 @@ export interface PatientsPortalTranslations {
   portal_recommendations_decision_saved: string;
   portal_recommendations_failed_to_save_action: string;
   portal_recommendations_title: string;
-  portal_recommendations_description: string;
   portal_recommendations_patient_portal: string;
   portal_recommendations_active: string;
   portal_recommendations_refresh: string;
@@ -404,7 +402,6 @@ export interface PatientsPortalTranslations {
   portal_dashboard_patient: string;
   portal_dashboard_failed_to_load_portal_workspace: string;
   portal_dashboard_failed_to_export_patient_data: string;
-  portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho: string;
   portal_dashboard_patient_portal: string;
   portal_dashboard_my_documents: string;
   portal_dashboard_my_appointments: string;
@@ -506,7 +503,6 @@ export interface PatientsPortalTranslations {
   portal_documents_failed_to_request_translation: string;
   portal_documents_failed_to_download_uploaded_document: string;
   portal_documents_my_documents: string;
-  portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here: string;
   portal_documents_pending_confirmations: string;
   portal_documents_my_uploads: string;
   portal_documents_refresh: string;
@@ -565,7 +561,6 @@ export interface PatientsPortalTranslations {
   portal_appointments_appointment_request_sent_to_the_care_team: string;
   portal_appointments_failed_to_send_appointment_request: string;
   portal_appointments_my_appointments: string;
-  portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th: string;
   portal_appointments_patient_portal: string;
   portal_appointments_refresh: string;
   portal_appointments_upcoming_visits: string;
@@ -604,7 +599,6 @@ export interface PatientsPortalTranslations {
   portal_appointments_appointment: string;
   portal_appointments_on: string;
   portal_appointments_request_a_visit: string;
-  portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve: string;
   portal_appointments_group_request_details: string;
   portal_appointments_group_schedule_preferences: string;
   portal_appointments_group_visit_context: string;
@@ -640,7 +634,6 @@ export interface PatientsPortalTranslations {
   portal_invoices_payment_proof_uploaded_for_the_billing_team: string;
   portal_invoices_failed_to_upload_payment_proof: string;
   portal_invoices_my_invoices: string;
-  portal_invoices_review_released_invoice_snapshots_track_payment_state_and_upload: string;
   portal_invoices_patient_portal: string;
   portal_invoices_open_documents: string;
   portal_invoices_refresh: string;
@@ -658,11 +651,9 @@ export interface PatientsPortalTranslations {
   portal_invoices_uploaded: string;
   portal_invoices_not_uploaded: string;
   portal_invoices_invoice_detail: string;
-  portal_invoices_commercial_totals_line_items_and_payment_proof_handoff_for_the_s: string;
   portal_invoices_loading_invoice_detail: string;
   portal_invoices_choose_an_invoice_card_to_open_the_detail_workspace: string;
   portal_invoices_invoice_overview: string;
-  portal_invoices_amounts_due_date_and_linked_quote_order_context: string;
   portal_invoices_failed_to_open_invoice_pdf: string;
   portal_invoices_preview_pdf: string;
   portal_invoices_failed_to_download_invoice_pdf: string;
@@ -687,9 +678,7 @@ export interface PatientsPortalTranslations {
   portal_invoices_uploaded_proofs: string;
   portal_invoices_latest_upload: string;
   portal_invoices_line_items: string;
-  portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot: string;
   portal_invoices_no_line_items_available: string;
-  portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no: string;
   portal_invoices_file: string;
   portal_invoices_note: string;
   portal_invoices_optional_transfer_reference_payment_date_or_clarification: string;
@@ -939,7 +928,6 @@ export interface PatientsPortalTranslations {
   patient_case_preview_value_no_2: string;
 
   portal_subscriptions_title: string;
-  portal_subscriptions_subtitle: string;
   portal_subscriptions_eyebrow: string;
   portal_subscriptions_refresh: string;
   portal_subscriptions_open_invoices: string;
@@ -1071,7 +1059,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_privacy_request_submitted: "Запрос по приватности отправлен.",
   portal_privacy_failed_to_submit_request: "Не удалось отправить запрос по приватности.",
   portal_privacy_title: "Запросы по приватности",
-  portal_privacy_description: "Отправляйте запросы по защите данных на удаление, ограничение обработки или отзыв передачи третьим лицам.",
   portal_privacy_patient_portal: "Портал пациента",
   portal_privacy_open_requests: "Открытые запросы",
   portal_privacy_refresh: "Обновить",
@@ -1116,7 +1103,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_recommendations_decision_saved: "Ваше решение сохранено.",
   portal_recommendations_failed_to_save_action: "Не удалось сохранить действие.",
   portal_recommendations_title: "Мои рекомендации",
-  portal_recommendations_description: "Здесь отображаются опубликованные рекомендации команды сопровождения, по которым можно выбрать следующее действие.",
   portal_recommendations_patient_portal: "Портал пациента",
   portal_recommendations_active: "Активно",
   portal_recommendations_refresh: "Обновить",
@@ -1398,7 +1384,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_dashboard_patient: "Пациент",
   portal_dashboard_failed_to_load_portal_workspace: "Не удалось загрузить портал пациента.",
   portal_dashboard_failed_to_export_patient_data: "Не удалось экспортировать данные пациента.",
-  portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho: "Здесь отображаются только явно опубликованные документы и процессы по защите данных.",
   portal_dashboard_patient_portal: "Портал пациента",
   portal_dashboard_my_documents: "Мои документы",
   portal_dashboard_my_appointments: "Мои визиты",
@@ -1498,7 +1483,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_documents_failed_to_request_translation: "Не удалось запросить перевод.",
   portal_documents_failed_to_download_uploaded_document: "Не удалось скачать загруженный документ.",
   portal_documents_my_documents: "Мои документы",
-  portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here: "Здесь видны только файлы, явно опубликованные для вашего портала.",
   portal_documents_pending_confirmations: "Ожидающие подтверждения",
   portal_documents_my_uploads: "Мои загрузки",
   portal_documents_refresh: "Обновить",
@@ -1523,7 +1507,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_documents_request_translation: "Запросить перевод",
   portal_documents_translation: "Перевод",
   portal_documents_upload_documents: "Загрузить документы",
-  portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can: "Отправляйте файлы команде сопровождения. Подтверждения оплаты остаются внутренними и загружаются из раздела счетов.",
+  portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can: "Подтверждения оплаты загружайте в разделе счетов.",
   portal_documents_category: "Категория",
   portal_documents_general: "Общий",
   portal_documents_correspondence: "Переписка",
@@ -1557,7 +1541,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_appointments_appointment_request_sent_to_the_care_team: "Запрос на визит отправлен команде сопровождения.",
   portal_appointments_failed_to_send_appointment_request: "Не удалось отправить запрос на визит.",
   portal_appointments_my_appointments: "Мои визиты",
-  portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th: "Просматривайте запланированные визиты и отправляйте новые запросы на визит для обработки и бронирования командой сопровождения.",
   portal_appointments_patient_portal: "Портал пациента",
   portal_appointments_refresh: "Обновить",
   portal_appointments_upcoming_visits: "Предстоящие визиты",
@@ -1596,7 +1579,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_appointments_appointment: "визит",
   portal_appointments_on: "на",
   portal_appointments_request_a_visit: "Запросить визит",
-  portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve: "Отправьте предпочтительные даты и контекст. Команда сопровождения рассмотрит запрос и назначит визит.",
   portal_appointments_group_request_details: "Параметры запроса",
   portal_appointments_group_schedule_preferences: "Предпочтения по времени",
   portal_appointments_group_visit_context: "Контекст визита",
@@ -1632,7 +1614,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_invoices_payment_proof_uploaded_for_the_billing_team: "Подтверждение оплаты загружено для бухгалтерии.",
   portal_invoices_failed_to_upload_payment_proof: "Не удалось загрузить подтверждение оплаты.",
   portal_invoices_my_invoices: "Мои счета",
-  portal_invoices_review_released_invoice_snapshots_track_payment_state_and_upload: "Просматривайте опубликованные счета, отслеживайте статус оплаты и загружайте подтверждение, если средства уже переведены.",
   portal_invoices_patient_portal: "Портал пациента",
   portal_invoices_open_documents: "Открыть документы",
   portal_invoices_refresh: "Обновить",
@@ -1650,11 +1631,9 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_invoices_uploaded: "Загружено",
   portal_invoices_not_uploaded: "Не загружено",
   portal_invoices_invoice_detail: "Детали счета",
-  portal_invoices_commercial_totals_line_items_and_payment_proof_handoff_for_the_s: "Коммерческие суммы, позиции и передача подтверждения оплаты для выбранного счета.",
   portal_invoices_loading_invoice_detail: "Загрузка деталей счета...",
   portal_invoices_choose_an_invoice_card_to_open_the_detail_workspace: "Выберите карточку счета, чтобы открыть детальное представление.",
   portal_invoices_invoice_overview: "Обзор счета",
-  portal_invoices_amounts_due_date_and_linked_quote_order_context: "Суммы, срок оплаты и связанный контекст предложения/заказа.",
   portal_invoices_failed_to_open_invoice_pdf: "Не удалось открыть PDF счета.",
   portal_invoices_preview_pdf: "Предпросмотр PDF",
   portal_invoices_failed_to_download_invoice_pdf: "Не удалось скачать PDF счета.",
@@ -1679,9 +1658,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_invoices_uploaded_proofs: "Загруженные подтверждения",
   portal_invoices_latest_upload: "Последняя загрузка",
   portal_invoices_line_items: "Позиции",
-  portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot: "Услуги и суммы так, как они указаны в счёте.",
   portal_invoices_no_line_items_available: "Нет доступных позиций.",
-  portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no: "Файл получит бухгалтерия GMED: по нему она сверит вашу оплату со счётом.",
   portal_invoices_file: "Файл",
   portal_invoices_note: "Заметка",
   portal_invoices_optional_transfer_reference_payment_date_or_clarification: "Необязательная ссылка на перевод, дата оплаты или пояснение.",
@@ -1920,7 +1897,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_case_preview_value_yes_2: "Да",
   patient_case_preview_value_no_2: "Нет",
   portal_subscriptions_title: "Мои подписки",
-  portal_subscriptions_subtitle: "Периоды действия, включённые услуги, доступные лимиты и состояние оплаты ваших сервисных пакетов.",
   portal_subscriptions_eyebrow: "Портал пациента",
   portal_subscriptions_refresh: "Обновить",
   portal_subscriptions_open_invoices: "Открыть счета",
@@ -2052,7 +2028,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_privacy_request_submitted: "Datenschutzanfrage wurde eingereicht.",
   portal_privacy_failed_to_submit_request: "Datenschutzanfrage konnte nicht gesendet werden.",
   portal_privacy_title: "Datenschutzanfragen",
-  portal_privacy_description: "Reichen Sie DSGVO-Anfragen zur Datenlöschung, Verarbeitungseinschränkung oder zum Widerruf der Weitergabe an Dritte ein.",
   portal_privacy_patient_portal: "Patientenportal",
   portal_privacy_open_requests: "Offene Anfragen",
   portal_privacy_refresh: "Aktualisieren",
@@ -2097,7 +2072,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_recommendations_decision_saved: "Ihre Entscheidung wurde gespeichert.",
   portal_recommendations_failed_to_save_action: "Aktion konnte nicht gespeichert werden.",
   portal_recommendations_title: "Meine Empfehlungen",
-  portal_recommendations_description: "Hier sehen Sie freigegebene Empfehlungen Ihres Betreuungsteams und können die nächste Entscheidung dokumentieren.",
   portal_recommendations_patient_portal: "Patientenportal",
   portal_recommendations_active: "Aktiv",
   portal_recommendations_refresh: "Aktualisieren",
@@ -2379,7 +2353,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_dashboard_patient: "Patient",
   portal_dashboard_failed_to_load_portal_workspace: "Patientenportal konnte nicht geladen werden.",
   portal_dashboard_failed_to_export_patient_data: "Patientendaten konnten nicht exportiert werden.",
-  portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho: "Hier werden nur ausdrücklich freigegebene Dokumente und Datenschutz-Workflows angezeigt.",
   portal_dashboard_patient_portal: "Patientenportal",
   portal_dashboard_my_documents: "Meine Dokumente",
   portal_dashboard_my_appointments: "Meine Termine",
@@ -2479,7 +2452,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_documents_failed_to_request_translation: "Übersetzung konnte nicht angefragt werden.",
   portal_documents_failed_to_download_uploaded_document: "Hochgeladenes Dokument konnte nicht heruntergeladen werden.",
   portal_documents_my_documents: "Meine Dokumente",
-  portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here: "Hier sind nur Dateien sichtbar, die ausdrücklich für Ihr Portal freigegeben wurden.",
   portal_documents_pending_confirmations: "Ausstehende Bestätigungen",
   portal_documents_my_uploads: "Meine hochgeladenen Dateien",
   portal_documents_refresh: "Aktualisieren",
@@ -2504,7 +2476,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_documents_request_translation: "Übersetzung anfragen",
   portal_documents_translation: "Übersetzung",
   portal_documents_upload_documents: "Dokumente hochladen",
-  portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can: "Senden Sie Dateien an das Betreuungsteam. Zahlungsnachweise bleiben intern und können im Rechnungsbereich hochgeladen werden.",
+  portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can: "Zahlungsnachweise laden Sie im Rechnungsbereich hoch.",
   portal_documents_category: "Kategorie",
   portal_documents_general: "Allgemein",
   portal_documents_correspondence: "Korrespondenz",
@@ -2538,7 +2510,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_appointments_appointment_request_sent_to_the_care_team: "Terminanfrage wurde an das Betreuungsteam gesendet.",
   portal_appointments_failed_to_send_appointment_request: "Terminanfrage konnte nicht gesendet werden.",
   portal_appointments_my_appointments: "Meine Termine",
-  portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th: "Prüfen Sie geplante Termine und senden Sie neue Terminwünsche an das Betreuungsteam zur Prüfung und Buchung.",
   portal_appointments_patient_portal: "Patientenportal",
   portal_appointments_refresh: "Aktualisieren",
   portal_appointments_upcoming_visits: "Kommende Termine",
@@ -2577,7 +2548,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_appointments_appointment: "Termin",
   portal_appointments_on: "am",
   portal_appointments_request_a_visit: "Termin anfragen",
-  portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve: "Senden Sie bevorzugte Termine und Kontext. Das Betreuungsteam prüft die Anfrage und wandelt sie in einen echten Termin um.",
   portal_appointments_group_request_details: "Anfragedaten",
   portal_appointments_group_schedule_preferences: "Zeitpräferenzen",
   portal_appointments_group_visit_context: "Besuchskontext",
@@ -2613,7 +2583,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_invoices_payment_proof_uploaded_for_the_billing_team: "Zahlungsnachweis wurde für das Abrechnungsteam hochgeladen.",
   portal_invoices_failed_to_upload_payment_proof: "Zahlungsnachweis konnte nicht hochgeladen werden.",
   portal_invoices_my_invoices: "Meine Rechnungen",
-  portal_invoices_review_released_invoice_snapshots_track_payment_state_and_upload: "Prüfen Sie freigegebene Rechnungsstände, verfolgen Sie den Zahlungsstatus und laden Sie einen Zahlungsnachweis hoch, wenn Sie bereits überwiesen haben.",
   portal_invoices_patient_portal: "Patientenportal",
   portal_invoices_open_documents: "Dokumente öffnen",
   portal_invoices_refresh: "Aktualisieren",
@@ -2631,11 +2600,9 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_invoices_uploaded: "Hochgeladen",
   portal_invoices_not_uploaded: "Nicht hochgeladen",
   portal_invoices_invoice_detail: "Rechnungsdetails",
-  portal_invoices_commercial_totals_line_items_and_payment_proof_handoff_for_the_s: "Kaufmännische Summen, Positionen und Übergabe des Zahlungsnachweises für die ausgewählte Rechnung.",
   portal_invoices_loading_invoice_detail: "Rechnungsdetails werden geladen...",
   portal_invoices_choose_an_invoice_card_to_open_the_detail_workspace: "Wählen Sie eine Rechnungskarte, um die Detailansicht zu öffnen.",
   portal_invoices_invoice_overview: "Rechnungsübersicht",
-  portal_invoices_amounts_due_date_and_linked_quote_order_context: "Beträge, Fälligkeitsdatum und verknüpfter Angebots-/Auftragskontext.",
   portal_invoices_failed_to_open_invoice_pdf: "Rechnungs-PDF konnte nicht geöffnet werden.",
   portal_invoices_preview_pdf: "PDF-Vorschau",
   portal_invoices_failed_to_download_invoice_pdf: "Rechnungs-PDF konnte nicht heruntergeladen werden.",
@@ -2660,9 +2627,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_invoices_uploaded_proofs: "Hochgeladene Nachweise",
   portal_invoices_latest_upload: "Zuletzt hochgeladen",
   portal_invoices_line_items: "Positionen",
-  portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot: "Leistungen und Beträge, wie sie auf der Rechnung stehen.",
   portal_invoices_no_line_items_available: "Keine Positionen verfügbar.",
-  portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no: "Die Datei geht an die Buchhaltung von GMED, die damit Ihre Zahlung der Rechnung zuordnet.",
   portal_invoices_file: "Datei",
   portal_invoices_note: "Notiz",
   portal_invoices_optional_transfer_reference_payment_date_or_clarification: "Optionale Überweisungsreferenz, Zahlungsdatum oder Erläuterung.",
@@ -2901,7 +2866,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_case_preview_value_yes_2: "Ja",
   patient_case_preview_value_no_2: "Nein",
   portal_subscriptions_title: "Meine Abonnements",
-  portal_subscriptions_subtitle: "Laufzeiten, enthaltene Leistungen, verfügbare Kontingente und Zahlungsstatus Ihrer Servicepakete.",
   portal_subscriptions_eyebrow: "Patientenportal",
   portal_subscriptions_refresh: "Aktualisieren",
   portal_subscriptions_open_invoices: "Rechnungen öffnen",

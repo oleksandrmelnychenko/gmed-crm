@@ -244,7 +244,6 @@ export function PatientPrivacyPage() {
     <div className="w-full min-w-0 space-y-3">
       <PageHeader
         title={t.portal_privacy_title}
-        description={t.portal_privacy_description}
         actions={
           <>
 

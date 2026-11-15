@@ -328,10 +328,10 @@ export function IdentityStep({
   const organisation = isOrganisation(context.payerType);
   return (
     <div className="space-y-5" data-testid="payer-link-step-identity">
-      {/* Whose document an organisation gives; a person needs no filler line (QA 2026-10-10). */}
-      {organisation ? (
+      {/* Only when the register extract makes the step skippable (owner 2026-11-15: no filler intro). */}
+      {organisation && extractOnFile ? (
         <p className="text-sm leading-6 text-muted-foreground" data-testid="payer-link-identity-intro">
-          {extractOnFile ? text.identityExtractOnFile : text.identityIntroOrganisation}
+          {text.identityExtractOnFile}
         </p>
       ) : null}
       {/* Offered until an extract is on file; the organisation's own upload stays listed here, with "remove". */}
@@ -340,7 +340,6 @@ export function IdentityStep({
           id="payer-link-register-extract"
           label={text.identityExtractUpload}
           required={false}
-          hint={text.identityExtractUploadHint}
           buttonLabel={text.identityExtractUploadButton}
           documents={extractDocuments}
           busy={extractUploads.busy}

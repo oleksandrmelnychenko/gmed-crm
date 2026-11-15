@@ -430,7 +430,6 @@ function usePatientAppointmentsPageContent() {
         // A paused subscription keeps the agreed visits readable; new requests are closed.
         pageAction={subscriptionPaused ? undefined : <Button onClick={() => setRequestSheetOpen(true)}><Plus className="size-4" />{t.portal_appointments_send_appointment_request}</Button>}
         title={t.portal_appointments_my_appointments}
-        description={t.portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th}
         actions={
           <>
 
@@ -743,7 +742,6 @@ function usePatientAppointmentsPageContent() {
           open={requestSheetOpen}
           onOpenChange={setRequestSheetOpen}
           title={t.portal_appointments_request_a_visit}
-          description={t.portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve}
           width="form-heavy"
           presentation="dialog"
           bodyClassName="bg-card"

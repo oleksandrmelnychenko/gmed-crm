@@ -23,7 +23,6 @@ type BeforeInstallPromptEvent = Event & {
 const COPY = {
   de: {
     title: "GMED auf dem Smartphone",
-    description: "Portal wie eine App öffnen und neue Termine, Dokumente, Empfehlungen oder Rechnungen nicht verpassen.",
     install: "App installieren",
     installed: "App installiert",
     installHint: "Im Browser-Menü „Zum Startbildschirm“ wählen.",
@@ -37,7 +36,6 @@ const COPY = {
   },
   ru: {
     title: "GMED на смартфоне",
-    description: "Открывайте портал как приложение и не пропускайте новые приёмы, документы, рекомендации или счета.",
     install: "Установить приложение",
     installed: "Приложение установлено",
     installHint: "Выберите «Добавить на главный экран» в меню браузера.",
@@ -192,9 +190,8 @@ export function PatientPortalMobileAccess() {
       <div className="mt-3 space-y-2">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
-          <p className="text-sm leading-6 text-muted-foreground">{copy.description}</p>
           {!installed && !installPrompt ? (
-            <p className="mt-1 text-xs text-muted-foreground">{copy.installHint}</p>
+            <p className="text-xs text-muted-foreground">{copy.installHint}</p>
           ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">

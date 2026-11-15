@@ -18,7 +18,6 @@ export type ConsentFormText = {
   /** Marks the three consents the service runs on: read by screen readers next to the `*`. */
   required: string;
   /** Why the three are needed; shown while one of them is not ticked. */
-  coreHint: string;
   /** The server refused a choice without the three (`consent_core_required`). */
   coreRequired: string;
   /** At a required box that is not ticked, once the step was to be left with a partial choice (QA 2026-11-10, finding 5). */
@@ -45,7 +44,6 @@ export type ConsentFormText = {
   byGuardianOnly: string;
   /** The named recipients (owner 2026-10-12), shown while "named recipients" is ticked. */
   recipientsTitle: string;
-  recipientsHint: string;
   recipientName: string;
   recipientRelation: string;
   recipientContact: string;
@@ -58,7 +56,7 @@ export type ConsentFormText = {
   recipientsInvalid: string;
 };
 
-type ChildTexts = Pick<ConsentFormText, "intro" | "options" | "channelsTitle" | "coreHint" | "recipientsHint">;
+type ChildTexts = Pick<ConsentFormText, "intro" | "options" | "channelsTitle">;
 
 /** Russian / Ukrainian plural: one, few (2–4), many. */
 function slavicPlural(count: number, one: string, few: string, many: string): string {
@@ -72,7 +70,7 @@ function slavicPlural(count: number, one: string, few: string, many: string): st
 const de: ConsentFormText = {
   title: "Einwilligung zur Datenübermittlung",
   intro:
-    "Wählen Sie selbst, wozu Sie einwilligen. Im Formular, das Sie später elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
+    "Wählen Sie selbst, wozu Sie einwilligen.",
   options: {
     agency_processing:
       "GMED und beauftragte Mitarbeitende dürfen meine personenbezogenen und medizinischen Daten und Unterlagen einholen, bearbeiten, speichern und bei Bedarf an behandelnde Ärzte, Kliniken, Labore, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln.",
@@ -89,7 +87,6 @@ const de: ConsentFormText = {
   channelsTitle: "Meine Daten und Unterlagen dürfen über diese Kommunikationswege eingeholt oder übermittelt werden:",
   channelsRisk: "Die Übermittlung sensibler Daten per E-Mail oder Messenger ist mit Risiken verbunden.",
   required: "erforderlich",
-  coreHint: "Diese drei Einwilligungen brauchen wir für Ihre Anfrage.",
   coreRequired: "Bitte kreuzen Sie die drei erforderlichen Einwilligungen an.",
   coreMissingBox: "Diese Einwilligung ist erforderlich. Bitte kreuzen Sie sie an.",
   coreIncomplete: "Ihre Auswahl ist noch nicht gespeichert: Bitte kreuzen Sie alle drei erforderlichen Einwilligungen an.",
@@ -109,7 +106,6 @@ const de: ConsentFormText = {
   byGuardianOnly:
     "Für Minderjährige wählen die Eltern bzw. der Vormund mit ihrem eigenen Zugang, wozu sie einwilligen. Hier ist nichts auszuwählen.",
   recipientsTitle: "Auskunftsberechtigte (Auskunft an Dritte)",
-  recipientsHint: "Nennen Sie, an wen GMED Ihre Daten übermitteln darf (höchstens 5). Nur diese Personen stehen im Formular.",
   recipientName: "Name bzw. Name der Institution",
   recipientRelation: "Wer ist das?",
   recipientContact: "Telefon oder E-Mail (optional)",
@@ -122,7 +118,7 @@ const de: ConsentFormText = {
 
 const deChild: ChildTexts = {
   intro:
-    "Wählen Sie selbst, wozu Sie für Ihr Kind einwilligen. Im Formular, das Sie später als Sorgeberechtigte/r elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
+    "Wählen Sie selbst, wozu Sie für Ihr Kind einwilligen.",
   options: {
     agency_processing:
       "GMED und beauftragte Mitarbeitende dürfen die personenbezogenen und medizinischen Daten und Unterlagen meines Kindes einholen, bearbeiten, speichern und bei Bedarf an behandelnde Ärzte, Kliniken, Labore, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln.",
@@ -137,14 +133,12 @@ const deChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "Die Daten und Unterlagen meines Kindes dürfen über diese Kommunikationswege eingeholt oder übermittelt werden:",
-  coreHint: "Diese drei Einwilligungen brauchen wir für die Anfrage Ihres Kindes.",
-  recipientsHint: "Nennen Sie, an wen GMED die Daten Ihres Kindes übermitteln darf (höchstens 5). Sich selbst als Eltern bzw. Vormund müssen Sie hier nicht nennen.",
 };
 
 const en: ConsentFormText = {
   title: "Consent to data transfer",
   intro:
-    "Choose yourself what you consent to. The form you later sign electronically shows ticked only what you choose here. Without your choice you sign the form on paper and tick the boxes there yourself.",
+    "Choose yourself what you consent to.",
   options: {
     agency_processing:
       "GMED and the staff it instructs may obtain, process and store my personal and medical data and documents and, where needed, pass them on to treating doctors, clinics, laboratories, interpreters, translators, assessors or payers.",
@@ -160,7 +154,6 @@ const en: ConsentFormText = {
   channelsTitle: "My data and documents may be obtained or passed on through these channels:",
   channelsRisk: "Sending sensitive data by e-mail or messenger carries risks.",
   required: "required",
-  coreHint: "We need these three consents for your request.",
   coreRequired: "Please tick the three required consents.",
   coreMissingBox: "This consent is required. Please tick it.",
   coreIncomplete: "Your choice is not saved yet: please tick all three required consents.",
@@ -180,7 +173,6 @@ const en: ConsentFormText = {
   byGuardianOnly:
     "For a minor, the parents or the guardian choose what they consent to with their own access. There is nothing to choose here.",
   recipientsTitle: "Information recipients (Auskunft an Dritte)",
-  recipientsHint: "Name who GMED may pass your data on to (at most 5). Only these persons appear on the form.",
   recipientName: "Name or name of the institution",
   recipientRelation: "Who is this?",
   recipientContact: "Phone or e-mail (optional)",
@@ -193,7 +185,7 @@ const en: ConsentFormText = {
 
 const enChild: ChildTexts = {
   intro:
-    "Choose yourself what you consent to for your child. The form you later sign electronically as the parent or guardian shows ticked only what you choose here. Without your choice you sign the form on paper and tick the boxes there yourself.",
+    "Choose yourself what you consent to for your child.",
   options: {
     agency_processing:
       "GMED and the staff it instructs may obtain, process and store my child's personal and medical data and documents and, where needed, pass them on to treating doctors, clinics, laboratories, interpreters, translators, assessors or payers.",
@@ -206,14 +198,12 @@ const enChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "My child's data and documents may be obtained or passed on through these channels:",
-  coreHint: "We need these three consents for your child's request.",
-  recipientsHint: "Name who GMED may pass your child's data on to (at most 5). You need not name yourself as parent or guardian.",
 };
 
 const uk: ConsentFormText = {
   title: "Згода на передачу даних",
   intro:
-    "Оберіть самі, на що ви погоджуєтеся. У формі, яку ви згодом підпишете електронно, позначено лише те, що ви оберете тут. Без вашого вибору ви підписуєте форму на папері й позначаєте там самі.",
+    "Оберіть самі, на що ви погоджуєтеся.",
   options: {
     agency_processing:
       "GMED і уповноважені працівники можуть отримувати, обробляти, зберігати мої персональні й медичні дані та документи і за потреби передавати їх лікарям, клінікам, лабораторіям, перекладачам, експертам або платникам.",
@@ -229,7 +219,6 @@ const uk: ConsentFormText = {
   channelsTitle: "Мої дані та документи можна отримувати або передавати цими каналами:",
   channelsRisk: "Передача чутливих даних електронною поштою чи месенджером пов’язана з ризиками.",
   required: "обов’язково",
-  coreHint: "Ці три згоди потрібні для вашої заявки.",
   coreRequired: "Позначте, будь ласка, три обов’язкові згоди.",
   coreMissingBox: "Ця згода обов’язкова. Позначте її, будь ласка.",
   coreIncomplete: "Ваш вибір ще не збережено: позначте, будь ласка, усі три обов’язкові згоди.",
@@ -249,7 +238,6 @@ const uk: ConsentFormText = {
   byGuardianOnly:
     "За неповнолітнього батьки або опікун обирають, на що погоджуються, через свій власний доступ. Тут нічого обирати не потрібно.",
   recipientsTitle: "Отримувачі інформації (Auskunft an Dritte)",
-  recipientsHint: "Вкажіть, кому GMED може передавати ваші дані (не більше 5). У формі будуть лише ці особи.",
   recipientName: "Ім’я та прізвище або назва установи",
   recipientRelation: "Хто це?",
   recipientContact: "Телефон або e-mail (необов’язково)",
@@ -262,7 +250,7 @@ const uk: ConsentFormText = {
 
 const ukChild: ChildTexts = {
   intro:
-    "Оберіть самі, на що ви погоджуєтеся за свою дитину. У формі, яку ви згодом підпишете електронно як батько, мати чи опікун, позначено лише те, що ви оберете тут. Без вашого вибору ви підписуєте форму на папері й позначаєте там самі.",
+    "Оберіть самі, на що ви погоджуєтеся за свою дитину.",
   options: {
     agency_processing:
       "GMED і уповноважені працівники можуть отримувати, обробляти, зберігати персональні й медичні дані та документи моєї дитини і за потреби передавати їх лікарям, клінікам, лабораторіям, перекладачам, експертам або платникам.",
@@ -275,14 +263,12 @@ const ukChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "Дані та документи моєї дитини можна отримувати або передавати цими каналами:",
-  coreHint: "Ці три згоди потрібні для заявки вашої дитини.",
-  recipientsHint: "Вкажіть, кому GMED може передавати дані вашої дитини (не більше 5). Себе як батька, матір чи опікуна вказувати не потрібно.",
 };
 
 const ru: ConsentFormText = {
   title: "Согласие на передачу данных",
   intro:
-    "Выберите сами, на что вы соглашаетесь. В форме, которую вы позже подпишете электронно, отмечено только то, что вы выберете здесь. Без вашего выбора вы подписываете форму на бумаге и отмечаете там сами.",
+    "Выберите сами, на что вы соглашаетесь.",
   options: {
     agency_processing:
       "GMED и уполномоченные сотрудники могут получать, обрабатывать, хранить мои персональные и медицинские данные и документы и при необходимости передавать их лечащим врачам, клиникам, лабораториям, переводчикам, экспертам или плательщикам.",
@@ -298,7 +284,6 @@ const ru: ConsentFormText = {
   channelsTitle: "Мои данные и документы можно получать или передавать по этим каналам:",
   channelsRisk: "Передача чувствительных данных по электронной почте или в мессенджере связана с рисками.",
   required: "обязательно",
-  coreHint: "Эти три согласия нужны для вашей заявки.",
   coreRequired: "Отметьте, пожалуйста, три обязательных согласия.",
   coreMissingBox: "Это согласие обязательно. Отметьте его, пожалуйста.",
   coreIncomplete: "Ваш выбор ещё не сохранён: отметьте, пожалуйста, все три обязательных согласия.",
@@ -318,7 +303,6 @@ const ru: ConsentFormText = {
   byGuardianOnly:
     "За несовершеннолетнего родители или опекун выбирают, на что они соглашаются, через свой собственный доступ. Здесь ничего выбирать не нужно.",
   recipientsTitle: "Получатели информации (Auskunft an Dritte)",
-  recipientsHint: "Укажите, кому GMED может передавать ваши данные (не более 5). В форме будут только эти лица.",
   recipientName: "Имя и фамилия или название учреждения",
   recipientRelation: "Кто это?",
   recipientContact: "Телефон или e-mail (необязательно)",
@@ -331,7 +315,7 @@ const ru: ConsentFormText = {
 
 const ruChild: ChildTexts = {
   intro:
-    "Выберите сами, на что вы соглашаетесь за ребёнка. В форме, которую вы позже подпишете электронно как родитель или опекун, отмечено только то, что вы выберете здесь. Без вашего выбора вы подписываете форму на бумаге и отмечаете там сами.",
+    "Выберите сами, на что вы соглашаетесь за ребёнка.",
   options: {
     agency_processing:
       "GMED и уполномоченные сотрудники могут получать, обрабатывать, хранить персональные и медицинские данные и документы моего ребёнка и при необходимости передавать их лечащим врачам, клиникам, лабораториям, переводчикам, экспертам или плательщикам.",
@@ -344,8 +328,6 @@ const ruChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "Данные и документы моего ребёнка можно получать или передавать по этим каналам:",
-  coreHint: "Эти три согласия нужны для заявки вашего ребёнка.",
-  recipientsHint: "Укажите, кому GMED может передавать данные вашего ребёнка (не более 5). Себя как родителя или опекуна указывать не нужно.",
 };
 
 /** The parents' child texts in the words of a guardian (Vormund): the longest phrase first. */
@@ -394,8 +376,6 @@ function guardianshipChildTexts(child: ChildTexts, lang: keyof typeof GUARDIANSH
     intro: reword(child.intro),
     options: Object.fromEntries(Object.entries(child.options).map(([key, value]) => [key, reword(value)])) as ChildTexts["options"],
     channelsTitle: reword(child.channelsTitle),
-    coreHint: reword(child.coreHint),
-    recipientsHint: reword(child.recipientsHint),
   };
 }
 

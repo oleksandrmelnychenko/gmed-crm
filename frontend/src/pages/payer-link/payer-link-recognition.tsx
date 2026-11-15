@@ -157,7 +157,7 @@ export function PayerIdentityRecognition({ context, uploads }: { context: StepCo
           {state.kind === "idle" ? text.run : text.again}
         </Button>
         <span className="text-xs leading-5 text-muted-foreground" aria-live="polite">
-          {state.kind === "running" ? text.running : state.kind === "applied" ? text.applied : state.kind === "idle" ? text.hint : null}
+          {state.kind === "running" ? text.running : state.kind === "applied" ? text.applied : null}
         </span>
       </div>
       {state.kind === "failed" ? (
@@ -208,7 +208,6 @@ export function PayerIdentityRecognition({ context, uploads }: { context: StepCo
               </li>
             ))}
           </ul>
-          <p className="text-xs leading-5 text-muted-foreground">{text.authorityHint}</p>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" disabled={taken.length === 0} onClick={apply} data-testid="payer-link-recognition-apply">
               {text.apply}

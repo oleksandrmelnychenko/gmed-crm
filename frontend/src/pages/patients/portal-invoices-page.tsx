@@ -513,7 +513,6 @@ function usePatientInvoicesPageContent() {
     <div className="w-full min-w-0 space-y-3">
       <PageHeader
         title={t.portal_invoices_my_invoices}
-        description={t.portal_invoices_review_released_invoice_snapshots_track_payment_state_and_upload}
         actions={
           <>
 
@@ -935,7 +934,6 @@ function usePatientInvoicesPageContent() {
         <SheetContent side="right" className="portal-invoice-sheet w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
             title={detail ? detail.invoice_number : t.portal_invoices_invoice_detail}
-            description={t.portal_invoices_commercial_totals_line_items_and_payment_proof_handoff_for_the_s}
             headerClassName="px-4 py-3"
             bodyClassName="min-h-0 overscroll-y-contain space-y-3 px-4 py-3"
           >
@@ -961,7 +959,6 @@ function usePatientInvoicesPageContent() {
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                         <SectionHeading icon={ReceiptText}>{t.portal_invoices_invoice_overview}</SectionHeading>
                       </h2>
-                      <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_amounts_due_date_and_linked_quote_order_context}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button
@@ -1331,7 +1328,6 @@ function usePatientInvoicesPageContent() {
                   <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                     <SectionHeading icon={ListOrdered}>{t.portal_invoices_line_items}</SectionHeading>
                   </h2>
-                  <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot}</p>
                   <div className="mt-3 space-y-2">
                     {!detail.line_items || detail.line_items.length === 0 ? (
                       <div className={cn("rounded-xl px-3 py-3 text-sm text-muted-foreground", tokens.surface.dashed)}>
@@ -1373,7 +1369,6 @@ function usePatientInvoicesPageContent() {
       >
         <AdminDialogScaffold
           title={t.portal_invoices_upload_payment_proof}
-          description={t.portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no}
           maxWidthClassName="sm:max-w-xl"
           bodyClassName="bg-card [&_label]:font-mono [&_label]:text-xs"
           onSubmit={(event) => void handlePaymentProofUpload(event)}

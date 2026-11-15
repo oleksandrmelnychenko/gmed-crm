@@ -319,11 +319,6 @@ export function ConsentFormChoicesSection({
               <p className="text-xs text-muted-foreground">{sentConsentText(lang)}</p>
             </div>
           ) : null}
-          {!coreTicked ? (
-            <p className="text-xs text-muted-foreground" data-testid="lead-request-consent-form-core-hint">
-              {text.coreHint}
-            </p>
-          ) : null}
           {staffMode && changed && coreTicked ? (
             <StaffConsentRecordFields lang={lang} testId="lead-request-consent-form" busy={busy}
               hint={cabinetStaffText(lang).recordChanges} onRecord={(recorded) => void save(draft, recorded)} />

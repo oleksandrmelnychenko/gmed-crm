@@ -131,7 +131,7 @@ describe("the lists of what is missing name the field and address the right pers
   it("has the new sentences in every cabinet language", () => {
     const keys = [
       "sentChangeRefused", "consentWithdrawAfterSend", "invalidGermanZip", "payerBornAfterPatient", "payerConsentAskedAgain",
-      "payerRenamedHint", "stepInvalidTitle", "payerLegalPrefilled",
+      "payerRenamedHint", "stepInvalidTitle",
     ] as const;
     for (const { value } of LEAD_CABINET_LANGS) {
       const text = leadRequestText(value);

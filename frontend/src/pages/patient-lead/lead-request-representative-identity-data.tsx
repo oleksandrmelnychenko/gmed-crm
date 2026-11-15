@@ -213,12 +213,7 @@ export function RepresentativeIdentityData({
         <CabinetHint testId={`lead-request-${slot}-identity-data-by-staff`}>
           {staffMode ? cabinetStaffText(lang).idDataByStaff : text.representativeIdDataStaff}
         </CabinetHint>
-      ) : (
-        <CabinetHint className="text-sm leading-6">
-          <p className="font-semibold text-foreground">{text.identityDataOptional}</p>
-          <p>{text.representativeIdDataIntro}</p>
-        </CabinetHint>
-      )}
+      ) : null}
       {/* Whoever may edit the fields has the copy read (owner 2026-11-13: OCR wherever ID data
           are typed) — staff in the client's form too, also after staff entered the data. */}
       {!byStaff || staffMode ? (

@@ -196,7 +196,7 @@ export function UploadBlock({
   label: string;
   required: boolean;
   badge?: string;
-  hint: string;
+  hint?: string;
   buttonLabel: string;
   documents: readonly PayerDocument[];
   busy: boolean;
@@ -253,7 +253,7 @@ export function UploadBlock({
         {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
         {busy ? text.uploading : buttonLabel}
       </Button>
-      <p className="text-xs leading-5 text-muted-foreground">{hint}</p>
+      {hint ? <p className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">
           {message}

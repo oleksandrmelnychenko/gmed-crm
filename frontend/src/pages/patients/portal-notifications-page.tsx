@@ -41,7 +41,6 @@ type ReadFilter = "all" | "unread" | "read";
 const COPY = {
   de: {
     title: "Meine Benachrichtigungen",
-    description: "Termine, Dokumente, Empfehlungen, Services und Rechnungen an einem Ort.",
     unread: "Ungelesen",
     refresh: "Aktualisieren",
     markAll: "Alle als gelesen markieren",
@@ -60,7 +59,6 @@ const COPY = {
   },
   ru: {
     title: "Мои уведомления",
-    description: "Визиты, документы, рекомендации, сервисы и счета в одном месте.",
     unread: "Непрочитанные",
     refresh: "Обновить",
     markAll: "Отметить все прочитанными",
@@ -214,7 +212,6 @@ export function PatientNotificationsPage() {
     <TabShell className="mt-0 w-full min-w-0 min-h-0 max-w-none space-y-3">
       <PageHeader
         title={copy.title}
-        description={copy.description}
         actions={
           <>
             <CountBadge>{copy.unread}: {unreadCount}</CountBadge>

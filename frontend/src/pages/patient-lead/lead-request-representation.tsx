@@ -696,10 +696,6 @@ function RepresentativeBlock({
   const locked = Boolean(person?.email_locked);
   // GMED entered the other parent's address: GMED changes it (owner 2026-10-23).
   const staffEmail = person?.email_locked_reason === "staff";
-  // The other parent gets an own access only when GMED invites them; nothing is linked by itself.
-  // Asked only while the address is still missing: not under one GMED entered (labels audit 2026-10-26, A9).
-  const inviteHint = minor && custody !== "guardian" && request.access_kind === "guardian" && !person?.mine && !locked
-    && !(person?.email ?? "").trim();
   const proof = authorityProofOf(slot, custody);
   const fieldId = (field: RepresentativeField) => `lead-request-${slot}_${field}`;
   // The other parent this login entered stays editable (QA 2026-10-23: the date of birth locked after the first save).
@@ -899,11 +895,6 @@ function RepresentativeBlock({
             {staffEmail && !hintsAbove && !form.errorFor("email") ? (
               <CabinetHint testId={`lead-request-${slot}-email-staff`}>
                 {text.representativeEmailStaff}
-              </CabinetHint>
-            ) : null}
-            {inviteHint ? (
-              <CabinetHint testId={`lead-request-${slot}-invite-hint`}>
-                {text.representativeOtherParentInvite}
               </CabinetHint>
             ) : null}
           </LabeledField>
@@ -1214,7 +1205,6 @@ export function RepresentationSection({
         </Button>
       ) : undefined}>
         <div className="space-y-3" data-testid="lead-request-representation">
-          {representation.document_stage === false && !showDocumentDetails ? <CabinetHint>{draft.custody === "guardian" ? text.parentShortFormIntroVormund : text.parentShortFormIntro}</CabinetHint> : null}
           {lockedByGmed ? <CabinetHint testId="lead-request-representation-locked">{text.representativeLockedByGmed}</CabinetHint> : null}
           <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-request-representation-name-hint">
             <CircleAlert aria-hidden="true" className="mt-[3px]" />

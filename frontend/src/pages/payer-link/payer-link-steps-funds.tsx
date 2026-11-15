@@ -311,10 +311,7 @@ export function FundsStep({
       </div>
 
       <Field context={context} field="funds_description">
-        <TextArea context={context} field="funds_description" describedBy="payer-link-funds_description-hint" />
-        <p id="payer-link-funds_description-hint" className="text-xs text-muted-foreground">
-          {text.fundsDescriptionHint}
-        </p>
+        <TextArea context={context} field="funds_description" />
       </Field>
 
       <UploadBlock

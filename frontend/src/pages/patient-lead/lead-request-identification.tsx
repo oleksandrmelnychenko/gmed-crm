@@ -49,7 +49,6 @@ import {
 } from "./lead-request-model";
 import {
   CabinetSection as Section,
-  CabinetHint,
   ConsentNeededNote,
   ConsentNoteAboveContext,
   LabeledField,
@@ -383,10 +382,6 @@ export function IdentityDocumentDataFields({
     ?? (field === "id_issued_on" && form.errorFor(field) ? dateRangeMessage(lang, form.draft.id_issued_on, issuedBounds) : undefined);
   return (
     <div className="space-y-3" data-testid="lead-request-identity-data">
-      <CabinetHint className="text-sm leading-6">
-        <p className="font-semibold text-foreground">{text.identityDataOptional}</p>
-        <p>{text.identityIntro}</p>
-      </CabinetHint>
       <div className="grid gap-3 sm:grid-cols-2">
         <IdentificationFormField form={form} field="id_document_type" text={text}>
           <IdentificationChoiceSelect form={form} field="id_document_type" options={text.idDocumentTypeOptions} text={text} />
@@ -537,7 +532,7 @@ export function IdentityDocumentSection({
             <RequiredMark />
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            {consentReady ? <StatusChip tone="warning">{request.minor ? text.childIdentityUploadHint : text.identityUploadHint}</StatusChip> : null}
+            {consentReady ? <StatusChip tone="warning">{text.identityUploadHint}</StatusChip> : null}
             <Button
               type="button"
               // The label is a sentence: on a phone it may wrap instead of widening the page.

@@ -437,11 +437,8 @@ export function BillingSections({
           ) : null}
           {asks("invoice_email") ? (
             <LabeledField {...labeled("invoice_email", "sm:max-w-[calc(50%-0.5rem)]")}>
-              {textInput("invoice_email", 254, "email", "lead-request-invoice_email-hint")}
+              {textInput("invoice_email", 254, "email")}
               {form.errorFor("invoice_email") ? null : <EmailDomainWarning email={draft.invoice_email} lang={lang} />}
-              <p id="lead-request-invoice_email-hint" className="text-xs leading-5 text-muted-foreground">
-                {text.invoiceEmailHint}
-              </p>
             </LabeledField>
           ) : null}
           {/* How the patient will pay, without the account (owner 2026-10-10): cash or

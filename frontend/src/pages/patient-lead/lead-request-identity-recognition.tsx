@@ -231,9 +231,7 @@ export function LeadRequestIdentityRecognition({
           ? `${words.running} ${words.file}: «${stateFile}»`
           : state.kind === "applied"
             ? `${words.applied} ${words.file}: «${stateFile}»`
-            : state.kind === "idle"
-              ? words.hint
-              : null}
+            : null}
       </p>
       {state.kind === "failed" ? (
         <p role="alert" className="text-xs font-medium text-destructive" data-testid={`${testId}-failed`}>
@@ -285,7 +283,6 @@ export function LeadRequestIdentityRecognition({
               </li>
             ))}
           </ul>
-          <p className="text-xs leading-5 text-muted-foreground">{words.authorityHint}</p>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" disabled={taken.length === 0} onClick={apply} data-testid={`${testId}-apply`}>
               {words.apply}

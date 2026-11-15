@@ -201,25 +201,6 @@ export function SendStep({
             </div>
           ) : null}
           <SentLockHint text={text} />
-          <Section compact icon={ListChecks} title={text.nextTitle}>
-            <ol className="space-y-1.5 text-sm" data-testid="lead-request-next-steps">
-              {/* "Nothing is needed meanwhile" only while no follow-up block is open (QA 2026-10-10). */}
-              {[
-                ...text.nextSteps,
-                ...(!followUpOpen ? [text.nextNothingRequired] : []),
-              ].map((item, index) => (
-                <li key={item} className="flex min-h-6 items-start gap-2.5">
-                  <span
-                    aria-hidden="true"
-                    className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--badge,var(--brand))] font-mono text-[11px] font-semibold text-[var(--badge-foreground,#fff)]"
-                  >
-                    {index + 1}
-                  </span>
-                  <span className="min-w-0 leading-6 text-foreground">{item}</span>
-                </li>
-              ))}
-            </ol>
-          </Section>
         </>
       ) : null}
       <Section icon={ClipboardCheck} title={sendable ? text.sendTitle : text.sentSummaryTitle}>

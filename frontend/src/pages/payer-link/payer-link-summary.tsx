@@ -461,10 +461,6 @@ export function ThankYou({
         </div>
       </div>
       {signature ? <SignatureStatus signature={signature} text={text} /> : null}
-      <div className="space-y-2 rounded-xl border border-border bg-muted/40 px-4 py-4 text-center text-sm leading-6 text-muted-foreground">
-        <p className="font-medium text-foreground">{text.completionClose}</p>
-        <p>{text.thanksNext}</p>
-      </div>
       <div className="flex justify-center border-t border-border pt-4">
         <Button type="button" variant="outline" className="h-auto min-h-9 whitespace-normal py-2" onClick={() => setViewAnswers(true)} data-testid="payer-link-view-submitted">
           <FileCheck2 aria-hidden="true" className="size-4 shrink-0" />

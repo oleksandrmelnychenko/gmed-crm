@@ -256,7 +256,7 @@ test.describe("Parent country follow-up", () => {
       await expect(identity.getByRole("heading", { name: text.childDocumentTitle, exact: true })).toBeVisible();
       await expect(identity).toContainText(text.childIdentityFiles);
       await expect(identity.getByRole("button", { name: text.childIdentityUploadButton, exact: true })).toBeVisible();
-      await expect(identity).toContainText(text.childIdentityUploadHint);
+      await expect(identity).toContainText(text.identityUploadHint);
       await step(page, "billing");
       await expect(page.getByRole("heading", { name: text.childSections.insurance, exact: true })).toBeVisible();
       await step(page, "documents");

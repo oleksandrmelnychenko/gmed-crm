@@ -503,7 +503,6 @@ function usePatientDocumentsPageContent() {
       <PageHeader
         pageAction={<Button onClick={() => dispatchDocumentsState({ uploadOpen: true })}><Upload className="size-4" />{t.portal_documents_upload_documents}</Button>}
         title={<SectionHeading icon={Files}>{t.portal_documents_my_documents}</SectionHeading>}
-        description={t.portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here}
         actions={
           <>
             {pending > 0 ? <CountBadge>

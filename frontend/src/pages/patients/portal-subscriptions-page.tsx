@@ -161,7 +161,6 @@ export function PatientSubscriptionsPage() {
     <div className="w-full min-w-0 space-y-3">
       <PageHeader
         title={t.portal_subscriptions_title}
-        description={t.portal_subscriptions_subtitle}
         actions={
           <>
 

@@ -1619,7 +1619,6 @@ export interface Translations
   services_error_cancel: string;
   services_loading: string;
   services_title: string;
-  services_description: string;
   services_open_requests: string;
   services_booked_or_in_service: string;
   services_completed: string;
@@ -1639,7 +1638,6 @@ export interface Translations
   services_created_at: string;
   services_cancel_request: string;
   services_request_title: string;
-  services_request_description: string;
   services_form_service_type: string;
   services_category: string;
   services_all_categories: string;

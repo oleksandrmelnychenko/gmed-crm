@@ -45,14 +45,14 @@ describe("consent form choices in the lead cabinet", () => {
     expect(markup).not.toContain('data-consent-option="channel_threema"');
     expect(markup).not.toContain('checked=""');
     expect(markup).not.toContain("Noch keine Auswahl gespeichert.");
-    expect(markup).toContain("ist nur angekreuzt, was Sie hier wählen.");
+    expect(markup).toContain("Wählen Sie selbst, wozu Sie einwilligen.");
+    expect(markup).not.toContain("ist nur angekreuzt, was Sie hier wählen.");
     // An empty choice is no consent: the three are marked with the `*` of every required field,
     // the word only for screen readers.
     expect(markup.match(/data-consent-required=""/g)).toHaveLength(3);
     expect(markup.match(/aria-required="true"/g)).toHaveLength(3);
     expect(markup).not.toMatch(/>\(erforderlich\)</);
-    expect(markup).toContain('data-testid="lead-request-consent-form-core-hint"');
-    expect(markup).toContain("Diese drei Einwilligungen brauchen wir für Ihre Anfrage.");
+    expect(markup).not.toContain('data-testid="lead-request-consent-form-core-hint"');
     expect(markup).not.toContain("lead-request-consent-form-save");
     // Every checkbox is named by its visible text, not by the value «on» (S1).
     expect(markup).toContain('aria-label="Meine Unterlagen dürfen im EDV-System von GMED gespeichert und verarbeitet werden."');
@@ -110,7 +110,7 @@ describe("consent form choices in the lead cabinet", () => {
     const parentWords = /meines Kindes|Ihres Kindes|Ihr Kind|Sorgeberechtigte|my child|My child|your child|parent|моего ребёнка|вашего ребёнка|родител|моєї дитини|вашої дитини|свою дитину|батьк/;
     for (const lang of ["de", "ru", "uk", "en"]) {
       const text = consentFormText(lang, true, true);
-      for (const value of [text.intro, ...Object.values(text.options), text.channelsTitle, text.coreHint, text.recipientsHint]) {
+      for (const value of [text.intro, ...Object.values(text.options), text.channelsTitle]) {
         expect(value, lang).not.toMatch(parentWords);
       }
     }

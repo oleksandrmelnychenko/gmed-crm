@@ -255,7 +255,6 @@ export function PatientRecommendationsPage() {
     <TabShell className="mt-0 min-h-0 space-y-3">
       <PageHeader
         title={t.portal_recommendations_title}
-        description={t.portal_recommendations_description}
         actions={
           <>
 

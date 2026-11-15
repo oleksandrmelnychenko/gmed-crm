@@ -940,7 +940,6 @@ export function OwnRepresentativeDocumentSection({
       <Section compact icon={IdCard} title={actsAsVormund(request) ? text.ownRepresentativeDocumentTitleVormund : text.ownRepresentativeDocumentTitle}>
         {me && slot ? (
           <div className="space-y-2">
-            <InfoNote>{text.ownRepresentativeDocumentHint}</InfoNote>
             <RepresentativeUpload
               request={request}
               slot={slot}
@@ -1008,7 +1007,6 @@ export function OtherParentDocumentSection({
       <Section compact icon={IdCard} title={vormund ? [text.representativeGuardianOfChild, name].filter(Boolean).join(": ") : byStaff ? text.parentDocumentTitle(name) : text.otherParentDocumentTitle(name)}>
         {person ? (
           <div className="space-y-2">
-            {vormund ? null : <InfoNote>{byStaff ? text.parentDocumentHint : text.otherParentDocumentHint}</InfoNote>}
             <RepresentativeUpload
               request={request}
               slot={slot}
@@ -1458,8 +1456,6 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     >
       {sent ? reasonSection : (
         <>
-          {/* Nothing here is required before the contract (QA 2026-10-24, A-1): said once, neutrally. */}
-          <p className="text-sm text-muted-foreground" data-testid="lead-request-documents-optional">{text.documentsOptional}</p>
           {consentSection}
           {reasonSection}
           {uploadSection}

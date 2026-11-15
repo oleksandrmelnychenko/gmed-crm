@@ -170,16 +170,6 @@ describe("the other parent's address (owner 2026-10-23)", () => {
     );
   }
 
-  it("tells the parent that GMED invites the other parent while the address is missing", () => {
-    const html = renderWith([mother, { ...father, email: null }]);
-    expect(html).toContain("lead-request-rep2-invite-hint");
-    expect(html).toContain("когда GMED пригласит его");
-    expect(html).not.toContain("lead-request-rep1-invite-hint");
-    expect(html).not.toContain("lead-request-rep2-email-staff");
-    // The address typed in: nothing more to ask for (labels audit 2026-10-26, A9).
-    expect(renderWith([mother, { ...father, email: "ben@example.com" }])).not.toContain("lead-request-rep2-invite-hint");
-  });
-
   it("shows the address GMED entered read-only, said once for the section", () => {
     const html = renderWith([mother, { ...father, email: "ben@example.com", email_locked: true, email_locked_reason: "staff" }]);
     // One line above the parents instead of a note per field (labels audit 2026-10-26, B6/A9).

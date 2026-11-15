@@ -1554,7 +1554,7 @@ test.describe("payer link", () => {
     });
     await expect.poll(() => calls.extracts).toBe(1);
     // The extract stands for the ID: the intro says so, nothing of the ID is missing.
-    await expect(page.getByTestId("payer-link-identity-intro")).toContainText("Die Angaben zum Ausweis sind daher freiwillig");
+    await expect(page.getByTestId("payer-link-identity-intro")).toContainText("Sie können diesen Schritt überspringen");
     expect(q.missing_for_submit.filter((key) => key.startsWith("id_"))).toEqual([]);
     // QA 2026-11-10: the file is listed as the register extract — not as a scan of the
     // representative's ID, and no document data are read from it.

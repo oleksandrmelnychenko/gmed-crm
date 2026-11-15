@@ -46,7 +46,6 @@ import {
 } from "./lead-request-model";
 import {
   CabinetSection as Section,
-  CabinetHint,
   ConsentNeededNote,
   LabeledField,
   RequiredMark,
@@ -614,7 +613,6 @@ export function InvoiceRecipientSection({
             >
               {textInput("email", 254, "email")}
               {errorFor("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
-              <CabinetHint>{text.invoiceEmailHint}</CabinetHint>
             </LabeledField>
           ) : null}
 

@@ -1741,8 +1741,6 @@ export const ru = {
   services_error_cancel: "Не удалось отменить сервисный запрос.",
   services_loading: "Загрузка дополнительных сервисов...",
   services_title: "Мои дополнительные сервисы",
-  services_description:
-    "Запрашивайте поездки, отели, трансферы и другие консьерж-сервисы и отслеживайте, как команда сопровождения их обрабатывает.",
   services_open_requests: "Открытые запросы",
   services_booked_or_in_service: "Забронировано или в работе",
   services_completed: "Завершенные сервисы",
@@ -1764,8 +1762,6 @@ export const ru = {
   services_created_at: "Создано",
   services_cancel_request: "Отменить запрос",
   services_request_title: "Запросить сервис",
-  services_request_description:
-    "Опишите здесь, какой сервис вам нужен. Ваша команда GMED рассмотрит запрос, займётся бронированием и свяжется с вами.",
   services_form_service_type: "Тип сервиса",
   services_category: "Категория сервиса",
   services_all_categories: "Все категории сервиса",

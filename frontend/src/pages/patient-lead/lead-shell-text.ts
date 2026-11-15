@@ -26,7 +26,6 @@ export interface LeadShellText {
     /** Above the list of the portal's areas (the one entry "what comes after your request"). */
     featuresIntro: string;
     locked: string;
-    explanation: string;
     disclaimer: string;
     request: string;
     forRequest: string;
@@ -106,8 +105,6 @@ const de: LeadShellText = {
     title: "Patientenbereich",
     featuresIntro: "Nach der Aufnahme als Patient finden Sie hier:",
     locked: "Dieser Bereich ist noch gesperrt.",
-    explanation:
-      "Er wird nach der Aufnahme als Patient und der Freigabe des Zugangs verfügbar. Sie können GMED jetzt Ihr Interesse an einem Paket mitteilen.",
     disclaimer: "Die Anfrage aktiviert kein Paket und schaltet diesen Bereich nicht frei.",
     request: "Anfrage auswählen",
     forRequest: "Für die Anfrage",
@@ -154,8 +151,6 @@ const ru: LeadShellText = {
     title: "Раздел пациента",
     featuresIntro: "После оформления пациента здесь будут:",
     locked: "Этот раздел пока закрыт.",
-    explanation:
-      "Он станет доступен после оформления пациента и подтверждения доступа. Сейчас можно сообщить GMED о желании оформить пакет.",
     disclaimer: "Запрос не активирует пакет и не открывает этот раздел.",
     request: "Выберите заявку",
     forRequest: "Для заявки",
@@ -202,8 +197,6 @@ const uk: LeadShellText = {
     title: "Розділ пацієнта",
     featuresIntro: "Після оформлення як пацієнта тут будуть:",
     locked: "Цей розділ поки заблоковано.",
-    explanation:
-      "Він стане доступним після оформлення як пацієнта та надання доступу. Ви можете вже зараз повідомити GMED про свій інтерес до пакета.",
     disclaimer: "Запит не активує пакет і не відкриває цей розділ.",
     request: "Виберіть заявку",
     forRequest: "Для заявки",
@@ -250,8 +243,6 @@ const en: LeadShellText = {
     title: "Patient area",
     featuresIntro: "Once you are admitted as a patient, you will find here:",
     locked: "This area is still locked.",
-    explanation:
-      "It becomes available once you are admitted as a patient and your access has been released. You can let GMED know now which package you are interested in.",
     disclaimer: "The request does not activate a package and does not unlock this area.",
     request: "Select a request",
     forRequest: "For the request",

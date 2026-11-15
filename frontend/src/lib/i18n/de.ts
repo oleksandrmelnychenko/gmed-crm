@@ -1751,8 +1751,6 @@ export const de = {
   services_error_cancel: "Serviceanfrage konnte nicht storniert werden.",
   services_loading: "Zusatzservices werden geladen...",
   services_title: "Meine Zusatzservices",
-  services_description:
-    "Fordern Sie Reise-, Hotel-, Transfer- oder andere Concierge-Unterstützung an und verfolgen Sie die Bearbeitung durch das Betreuungsteam.",
   services_open_requests: "Offene Anfragen",
   services_booked_or_in_service: "Gebucht oder in Bearbeitung",
   services_completed: "Abgeschlossene Services",
@@ -1774,8 +1772,6 @@ export const de = {
   services_created_at: "Erstellt",
   services_cancel_request: "Anfrage stornieren",
   services_request_title: "Service anfragen",
-  services_request_description:
-    "Beschreiben Sie hier, welchen Service Sie wünschen. Ihr GMED-Team prüft die Anfrage, kümmert sich um die Buchung und meldet sich bei Ihnen.",
   services_form_service_type: "Servicetyp",
   services_category: "Service-Kategorie",
   services_all_categories: "Alle Service-Kategorien",

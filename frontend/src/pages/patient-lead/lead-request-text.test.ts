@@ -56,9 +56,6 @@ describe("a child's cabinet by who signs in (QA 2026-10-24)", () => {
       expect(guardianCabinetTitle(text, vormundLogin, "Mia")).not.toContain(text.titleGuardian);
       expect(hasInsuranceLabel(text, vormundLogin)).toBe(text.hasInsuranceVormund);
       expect(hasInsuranceLabel(text, parentLogin)).toBe(text.hasInsuranceGuardian);
-      // One short sentence that fits parents and a guardian alike (labels audit 2026-10-26, A8/B5).
-      expect(text.parentShortFormIntroVormund).not.toMatch(/gespeichert|сохранён|збережені|saved/i);
-      expect(text.parentShortFormIntro.split(/[.!?]\s/)).toHaveLength(1);
     }
     expect(submitFieldLabel(de, "has_insurance", true, null, true, { custody: "guardian" })).toBe("Hat das Kind eine Krankenversicherung?");
   });
@@ -142,7 +139,7 @@ describe("lead cabinet languages", () => {
   it("names the legal questions neutrally: no money-laundering law in a heading the lead reads", () => {
     for (const lang of ["de", "en", "uk", "ru"] as const) {
       const text = leadRequestText(lang);
-      for (const words of [text.followUpBlocks.L, text.sectionLegal, text.legalIntro]) {
+      for (const words of [text.followUpBlocks.L, text.sectionLegal]) {
         expect(words).not.toMatch(/geldwäsche|gwg|laundering|отмыван|відмиван|pep|sanktion|sanction|санкц/i);
       }
     }
@@ -342,12 +339,6 @@ describe("lead cabinet languages", () => {
       "Будь ласка, доповніть ще деякі відомості.",
       "Пожалуйста, дополните ещё некоторые сведения.",
     ]);
-    // "Nothing is needed meanwhile" stands apart: it is left out while blocks are open.
-    for (const option of LEAD_CABINET_LANGS) {
-      const text = leadRequestText(option.value);
-      expect(text.nextSteps.join(" "), option.value).not.toContain(text.nextNothingRequired);
-      expect(text.nextAfterChange, option.value).not.toContain(text.nextNothingRequired);
-    }
     // One thank-you only (QA 2026-10-10), without the review notice: "what happens next" says it (owner 2026-10-22).
     expect(
       LEAD_CABINET_LANGS.map((option) => {
@@ -362,17 +353,16 @@ describe("lead cabinet languages", () => {
     ]);
     // Introductory copy for the extra questions before sending.
     expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).followUpBeforeSubmitIntro)).toEqual([
-      "Bei internationalen Aufträgen dokumentieren wir die Herkunft der Zahlung. Wir stützen uns dabei auf die geltenden Vorschriften zur Verhinderung von Geldwäsche und die EU-Sanktionsregelungen, die für jedes Unternehmen gelten, sowie auf unsere interne Compliance-Richtlinie. Das Verfahren ist für alle Aufträge einheitlich und keine persönliche Bewertung. Ihre Angaben werden streng vertraulich behandelt und nur zu diesem Zweck verwendet.",
-      "For your request we need a few more details. Your answers are saved automatically.",
-      "Для вашого запиту нам потрібні ще деякі додаткові відомості. Відповіді зберігаються автоматично.",
-      "При международных заказах мы документируем происхождение платежа. Мы опираемся на действующие нормы о предотвращении отмывания денег и санкционные правила ЕС, обязательные для любой компании, а также на нашу внутреннюю политику комплаенса. Процедура единая для всех заказов и не является личной оценкой. Ваши данные строго конфиденциальны и используются только для этой цели.",
+      "Bei internationalen Aufträgen dokumentieren wir die Herkunft der Zahlung – einheitlich für alle Aufträge und ohne persönliche Bewertung.",
+      "For international orders we document the origin of the payment – the same for every order and with no personal assessment.",
+      "Під час міжнародних замовлень ми документуємо походження платежу — однаково для всіх замовлень і без особистої оцінки.",
+      "При международных заказах мы документируем происхождение платежа — одинаково для всех заказов и без личной оценки.",
     ]);
     // No text of the follow-up speaks of points, levels, triggers, risk or a decision (P2).
     const risk = /risiko|risk|punkt|point|stufe|level|trigger|abgelehnt|reject|ризик|риск|бал/i;
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
       const words = [
-        text.followUpIntro,
         text.followUpOpen,
         text.followUpIncomplete,
         text.followUpAnsweredAt("07.10.2026 10:00"),
@@ -485,12 +475,6 @@ describe("lead cabinet languages", () => {
   });
 
   it("asks who pays without a filler sentence and names an organisation's seat", () => {
-    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).payerIntro)).toEqual([
-      "Bitte nennen Sie, wer die Kosten übernimmt.",
-      "Please tell us who pays for the services.",
-      "Вкажіть, будь ласка, хто оплачує послуги.",
-      "Укажите, пожалуйста, кто оплачивает услуги.",
-    ]);
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
       expect(text.payerSeat, option.value).not.toBe(text.payerResidence);
@@ -578,7 +562,6 @@ describe("lead cabinet languages", () => {
       const text = leadRequestText(option.value);
       const words = [
         text.payerQuestion,
-        text.payerIntro,
         text.payerConsentLabel,
         text.payerConsentLabelGuardian,
         text.payerCostEstimateConsentLabel,

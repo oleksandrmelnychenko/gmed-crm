@@ -243,16 +243,11 @@ function PayerQuestionnaireForm({
   const ownLegalRef = useRef(ownLegalAnswers);
   ownLegalRef.current = ownLegalAnswers;
   const legalTakenOver = useRef(false);
-  const [legalPrefilled, setLegalPrefilled] = useState(false);
   const writable = acknowledged && !submitted;
   useEffect(() => {
     if (legalTakenOver.current || !writable) return;
     legalTakenOver.current = true;
-    setDraft((current) => {
-      const next = withRepresentativeLegalAnswers(current, ownLegalRef.current);
-      if (next !== current) setLegalPrefilled(true);
-      return next;
-    });
+    setDraft((current) => withRepresentativeLegalAnswers(current, ownLegalRef.current));
   }, [writable]);
   const [channels, setChannels] = useState<string[]>(() => questionnaire.privacy.contact_channels);
   const [noticeBusy, setNoticeBusy] = useState(false);
@@ -691,9 +686,6 @@ function PayerQuestionnaireForm({
           ) : null}
 
           <div className="space-y-3" data-testid="lead-request-payer-legal">
-            {legalPrefilled ? (
-              <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-payer-legal-prefilled">{text.payerLegalPrefilled}</p>
-            ) : null}
             {PAYER_LEGAL_QUESTIONS.map((question) => {
               const details = PAYER_LEGAL_DETAILS[question];
               return (

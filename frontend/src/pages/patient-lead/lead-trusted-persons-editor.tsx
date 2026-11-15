@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarDays, Flag, Info, Mail, Phone, Plus, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Flag, Mail, Phone, Plus, Trash2, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect, citizenshipFieldLabel } from "@/components/ui/citizenship-multi-select";
 import { countryLabel } from "@/components/ui/country-select";
@@ -61,23 +61,6 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
       </li>;
     })}
   </ul>;
-}
-
-/**
- * The (i) beside the phone label: why GMED asks for the number (owner 2026-10-26). A toggle button
- * with the explanation right below the label, so it never leaves a phone screen; Escape closes it.
- */
-function PhoneInfo({ index, label, info }: { index: number; label: string; info: string }) {
-  const [open, setOpen] = useState(false);
-  const id = `trusted-person-phone-info-${index}`;
-  return <>
-    <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      aria-label={label} title={label} aria-expanded={open} aria-controls={id} data-testid="trusted-person-phone-info"
-      onClick={() => setOpen((current) => !current)} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}>
-      <Info aria-hidden="true" className="size-3.5" />
-    </button>
-    {open ? <p id={id} role="note" className="basis-full rounded-lg border border-border/70 bg-muted/40 px-3 py-2 leading-5 text-foreground" data-testid="trusted-person-phone-info-text">{info}</p> : null}
-  </>;
 }
 
 /**
@@ -157,10 +140,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         {message("relation", problems, index)}
       </label>
       <div className="min-w-0 space-y-1.5 text-xs">
-        <div className="flex flex-wrap items-start gap-x-1.5 gap-y-1.5">
-          <label htmlFor={`trusted-person-phone-${index}`} className="min-w-0 flex-1 font-mono font-medium leading-5 text-foreground/75">{fields.phone}</label>
-          <PhoneInfo index={index} label={fields.phoneInfoLabel} info={fields.phoneInfo} />
-        </div>
+        <label htmlFor={`trusted-person-phone-${index}`} className="block font-mono font-medium leading-5 text-foreground/75">{fields.phone}</label>
         <Input id={`trusted-person-phone-${index}`} className={inputClass} type="tel" inputMode="tel" value={person.phone} maxLength={40} disabled={disabled} autoComplete="off" required
           aria-invalid={problems.has("phone") || undefined} aria-describedby={[describedBy("phone"), legacyContact ? `trusted-person-contact-${index}` : null].filter(Boolean).join(" ") || undefined}
           data-testid="trusted-person-phone"
@@ -200,7 +180,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         </div>
         {person.scopeCodes.length === 0 && person.scope.trim()
           ? <p className="text-amber-700 dark:text-amber-400" data-testid="trusted-person-scope-legacy">{fields.scopeLegacy(person.scope.trim())}</p>
-          : message("scope", problems, index) ?? <p className="text-muted-foreground">{fields.scopeHint}</p>}
+          : message("scope", problems, index)}
       </fieldset>
       </div>
     </div>;

@@ -115,7 +115,6 @@ describe("scope selector", () => {
     for (const code of CONSENT_RECIPIENT_SCOPES) expect(scopeOptionLabel(code, lang)).toBeTruthy();
     expect(cabinetScopeSummary(["organisational", "medical"], lang)).toContain(", ");
     const html = renderToStaticMarkup(<TrustedPersonsEditor persons={[friend]} lang={lang} onChange={() => undefined} />);
-    expect(html).toContain(trustedPersonsText(lang).scopeHint);
     expect(html).toContain(cabinetScopeSummary(["medical"], lang));
   });
   it("shows the localized labels in the staff app", () => {
@@ -275,14 +274,12 @@ describe("trusted persons independent of consent", () => {
     expect(html).toContain(trustedPersonsText("de").birthDateRequired);
   });
 
-  it.each(["de", "en", "uk", "ru"])("renders the phone with its (i) explanation, the date of birth and the scope checkboxes in %s", (lang) => {
+  it.each(["de", "en", "uk", "ru"])("renders the phone without an (i) explanation, the date of birth and the scope checkboxes in %s", (lang) => {
     const copy = trustedPersonsText(lang);
-    for (const key of ["phone", "phoneInfo", "phoneInfoLabel", "phoneRequired", "birthDate", "birthDateRequired", "withdraw", "removePerson", "lockedDecision"] as const) expect(copy[key]).toBeTruthy();
+    for (const key of ["phone", "phoneRequired", "birthDate", "birthDateRequired", "withdraw", "removePerson", "lockedDecision"] as const) expect(copy[key]).toBeTruthy();
     const html = renderToStaticMarkup(<TrustedPersonsEditor persons={[{ ...friend, scopeCodes: ["all"] }]} lang={lang} onChange={() => undefined} />);
     expect(html).toContain(copy.phone);
-    expect(html).toContain('data-testid="trusted-person-phone-info"');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('aria-label="' + copy.phoneInfoLabel + '"');
+    expect(html).not.toContain('data-testid="trusted-person-phone-info"');
     expect(html).toContain('data-testid="trusted-person-birth-date"');
     expect(html).toContain('type="tel"');
     for (const code of CONSENT_RECIPIENT_SCOPES) {

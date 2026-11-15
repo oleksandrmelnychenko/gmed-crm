@@ -137,7 +137,7 @@ export function LeadPortalPlanDialog({ lang, moduleId, moduleLabel, features, on
         </AdminFormSection> : null}
         <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <div className="space-y-1"><p>{text.explanation}</p><p className="font-semibold">{text.disclaimer}</p></div>
+          <p>{text.disclaimer}</p>
         </div>
         {choices.length ? <AdminFormSection title={text.forRequest} className={cn("p-3", choices.length === 1 && "flex flex-wrap items-center gap-x-3 gap-y-2 space-y-0")}>
           {choices.length > 1 ? <div className="space-y-1.5">

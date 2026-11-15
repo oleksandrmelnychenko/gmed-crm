@@ -687,8 +687,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "identity");
     await expect(identity.getByTestId("lead-request-step-missing")).toContainText("Ausweisdokument: Foto oder Scan des Ausweises");
     await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveText("1");
-    // The lead may type the data of the own document under the copy (owner 2026-11-10).
-    await expect(page.getByTestId("lead-request-identity-data")).toContainText("Tragen Sie darunter die Angaben aus dem Dokument ein");
+    // The lead may type the data of the own document under the copy (owner 2026-11-10), without an intro (owner 2026-11-15).
+    await expect(page.getByTestId("lead-request-identity-data")).not.toContainText("Diese Angaben sind jetzt optional");
     await expect(page.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(1);
     await expect(page.getByRole("textbox", { name: "Dokumentnummer" })).toHaveCount(1);
     await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(1);
@@ -803,10 +803,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await tab(page, "send").click();
     await expect(page.getByTestId("lead-request-follow-up-open")).toContainText("Bitte ergänzen Sie noch einige Angaben.");
     await expect(page.getByTestId("lead-request-follow-up-open")).not.toContainText("Wir benötigen");
-    // Sent is sent (owner 2026-10-27): no "change and send again" line; the open block is the only pointer.
-    await expect(page.getByTestId("lead-request-next-steps")).toContainText("Wir melden uns bei Ihnen");
-    await expect(page.getByTestId("lead-request-next-steps")).not.toContainText("senden Sie sie erneut");
-    await expect(page.getByTestId("lead-request-next-steps")).not.toContainText("Bis dahin müssen Sie nichts weiter tun.");
+    // No "what happens next" list any more (owner 2026-11-15): the open block is the only pointer.
+    await expect(page.getByTestId("lead-request-next-steps")).toHaveCount(0);
     await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveCount(0);
     await page.getByTestId("lead-request-follow-up-open").getByRole("button").click();
     await expect(followUp).toBeVisible();
@@ -846,7 +844,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveCount(0);
 
     await page.getByTestId("lead-request-follow-up-submit").click();
-    await expect(page.getByTestId("lead-request-follow-up-answered")).toContainText("Ihre Angaben werden geprüft.");
+    await expect(page.getByTestId("lead-request-follow-up-answered")).toContainText("gesendet.");
+    await expect(page.getByTestId("lead-request-follow-up-answered")).not.toContainText("Ihre Angaben werden geprüft.");
     // No "please complete and send" above the confirmation that it was sent.
     await expect(page.getByTestId("lead-request-follow-up-explanation")).toHaveCount(0);
     expect(calls.followUpSubmits).toBe(2);
@@ -1013,8 +1012,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const order = await followUp
       .locator(':scope > div[data-testid^="lead-request-follow-up-"]')
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
-    // The explanation stands above the blocks (owner UI polish 323f8bac).
-    expect(order).toEqual(["lead-request-follow-up-explanation", "lead-request-follow-up-K", "lead-request-follow-up-L", "lead-request-follow-up-A"]);
+    // No filler intro above the blocks after the first send (owner 2026-11-15).
+    expect(order).toEqual(["lead-request-follow-up-K", "lead-request-follow-up-L", "lead-request-follow-up-A"]);
 
     // Block K: birth name, place and country of birth (no longer in the first step).
     const blockK = page.getByTestId("lead-request-follow-up-K");

@@ -199,23 +199,14 @@ test("automatic save keeps failed drafts; Next retries and reload restores decis
   await expect(row.getByTestId("trusted-person-scope-all")).not.toBeChecked();
 });
 
-test("the phone explains itself behind (i); an institution has no date of birth; a server refusal marks its field", async ({ page }) => {
+test("the phone has no (i) explanation; an institution has no date of birth; a server refusal marks its field", async ({ page }) => {
   const { calls } = await setup(page, { failSave: { code: "consent_recipients_invalid", field: "birth_date", index: 0 } });
   await page.getByTestId("disclosure-yes").check();
   await page.getByTestId("trusted-person-add").click();
   const row = page.getByTestId("trusted-person-editor");
   await expect(row.getByText("Phone number this person will call us from", { exact: true })).toBeVisible();
-  const info = row.getByTestId("trusted-person-phone-info");
-  await expect(info).toHaveAttribute("aria-expanded", "false");
-  await expect(row.getByTestId("trusted-person-phone-info-text")).toHaveCount(0);
-  await info.focus();
-  await page.keyboard.press("Enter");
-  await expect(info).toHaveAttribute("aria-expanded", "true");
-  await expect(row.getByTestId("trusted-person-phone-info-text")).toHaveText(
-    "We give information on the phone only if the person calls from this number and states their date of birth. This way we make sure we are talking to the right person.",
-  );
-  await page.keyboard.press("Escape");
-  await expect(row.getByTestId("trusted-person-phone-info-text")).toHaveCount(0);
+  // Owner 2026-11-15: no (i) explanation beside the phone.
+  await expect(row.getByTestId("trusted-person-phone-info")).toHaveCount(0);
   // A clinic: phone yes, date of birth no.
   await row.getByLabel("Last name, first name").fill("Klinik Nord");
   await row.getByRole("combobox").first().click();
@@ -499,8 +490,6 @@ for (const width of [1440, 390]) {
     await setup(page, { requests: [item], lang: "ru" });
     await expect(page.getByTestId("trusted-persons-editor")).toBeVisible();
     await expect(page.getByTestId("trusted-person-editor")).toHaveCount(3);
-    await page.getByTestId("trusted-person-phone-info").first().click();
-    await expect(page.getByTestId("trusted-person-phone-info-text")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: `../.tmp/third-party-disclosure-20261026/disclosure-${width}.png`, fullPage: true });
     await page.getByRole("button", { name: "Далее", exact: true }).scrollIntoViewIfNeeded();

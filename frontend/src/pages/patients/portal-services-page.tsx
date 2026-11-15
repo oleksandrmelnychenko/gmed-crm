@@ -203,7 +203,6 @@ function PatientServicesRequestSection({
   return (
     <AdminDialogScaffold
       title={t.services_request_title}
-      description={t.services_request_description}
       bodyClassName="bg-card [&_label]:font-mono [&_label]:text-xs"
       onSubmit={(event) => void onSubmit(event)}
       footer={
@@ -572,7 +571,6 @@ export function PatientServicesPage() {
           </Button>
         ) : <Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>}
         title={t.services_title}
-        description={t.services_description}
         actions={
           <Button
             variant="default"

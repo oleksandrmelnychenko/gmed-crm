@@ -345,10 +345,10 @@ export function FollowUpStep({
         </p>
       ) : null}
       {/* Answered and unchanged: "please complete and send" would contradict the confirmation below. */}
-      {answered && answeredAt && !beforeSubmit ? null : (
+      {(answered && answeredAt && !beforeSubmit) || (!beforeSubmit && !subjectName) ? null : (
         <CabinetHint testId="lead-request-follow-up-explanation">
-          {beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}
-          {subjectName ? <span className="mt-1 block font-medium" data-testid="lead-request-follow-up-subject">{text.followUpAboutPerson(subjectName)}</span> : null}
+          {beforeSubmit ? text.followUpBeforeSubmitIntro : null}
+          {subjectName ? <span className={cn("block font-medium", beforeSubmit && "mt-1")} data-testid="lead-request-follow-up-subject">{text.followUpAboutPerson(subjectName)}</span> : null}
         </CabinetHint>
       )}
       {answered && answeredAt ? (

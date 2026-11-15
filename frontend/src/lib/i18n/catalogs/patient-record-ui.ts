@@ -153,7 +153,7 @@ export const patientRecordUiDe = {
   // Patient portal: consents and contracts get their own document chip.
   "portal_documents_category_consents": "Einwilligungen & Verträge",
   // Patient portal: a missing consent is signed, not uploaded.
-  "portal_documents_consent_sent_by_gmed": "Einwilligungen (Einverständniserklärung, Schweigepflichtentbindung) schickt Ihnen GMED zur Unterschrift – elektronisch per E-Mail oder auf Papier. Hochladen müssen Sie sie hier nicht; bei Fragen hilft Ihr Betreuungsteam.",
+  "portal_documents_consent_sent_by_gmed": "Einwilligungen schickt Ihnen GMED zur Unterschrift – hochladen müssen Sie sie hier nicht.",
   // Legal status: "Compliance completed" switched off by a revocation.
   "patient_legal_compliance_reopened": "Zurückgesetzt: {items} am {date} widerrufen",
   "patient_legal_compliance_blocked": "Erst nach einer neu unterschriebenen Einwilligung möglich: {items} am {date} widerrufen",
@@ -307,7 +307,7 @@ export const patientRecordUiRu = {
   "consents_revoke_cancel": "Отмена",
   "consents_revoke_confirm": "Зафиксировать отзыв",
   "portal_documents_category_consents": "Согласия и договоры",
-  "portal_documents_consent_sent_by_gmed": "Согласия (согласие на обработку данных, освобождение от врачебной тайны) GMED пришлёт вам на подпись — электронно по e-mail или на бумаге. Загружать их здесь не нужно; с вопросами обращайтесь к вашей команде сопровождения.",
+  "portal_documents_consent_sent_by_gmed": "Согласия GMED пришлёт вам на подпись — загружать их здесь не нужно.",
   "patient_legal_compliance_reopened": "Снято: {items} — отзыв {date}",
   "patient_legal_compliance_blocked": "Можно отметить только после нового подписанного согласия: {items} — отзыв {date}",
   "patient_legal_compliance_item_dsgvo": "согласие DSGVO",

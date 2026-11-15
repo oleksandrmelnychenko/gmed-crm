@@ -984,13 +984,18 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "person");
     await expect(person.getByTestId("lead-request-step-missing")).toContainText("Geburtsdatum");
 
-    // The address is part of the first step (owner 2026-10-09), saved on its own.
+    // The address is part of the first step (owner 2026-10-09), saved on its own. The city may
+    // go out in a patch of its own before the other two fields (debounce), so the patches since
+    // the first keystroke are merged.
+    const addressFrom = calls.personalData.length;
     await page.locator("#lead-request-city").fill("Berlin");
     await page.locator("#lead-request-zip_code").fill("10115");
     await page.locator("#lead-request-street_address").fill("Musterstraße 1");
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
-    expect(calls.personalData.at(-1)).toMatchObject({ city: "Berlin", zip_code: "10115", street_address: "Musterstraße 1" });
-    expect(Object.keys(calls.personalData.at(-1) ?? {})).not.toContain("first_name");
+    await expect
+      .poll(() => Object.assign({}, ...calls.personalData.slice(addressFrom)))
+      .toMatchObject({ city: "Berlin", zip_code: "10115", street_address: "Musterstraße 1" });
+    for (const patch of calls.personalData.slice(addressFrom)) expect(Object.keys(patch)).not.toContain("first_name");
 
     // "Anliegen & Unterlagen": the medical documents after the Art. 9 consent.
     await step(page, "documents");
@@ -1079,7 +1084,7 @@ test.describe("lead cabinet", () => {
     await expect(payer.getByRole("combobox", { name: "Handeln Sie im eigenen wirtschaftlichen Interesse?" })).toHaveCount(0);
 
     // The invoice goes to the patient; the payment route is no question of the base form any more.
-    await page.getByTestId("lead-request-billing").getByRole("radio", { name: "Auf meinen Namen", exact: true }).check();
+    await page.getByTestId("lead-request-billing").getByRole("radio", { name: "Ich", exact: true }).check();
     await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_to: "self" });
     await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
 
@@ -1107,9 +1112,9 @@ test.describe("lead cabinet", () => {
     expect(calls.submits).toBe(1);
     expect(calls.submitBodies).toEqual([{ declared_correct: true }]);
 
-    // Sent: the page says what happens next and offers nothing to send. The
+    // Sent: nothing to send and no "what happens next" list (owner 2026-11-15). The
     // confirmation given with the sending is shown, not asked again.
-    await expect(page.getByTestId("lead-request-next-steps")).toContainText("Ihre Ansprechperson prüft");
+    await expect(page.getByTestId("lead-request-next-steps")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Das haben wir erhalten" })).toBeVisible();
     await expect(send).toHaveCount(0);
     await expect(page.getByTestId("lead-request-changed")).toHaveCount(0);
@@ -1121,7 +1126,7 @@ test.describe("lead cabinet", () => {
     // Sent (owner 2026-10-26): the form is read-only with one hint; documents are added
     // without sending again; «Abschließen und abmelden» signs out with a thank-you.
     await expect(page.getByTestId("lead-request-sent-locked")).toContainText(
-      "Ihre Anfrage ist bei GMED. Möchten Sie etwas ändern? Schreiben Sie Ihrem Kontakt bei GMED oder rufen Sie an.",
+      "Für Änderungen schreiben Sie Ihrem Kontakt bei GMED oder rufen Sie an.",
     );
     await expect(page.getByRole("button", { name: "Angaben ändern" })).toHaveCount(0);
     await step(page, "billing");
@@ -1131,7 +1136,7 @@ test.describe("lead cabinet", () => {
     await step(page, "documents");
     await expect(page.getByRole("textbox", { name: "Grund der Anfrage" })).toBeDisabled();
     await expect(page.getByTestId("lead-request-add-documents")).toHaveText("Dokumente nachreichen");
-    await expect(page.getByTestId("lead-request-add-documents-note")).toContainText("ein erneutes Senden ist nicht nötig");
+    await expect(page.getByTestId("lead-request-add-documents-note")).toHaveText("Nachreichen können Sie nur medizinische Unterlagen.");
     const uploadsBefore = calls.uploads;
     await page.locator("#lead-request-files").setInputFiles({
       name: "nachtrag.pdf",
@@ -1173,7 +1178,7 @@ test.describe("lead cabinet", () => {
     // An empty or partial choice is no consent (QA 2026-10-12, A2-02): saving waits for the three
     // consents the service runs on.
     await expect(save).toHaveCount(0);
-    await expect(page.getByTestId("lead-request-consent-form-core-hint")).toBeVisible();
+    await expect(page.getByTestId("lead-request-consent-form-core-hint")).toHaveCount(0);
     await block.getByRole("checkbox", { name: /behandelnden Ärzte/ }).check();
     await block.getByRole("checkbox", { name: "WhatsApp", exact: true }).check();
     await expect(save).toHaveCount(0);
@@ -1965,7 +1970,7 @@ test.describe("lead cabinet", () => {
     const list = page.getByTestId("lead-request-identity-list");
 
     // The lead may type the data of the own document under the copy (owner 2026-11-10).
-    await expect(page.getByTestId("lead-request-identity-data")).toContainText("Diese Angaben sind jetzt optional");
+    await expect(page.getByTestId("lead-request-identity-data")).not.toContainText("Diese Angaben sind jetzt optional");
     await expect(page.locator("#lead-request-id_document_type")).toHaveCount(1);
     await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(1);
     // Like the health consent before the medical documents: no consent, no upload.
@@ -2002,7 +2007,7 @@ test.describe("lead cabinet", () => {
     const recognition = page.getByTestId("lead-request-recognition-run");
     await recognition.scrollIntoViewIfNeeded();
     await expect(recognition).toBeVisible();
-    await expect(page.getByTestId("lead-request-identity-data").getByRole("note")).toBeVisible();
+    await expect(page.getByTestId("lead-request-identity-data").getByRole("note")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("identity-optional-mobile.png") });
     await page.getByRole("button", { name: "Weiter", exact: true }).click();
     await expect(page.getByTestId("lead-request-step-billing")).toBeVisible();
