@@ -32,6 +32,16 @@ pub(super) const SERVICE_OTHER_ORDER: &str = "concierge_service_other_order";
 pub(super) const SERVICE_OTHER_CURRENCY: &str = "concierge_service_other_currency";
 /// No active default tax profile gives the VAT of the line.
 pub(super) const NO_DEFAULT_TAX_PROFILE: &str = "concierge_service_no_tax_profile";
+/// A live invoice already re-bills a receipt of the service at cost (QA D-02).
+pub(super) const SERVICE_BILLED_BY_RECEIPT: &str = "concierge_service_billed_by_receipt";
+/// The same draft would bill the service and re-bill its receipt (QA D-02).
+pub(super) const SERVICE_WITH_ITS_RECEIPT: &str = "concierge_service_with_its_receipt";
+/// A live invoice already bills the service of the receipt at its sale price.
+pub(super) const RECEIPT_SERVICE_BILLED: &str = "concierge_receipt_service_billed";
+/// The release is refused: the draft bills a concierge service both ways.
+pub(super) const RELEASE_BILLED_TWICE: &str = "invoice_bills_concierge_service_twice";
+/// Constraint name of the database guard (migration 20261115120000).
+pub(super) const BILLED_ONCE_CONSTRAINT: &str = "concierge_service_billed_once";
 /// The release is refused: a billed service changed after the draft was made.
 pub(super) const RELEASE_BLOCKED: &str = "invoice_bills_changed_concierge_service";
 
@@ -56,6 +66,10 @@ pub(super) struct ServiceFacts<'a> {
     pub service_order_id: Option<Uuid>,
     pub service_currency: &'a str,
     pub already_invoiced: bool,
+    /// A live invoice re-bills a receipt of the service at cost.
+    pub receipt_rebilled: bool,
+    /// A receipt of the service is chosen for the same draft.
+    pub receipt_selected: bool,
 }
 
 /// Why a service cannot go on this draft, `None` when it can.
@@ -69,6 +83,13 @@ pub(super) fn refusal(
     }
     if facts.already_invoiced {
         return Some(SERVICE_ALREADY_INVOICED);
+    }
+    // One billing path per concierge cost (owner 2026-11-12, QA D-02).
+    if facts.receipt_rebilled {
+        return Some(SERVICE_BILLED_BY_RECEIPT);
+    }
+    if facts.receipt_selected {
+        return Some(SERVICE_WITH_ITS_RECEIPT);
     }
     if facts.quantity <= Decimal::ZERO
         || facts.unit_price.is_none_or(|price| price <= Decimal::ZERO)
@@ -92,6 +113,8 @@ fn refusal_message(code: &str) -> &'static str {
     match code {
         SERVICE_NOT_READY => "The concierge service is not ready for billing",
         SERVICE_ALREADY_INVOICED => "The concierge service is already billed by another invoice",
+        SERVICE_BILLED_BY_RECEIPT => "The concierge service is already billed through its receipt",
+        SERVICE_WITH_ITS_RECEIPT => "Choose the concierge service or its receipt, not both",
         SERVICE_WITHOUT_PRICE => {
             "The concierge service has no sale price; set it on the service first"
         }
@@ -114,6 +137,36 @@ fn refused(code: &'static str, title: &str) -> axum::response::Response {
         code,
         refusal_message(code),
         json!({ "service_label": title }),
+    )
+}
+
+/// The receipt is not re-billed: a live invoice bills its concierge service
+/// at the sale price (QA D-02).
+pub(super) fn receipt_refused(title: &str) -> axum::response::Response {
+    coded_err(
+        StatusCode::CONFLICT,
+        RECEIPT_SERVICE_BILLED,
+        "The concierge service of this receipt is already billed at its sale price",
+        json!({ "service_label": title }),
+    )
+}
+
+/// The database guard refused a second billing path of a concierge service.
+pub(super) fn is_billed_once_violation(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|database| database.constraint())
+        == Some(BILLED_ONCE_CONSTRAINT)
+}
+
+/// A concierge service would be billed at its sale price and through its
+/// receipt; `services` names them when known.
+pub(super) fn billed_twice(services: &[String]) -> axum::response::Response {
+    coded_err(
+        StatusCode::CONFLICT,
+        RELEASE_BILLED_TWICE,
+        "A concierge service is already billed the other way (sale price or receipt)",
+        json!({ "services_label": services.join(", ") }),
     )
 }
 
@@ -161,6 +214,7 @@ pub(super) async fn append_lines(
     invoice_order_id: Option<Uuid>,
     currency: &mut Option<String>,
     service_ids: &[Uuid],
+    selected_external_ids: &[Uuid],
     line_items: &mut Vec<Value>,
     totals: &mut (Decimal, Decimal, Decimal),
 ) -> Result<Vec<ConciergeLink>, axum::response::Response> {
@@ -218,6 +272,28 @@ pub(super) async fn append_lines(
         .fetch_one(&mut *conn)
         .await
         .map_err(|error| failed(error, "check concierge service invoices"))?;
+        // The other billing path of the same cost: a receipt of the service
+        // re-billed by a live invoice, or chosen for this draft (QA D-02).
+        let (receipt_rebilled, receipt_selected) = sqlx::query_as::<_, (bool, bool)>(
+            r#"SELECT COALESCE(BOOL_OR(EXISTS (
+                       SELECT 1
+                       FROM external_invoice_patient_invoice_allocations allocation
+                       JOIN invoices rebilling ON rebilling.id = allocation.patient_invoice_id
+                       WHERE allocation.external_invoice_id = receipt_service.external_invoice_id
+                         AND allocation.reversed_at IS NULL
+                         AND rebilling.status <> 'cancelled'
+                   )), false),
+                   COALESCE(BOOL_OR(receipt_service.external_invoice_id = ANY($2)), false)
+               FROM concierge_receipt_services receipt_service
+               JOIN external_invoices external ON external.id = receipt_service.external_invoice_id
+               WHERE receipt_service.concierge_service_id = $1
+                 AND external.status <> 'cancelled'"#,
+        )
+        .bind(*service_id)
+        .bind(selected_external_ids)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|error| failed(error, "check concierge service receipts"))?;
         let title = row.try_get::<String, _>("title").unwrap_or_default();
         let status = row.try_get::<String, _>("status").unwrap_or_default();
         let billing_status = row
@@ -243,6 +319,8 @@ pub(super) async fn append_lines(
             service_order_id,
             service_currency: &service_currency,
             already_invoiced,
+            receipt_rebilled,
+            receipt_selected,
         };
         if let Some(code) = refusal(&facts, invoice_order_id, currency.as_deref()) {
             return Err(refused(code, &title));
@@ -331,6 +409,60 @@ pub(super) async fn insert_links(
     Ok(())
 }
 
+/// The concierge services the draft bills one way while a live invoice (this
+/// one or another) bills them the other way: the sale price next to a
+/// re-billed receipt of the same service (QA D-02). Data from before the
+/// database guard of 2026-11-15 can hold both; the release refuses it.
+pub(super) async fn billed_twice_on_draft(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"WITH draft_services AS (
+               SELECT link.concierge_service_id AS service_id, 'sale'::text AS path
+               FROM invoice_concierge_service_lines link
+               WHERE link.invoice_id = $1
+               UNION
+               SELECT receipt_service.concierge_service_id, 'receipt'::text
+               FROM external_invoice_patient_invoice_allocations allocation
+               JOIN concierge_receipt_services receipt_service
+                 ON receipt_service.external_invoice_id = allocation.external_invoice_id
+               JOIN external_invoices external
+                 ON external.id = allocation.external_invoice_id
+                AND external.status <> 'cancelled'
+               WHERE allocation.patient_invoice_id = $1
+                 AND allocation.reversed_at IS NULL
+           ), live_sales AS (
+               SELECT link.concierge_service_id AS service_id
+               FROM invoice_concierge_service_lines link
+               JOIN invoices invoice ON invoice.id = link.invoice_id
+               WHERE invoice.status <> 'cancelled'
+           ), live_receipts AS (
+               SELECT receipt_service.concierge_service_id AS service_id
+               FROM external_invoice_patient_invoice_allocations allocation
+               JOIN invoices invoice ON invoice.id = allocation.patient_invoice_id
+               JOIN concierge_receipt_services receipt_service
+                 ON receipt_service.external_invoice_id = allocation.external_invoice_id
+               JOIN external_invoices external
+                 ON external.id = allocation.external_invoice_id
+                AND external.status <> 'cancelled'
+               WHERE allocation.reversed_at IS NULL
+                 AND invoice.status <> 'cancelled'
+           )
+           SELECT DISTINCT service.title
+           FROM draft_services draft
+           JOIN concierge_services service ON service.id = draft.service_id
+           WHERE (draft.path = 'sale'
+                  AND EXISTS (SELECT 1 FROM live_receipts r WHERE r.service_id = draft.service_id))
+              OR (draft.path = 'receipt'
+                  AND EXISTS (SELECT 1 FROM live_sales s WHERE s.service_id = draft.service_id))
+           ORDER BY service.title"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await
+}
+
 /// The services a draft bills that changed since it was made: no longer
 /// `ready` (reopened, waived, billed by hand, cancelled) or another quantity,
 /// unit price or currency. The rows are locked until the release commits.
@@ -411,7 +543,10 @@ pub(super) async fn reopen_after_cancellation(
 ) -> Result<(), sqlx::Error> {
     let services: Vec<Uuid> = sqlx::query_scalar(
         r#"UPDATE concierge_services service
-           SET billing_status = 'ready'
+           SET billing_status = 'ready',
+               -- No longer billed: the date of the cancelled invoice goes too
+               -- (QA D-03).
+               billed_at = NULL
            FROM invoice_concierge_service_lines link
            JOIN invoices cancelled_invoice ON cancelled_invoice.id = link.invoice_id
            WHERE link.invoice_id = $1
@@ -464,6 +599,8 @@ mod tests {
             service_order_id: order,
             service_currency: "EUR",
             already_invoiced: false,
+            receipt_rebilled: false,
+            receipt_selected: false,
         }
     }
 
@@ -516,6 +653,28 @@ mod tests {
         assert_eq!(
             refusal(&ready(Some(order)), Some(order), Some("USD")),
             Some(SERVICE_OTHER_CURRENCY)
+        );
+    }
+
+    #[test]
+    fn a_service_is_refused_when_its_receipt_is_billed_or_chosen_too() {
+        let order = Uuid::new_v4();
+        let mut facts = ready(Some(order));
+        facts.receipt_rebilled = true;
+        assert_eq!(
+            refusal(&facts, Some(order), Some("EUR")),
+            Some(SERVICE_BILLED_BY_RECEIPT)
+        );
+
+        let mut facts = ready(Some(order));
+        facts.receipt_selected = true;
+        assert_eq!(
+            refusal(&facts, Some(order), Some("EUR")),
+            Some(SERVICE_WITH_ITS_RECEIPT)
+        );
+        assert_eq!(
+            refusal_message(SERVICE_WITH_ITS_RECEIPT),
+            "Choose the concierge service or its receipt, not both"
         );
     }
 }

@@ -7469,6 +7469,13 @@ async fn get_patient_billing_workspace(
                     -- the Concierge service of the receipt (QA 2026-11-12 C-1).
                     'proposed_order_id', COALESCE(external.order_id, concierge_link.order_id),
                     'concierge_receipt', external.source_concierge_expense_id IS NOT NULL,
+                    -- One billing path per concierge cost (QA D-02): the
+                    -- receipt's service, and the live invoice that bills it
+                    -- at its sale price.
+                    'concierge_service_id', concierge_sale.service_id,
+                    'concierge_sale_billed', receivable.concierge_sale_billed,
+                    'concierge_sale_invoice_id', concierge_sale.invoice_id,
+                    'concierge_sale_invoice_number', concierge_sale.invoice_number,
                     -- A closed settlement keeps its waivers (rebilling_waivers).
                     'settlement_closed', EXISTS (
                         SELECT 1 FROM order_termination_settlements closed_settlement
@@ -7519,6 +7526,21 @@ async fn get_patient_billing_workspace(
                       ON task_appointment.id = linked_task.appointment_id
                     WHERE receipt.id = external.source_concierge_expense_id
                 ) concierge_link ON true
+                LEFT JOIN LATERAL (
+                    SELECT receipt_service.concierge_service_id AS service_id,
+                           sale.invoice_id, sale.invoice_number
+                    FROM concierge_receipt_services receipt_service
+                    LEFT JOIN LATERAL (
+                        SELECT invoice.id AS invoice_id, invoice.invoice_number
+                        FROM invoice_concierge_service_lines link
+                        JOIN invoices invoice ON invoice.id = link.invoice_id
+                        WHERE link.concierge_service_id = receipt_service.concierge_service_id
+                          AND invoice.status <> 'cancelled'
+                        ORDER BY link.created_at DESC
+                        LIMIT 1
+                    ) sale ON true
+                    WHERE receipt_service.external_invoice_id = external.id
+                ) concierge_sale ON true
                 WHERE external.patient_id = patient.id
                   AND external.invoice_scope = 'patient_order'
                   AND external.status <> 'cancelled'
@@ -7551,8 +7573,21 @@ async fn get_patient_billing_workspace(
                         THEN ROUND(service.quantity * service.unit_price, 2)::text END,
                     'invoice_id', reservation.invoice_id,
                     'invoice_number', reservation.invoice_number,
+                    -- Receipts of the service, and the live invoice that
+                    -- re-bills one of them (one billing path, QA D-02).
+                    'receipt_external_invoice_ids', COALESCE((
+                        SELECT jsonb_agg(receipt_service.external_invoice_id)
+                        FROM concierge_receipt_services receipt_service
+                        JOIN external_invoices receipt_external
+                          ON receipt_external.id = receipt_service.external_invoice_id
+                         AND receipt_external.status <> 'cancelled'
+                        WHERE receipt_service.concierge_service_id = service.id
+                    ), '[]'::jsonb),
+                    'receipt_invoice_id', receipt_rebilling.invoice_id,
+                    'receipt_invoice_number', receipt_rebilling.invoice_number,
                     'billable', COALESCE(service.unit_price > 0 AND service.quantity > 0, FALSE)
                         AND reservation.invoice_id IS NULL
+                        AND receipt_rebilling.invoice_id IS NULL
                 ) ORDER BY COALESCE(service.starts_at, service.completed_at, service.created_at), service.id)
                 FROM concierge_services service
                 LEFT JOIN appointments appointment ON appointment.id = service.appointment_id
@@ -7567,6 +7602,21 @@ async fn get_patient_billing_workspace(
                     ORDER BY link.created_at DESC
                     LIMIT 1
                 ) reservation ON true
+                LEFT JOIN LATERAL (
+                    SELECT invoice.id AS invoice_id, invoice.invoice_number
+                    FROM concierge_receipt_services receipt_service
+                    JOIN external_invoices receipt_external
+                      ON receipt_external.id = receipt_service.external_invoice_id
+                     AND receipt_external.status <> 'cancelled'
+                    JOIN external_invoice_patient_invoice_allocations allocation
+                      ON allocation.external_invoice_id = receipt_service.external_invoice_id
+                     AND allocation.reversed_at IS NULL
+                    JOIN invoices invoice ON invoice.id = allocation.patient_invoice_id
+                    WHERE receipt_service.concierge_service_id = service.id
+                      AND invoice.status <> 'cancelled'
+                    ORDER BY allocation.created_at DESC
+                    LIMIT 1
+                ) receipt_rebilling ON true
                 WHERE service.patient_id = patient.id
                   AND service.billing_status = 'ready'
                   AND service.status <> 'cancelled'
@@ -7815,7 +7865,7 @@ async fn create_patient_billing_invoice(
         .line_items
         .as_array_mut()
         .expect("invoice line array");
-    for external_id in external_ids {
+    for external_id in external_ids.iter().copied() {
         let source = match sqlx::query(
             r#"SELECT external.patient_id, external.status, external.paid_by,
                       external.invoice_scope, UPPER(external.currency) AS currency,
@@ -7882,16 +7932,26 @@ async fn create_patient_billing_invoice(
             );
         }
         // Only a cost no billed order service covers is re-billed at cost.
-        let remaining = match sqlx::query_as::<_, (Decimal, bool)>(
-            r#"SELECT remaining_receivable_gross, order_service_billed
+        // A concierge receipt whose service a live invoice bills at its sale
+        // price is not re-billed (one billing path per cost, QA D-02).
+        let remaining = match sqlx::query_as::<_, (Decimal, bool, bool)>(
+            r#"SELECT remaining_receivable_gross, order_service_billed, concierge_sale_billed
                FROM external_invoice_receivable_balances WHERE external_invoice_id = $1"#,
         )
         .bind(external_id)
         .fetch_optional(&mut *transaction)
         .await
         {
-            Ok(Some((value, _))) if value > Decimal::ZERO => value.round_cents(),
-            Ok(Some((_, true))) => {
+            Ok(Some((_, _, true))) => {
+                return concierge_lines::receipt_refused(
+                    &source
+                        .try_get::<Option<String>, _>("concierge_title")
+                        .unwrap_or_default()
+                        .unwrap_or_default(),
+                );
+            }
+            Ok(Some((value, _, _))) if value > Decimal::ZERO => value.round_cents(),
+            Ok(Some((_, true, _))) => {
                 return err(
                     StatusCode::CONFLICT,
                     "Incoming invoice is the cost of an order service that is billed to the patient",
@@ -7956,6 +8016,7 @@ async fn create_patient_billing_invoice(
         body.order_id,
         &mut currency,
         &concierge_ids,
+        &external_ids,
         line_items,
         &mut concierge_totals,
     )
@@ -8088,6 +8149,9 @@ async fn create_patient_billing_invoice(
         .await
         {
             tracing::error!(%error, %invoice_id, %external_id, "reserve patient billing expense");
+            if concierge_lines::is_billed_once_violation(&error) {
+                return concierge_lines::billed_twice(&[]);
+            }
             return err(
                 StatusCode::CONFLICT,
                 "An incoming invoice was selected by another draft; reload and try again",
@@ -8100,6 +8164,9 @@ async fn create_patient_billing_invoice(
             .await
     {
         tracing::error!(%error, %invoice_id, "link patient billing concierge services");
+        if concierge_lines::is_billed_once_violation(&error) {
+            return concierge_lines::billed_twice(&[]);
+        }
         return err(
             StatusCode::CONFLICT,
             "A concierge service was selected by another draft; reload and try again",
@@ -14917,6 +14984,19 @@ async fn update_invoice_status(
             }
             Err(error) => {
                 tracing::error!(%error, %invoice_id, "check the concierge services of a draft");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        }
+        // One billing path per concierge cost (QA D-02): no sale price next
+        // to a re-billed receipt of the same service, here or elsewhere.
+        match concierge_lines::billed_twice_on_draft(&mut transaction, invoice_id).await {
+            Ok(services) if services.is_empty() => {}
+            Ok(services) => return concierge_lines::billed_twice(&services),
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "check concierge services billed twice");
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to update invoice",

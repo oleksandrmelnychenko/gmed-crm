@@ -89,6 +89,7 @@ const textByLanguage = {
     outflow: "Выплаты",
     search: "Поиск по документу, пациенту или описанию",
     patientReceivables: "Долг пациентов",
+    payerReceivables: "Долг плательщиков",
     patientCredits: "Переплаты пациентов",
     providerPayables: "Долг поставщикам",
     expectedCosts: "Ожидаемые расходы",
@@ -116,6 +117,7 @@ const textByLanguage = {
     reconciliation: "Сверка",
     patient: "Пациент",
     invoicesDue: "По счетам",
+    payerDue: "Платит плательщик",
     externalReceivable: "Расходы GMED",
     adjustments: "Корректировки",
     advances: "Авансы",
@@ -185,6 +187,7 @@ const textByLanguage = {
     outflow: "Auszahlungen",
     search: "Dokument, Patient oder Beschreibung suchen",
     patientReceivables: "Patientenforderungen",
+    payerReceivables: "Forderungen an Zahler",
     patientCredits: "Patientenguthaben",
     providerPayables: "Verbindlichkeiten",
     expectedCosts: "Erwartete Kosten",
@@ -212,6 +215,7 @@ const textByLanguage = {
     reconciliation: "Abstimmung",
     patient: "Patient",
     invoicesDue: "Rechnungen offen",
+    payerDue: "Zahlt ein Zahler",
     externalReceivable: "GMED-Auslagen",
     adjustments: "Korrekturen",
     advances: "Vorauszahlungen",
@@ -510,6 +514,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
       ),
     },
     { id: "invoice_due", label: text.invoicesDue, accessor: (row) => parseAmount(row.invoice_due), filterType: "number", sortable: true, width: 145, render: (row) => money(row.invoice_due) },
+    { id: "payer_due", label: text.payerDue, accessor: (row) => parseAmount(row.payer_due ?? "0"), filterType: "number", sortable: true, width: 170, render: (row) => parseAmount(row.payer_due ?? "0") > 0 ? <span title={row.payer_names ?? undefined}>{money(row.payer_due ?? "0")}{row.payer_names ? <span className="block truncate text-[10px] text-muted-foreground">{row.payer_names}</span> : null}</span> : money("0") },
     { id: "external_receivable", label: text.externalReceivable, accessor: (row) => parseAmount(row.external_receivable), filterType: "number", sortable: true, width: 150, render: (row) => money(row.external_receivable) },
     { id: "manual_balance", label: text.adjustments, accessor: (row) => parseAmount(row.manual_balance), filterType: "number", sortable: true, width: 140, render: (row) => signedMoney(row.manual_balance) },
     { id: "prepayment", label: text.advances, accessor: (row) => parseAmount(row.available_prepayment), filterType: "number", sortable: true, width: 140, render: (row) => parseAmount(row.available_prepayment) > 0 ? <span className="text-sky-700 dark:text-sky-400">− {money(row.available_prepayment)}</span> : money("0") },
@@ -872,6 +877,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
         <>
           <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-card px-3 py-2.5 lg:grid-cols-3 xl:grid-cols-5">
             <SummaryCard label={text.patientReceivables} value={money(summary.patient_receivables_calculated)} tone={parseAmount(summary.patient_receivables_calculated) > 0 ? "negative" : "default"} />
+            {parseAmount(summary.payer_receivables_calculated ?? "0") > 0 ? <SummaryCard label={text.payerReceivables} value={money(summary.payer_receivables_calculated ?? "0")} tone="negative" /> : null}
             <SummaryCard label={text.patientCredits} value={money(summary.patient_credits)} tone={parseAmount(summary.patient_credits) > 0 ? "info" : "default"} />
             <SummaryCard label={text.providerPayables} value={money(summary.provider_payables)} tone={parseAmount(summary.provider_payables) > 0 ? "negative" : "default"} />
             <SummaryCard label={text.expectedCosts} value={money(summary.expected_provider_costs)} tone="warning" />

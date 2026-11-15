@@ -25,6 +25,11 @@ export type BillingConciergeService = {
   /** A live draft that already bills the service. */
   invoice_id: string | null;
   invoice_number: string | null;
+  /** Receipts of the service (external invoices), not cancelled. */
+  receipt_external_invoice_ids?: string[];
+  /** A live invoice re-bills a receipt of the service at cost (QA D-02). */
+  receipt_invoice_id?: string | null;
+  receipt_invoice_number?: string | null;
   billable: boolean;
 };
 
@@ -32,6 +37,8 @@ export type ConciergeServiceState =
   | "selectable"
   | "no_price"
   | "in_draft"
+  | "billed_by_receipt"
+  | "receipt_selected"
   | "other_order"
   | "other_currency";
 
@@ -52,9 +59,13 @@ export function hasSalePrice(service: BillingConciergeService): boolean {
  */
 export function conciergeServiceState(
   service: BillingConciergeService,
-  draft: { orderId: string; currency: string },
+  draft: { orderId: string; currency: string; selectedExpenseIds?: readonly string[] },
 ): ConciergeServiceState {
+  // One billing path per concierge cost (QA D-02): its receipt is re-billed
+  // already, or chosen for this draft.
+  if (service.receipt_invoice_id) return "billed_by_receipt";
   if (!hasSalePrice(service)) return "no_price";
+  if ((service.receipt_external_invoice_ids ?? []).some(id => draft.selectedExpenseIds?.includes(id))) return "receipt_selected";
   if (service.invoice_id || !service.billable) return "in_draft";
   if (service.currency.toUpperCase() !== draft.currency.toUpperCase()) return "other_currency";
   if (service.order_id && draft.orderId && service.order_id !== draft.orderId) return "other_order";

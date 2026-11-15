@@ -94,7 +94,9 @@ async fn list_ready_concierge_services(
                   service.quantity,
                   service.unit_price,
                   UPPER(service.currency) AS currency,
-                  reservation.invoice_id AS draft_invoice_id
+                  reservation.invoice_id AS draft_invoice_id,
+                  receipt_rebilling.invoice_id AS receipt_invoice_id,
+                  receipt_rebilling.invoice_number AS receipt_invoice_number
            FROM concierge_services service
            JOIN patients patient ON patient.id = service.patient_id
            LEFT JOIN appointments appointment ON appointment.id = service.appointment_id
@@ -110,6 +112,23 @@ async fn list_ready_concierge_services(
                ORDER BY link.created_at DESC
                LIMIT 1
            ) reservation ON true
+           -- A live invoice that re-bills a receipt of the service at cost:
+           -- the sale price is not billed as well (QA D-02).
+           LEFT JOIN LATERAL (
+               SELECT invoice.id AS invoice_id, invoice.invoice_number
+               FROM concierge_receipt_services receipt_service
+               JOIN external_invoices receipt_external
+                 ON receipt_external.id = receipt_service.external_invoice_id
+                AND receipt_external.status <> 'cancelled'
+               JOIN external_invoice_patient_invoice_allocations allocation
+                 ON allocation.external_invoice_id = receipt_service.external_invoice_id
+                AND allocation.reversed_at IS NULL
+               JOIN invoices invoice ON invoice.id = allocation.patient_invoice_id
+               WHERE receipt_service.concierge_service_id = service.id
+                 AND invoice.status <> 'cancelled'
+               ORDER BY allocation.created_at DESC
+               LIMIT 1
+           ) receipt_rebilling ON true
            WHERE service.billing_status = 'ready'
              AND service.status <> 'cancelled'
              AND ($1::uuid IS NULL OR service.patient_id = $1::uuid)
@@ -181,6 +200,8 @@ async fn list_ready_concierge_services(
                 "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                 // Already on a live draft of the patient's billing tab.
                 "draft_invoice_id": row.try_get::<Option<Uuid>, _>("draft_invoice_id").unwrap_or_default(),
+                "receipt_invoice_id": row.try_get::<Option<Uuid>, _>("receipt_invoice_id").unwrap_or_default(),
+                "receipt_invoice_number": row.try_get::<Option<String>, _>("receipt_invoice_number").unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();

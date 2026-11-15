@@ -2090,3 +2090,209 @@ async fn agency_paid_expense_from_a_cash_account_needs_the_cash() {
     .await;
     assert_eq!(status, StatusCode::OK, "{posted}");
 }
+
+/// Money QA 2026-11-15 D-02 (owner 2026-11-12, concierge decisions 1 and 7):
+/// a concierge service is billed one way only — at its sale price or through
+/// its receipt re-billed at cost. Both in one draft, or one while a live
+/// invoice bills the other, is refused; cancelling one frees the other; the
+/// database refuses a second path written past the API.
+#[tokio::test]
+async fn a_concierge_service_is_billed_by_its_sale_price_or_its_receipt_never_both() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("once-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("once-review-{tag}")).await;
+    let (patient_id, _provider_id, service_id, order_id, _order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE concierge_services
+           SET provider_id = NULL, order_id = $2, status = 'completed',
+               completed_at = now(), billing_status = 'ready',
+               quantity = 1, unit_price = 150
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .bind(order_id)
+    .execute(&context.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tasks SET provider_id = NULL WHERE concierge_service_id = $1")
+        .bind(service_id)
+        .execute(&context.pool)
+        .await
+        .unwrap();
+    let account_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO company_financial_accounts (
+               name, account_type, currency, opening_balance, opening_balance_on,
+               is_default, is_active, created_by
+           ) VALUES ($1, 'bank', 'EUR', 0, '2020-01-01', false, true, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Billed once {tag}"))
+    .bind(context.admin_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    let concierge = auth_header(concierge_id, "concierge");
+    let billing = auth_header(billing_id, "billing");
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
+    let (status, created) = submit_fixture_expense(
+        &context.app,
+        &concierge,
+        service_id,
+        Uuid::new_v4(),
+        "agency",
+        true,
+        expense_date,
+        &format!("{tag}-once"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let expense_id = created["item"]["id"].as_str().unwrap().to_string();
+    let (status, posted) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "financial_account_id": account_id,
+            "paid_on": expense_date,
+            "payment_method": "bank_transfer",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{posted}");
+    let receipt_id =
+        Uuid::parse_str(posted["item"]["external_invoice"]["id"].as_str().unwrap()).unwrap();
+
+    let billing_path = format!("/api/v1/patients/{patient_id}/billing-invoices");
+    let workspace_path = format!("/api/v1/patients/{patient_id}/billing-workspace");
+    let draft = |receipts: Vec<Uuid>, services: Vec<Uuid>| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "currency": "EUR",
+            "invoice_type": "interim",
+            "external_invoice_ids": receipts,
+            "concierge_service_ids": services,
+        })
+    };
+
+    // Both paths in one draft: refused.
+    let (status, body) = json_request(
+        &context.app,
+        "POST",
+        &billing_path,
+        &billing,
+        Some(draft(vec![receipt_id], vec![service_id])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "concierge_service_with_its_receipt");
+
+    // The sale price on a draft: the receipt is no longer offered.
+    let (status, sale_draft) = json_request(
+        &context.app,
+        "POST",
+        &billing_path,
+        &billing,
+        Some(draft(vec![], vec![service_id])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sale_draft}");
+    let sale_draft_id = sale_draft["id"].as_str().unwrap().to_string();
+    let (status, listed) = json_request(&context.app, "GET", &workspace_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let receipt = listed["expenses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == receipt_id.to_string())
+        .expect("the receipt is listed")
+        .clone();
+    assert_eq!(receipt["concierge_sale_billed"], true, "{receipt}");
+    assert_eq!(receipt["concierge_sale_invoice_id"], sale_draft_id);
+    assert_eq!(receipt["concierge_service_id"], service_id.to_string());
+    assert_eq!(receipt["billable"], false);
+    assert_eq!(receipt["remaining_receivable_gross"], "0.00");
+    let (status, body) = json_request(
+        &context.app,
+        "POST",
+        &billing_path,
+        &billing,
+        Some(draft(vec![receipt_id], vec![])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "concierge_receipt_service_billed");
+
+    // Cancelling the sale-price draft frees the receipt.
+    let (status, body) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/invoices/{sale_draft_id}/status"),
+        &billing,
+        Some(json!({ "status": "cancelled", "reason": "Über den Beleg abrechnen" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, receipt_draft) = json_request(
+        &context.app,
+        "POST",
+        &billing_path,
+        &billing,
+        Some(draft(vec![receipt_id], vec![])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{receipt_draft}");
+    let receipt_draft_id = Uuid::parse_str(receipt_draft["id"].as_str().unwrap()).unwrap();
+
+    // The receipt re-billed: the sale price is not offered, nor accepted.
+    let (status, listed) = json_request(&context.app, "GET", &workspace_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let service = listed["concierge_services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == service_id.to_string())
+        .expect("the ready service is listed")
+        .clone();
+    assert_eq!(service["receipt_invoice_id"], receipt_draft_id.to_string());
+    assert_eq!(service["billable"], false);
+    assert_eq!(service["receipt_external_invoice_ids"], json!([receipt_id]));
+    let (status, body) = json_request(
+        &context.app,
+        "POST",
+        &billing_path,
+        &billing,
+        Some(draft(vec![], vec![service_id])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "concierge_service_billed_by_receipt");
+
+    // Past the API the database refuses the second path as well.
+    let error = sqlx::query(
+        r#"INSERT INTO invoice_concierge_service_lines (
+               invoice_id, concierge_service_id, invoice_line_index, quantity,
+               unit_price_net, vat_rate, amount_net, amount_vat, amount_gross, created_by)
+           VALUES ($1, $2, 7, 1, 150, 19, 150, 28.50, 178.50, $3)"#,
+    )
+    .bind(receipt_draft_id)
+    .bind(service_id)
+    .bind(context.admin_id)
+    .execute(&context.pool)
+    .await
+    .expect_err("a sale-price line beside the re-billed receipt is refused");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|database| database.constraint()),
+        Some("concierge_service_billed_once"),
+        "{error}"
+    );
+}

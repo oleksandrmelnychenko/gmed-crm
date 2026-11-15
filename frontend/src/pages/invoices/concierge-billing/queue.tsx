@@ -170,7 +170,9 @@ export function ConciergeBillingQueue({
         // F-C8: an unpriced service cannot be billed; its price is set on
         // the service. A service already on a draft opens that draft.
         const action = conciergeQueueAction(row);
-        const label = action.kind === "set_price"
+        const label = action.kind === "billed_by_receipt"
+          ? [tx("Уже выставлено как расход по чеку", "Bereits als Beleg berechnet"), action.invoiceNumber].filter(Boolean).join(" · ")
+          : action.kind === "set_price"
           ? tx("Указать цену в услуге", "Preis in der Leistung erfassen")
           : action.kind === "open_draft"
             ? tx("В черновике — открыть", "Im Entwurf – öffnen")

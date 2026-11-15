@@ -129,6 +129,22 @@ fn parse_search(value: Option<&str>) -> Result<Option<String>, String> {
 /// The per-patient position the company finance page lists. The same SQL
 /// feeds [`open_patient_receivables`], so the company finance page, the CEO
 /// dashboard and the billing dashboard show one receivables figure.
+///
+/// An open invoice a third party (Kostenübernehmer) pays is that payer's
+/// debt, not the patient's (owner 2026-11-12 #7, QA D-03): `payer_due`, kept
+/// out of the patient's balance and listed as «Долг плательщиков».
+fn patient_positions_sql() -> String {
+    PATIENT_POSITIONS_SQL
+        .replace(
+            "{THIRD_PARTY_PAYER}",
+            super::patient_financials::THIRD_PARTY_PAYER,
+        )
+        .replace(
+            "{INVOICE_RECIPIENT_VALUE}",
+            super::patient_financials::INVOICE_RECIPIENT_VALUE,
+        )
+}
+
 const PATIENT_POSITIONS_SQL: &str = r#"WITH source_allocations AS (
                SELECT allocation.advance_invoice_id,
                       COALESCE(SUM(allocation.amount_gross), 0) AS allocated
@@ -140,6 +156,29 @@ const PATIENT_POSITIONS_SQL: &str = r#"WITH source_allocations AS (
                           CASE
                               WHEN invoice.invoice_type <> 'advance'
                                AND invoice.status NOT IN ('draft', 'cancelled')
+                               AND payer.third_party
+                                  THEN GREATEST(
+                                      invoice.total_gross
+                                          - invoice.credited_amount
+                                          - invoice.paid_amount
+                                          - invoice.prepayment_applied_amount,
+                                      0
+                                  )
+                              ELSE 0
+                          END
+                      ), 0) AS payer_due,
+                      STRING_AGG(DISTINCT rcpt.value ->> 'name', ', ') FILTER (
+                          WHERE invoice.invoice_type <> 'advance'
+                            AND invoice.status NOT IN ('draft', 'cancelled')
+                            AND payer.third_party
+                            AND invoice.total_gross - invoice.credited_amount
+                                - invoice.paid_amount - invoice.prepayment_applied_amount > 0
+                      ) AS payer_names,
+                      COALESCE(SUM(
+                          CASE
+                              WHEN invoice.invoice_type <> 'advance'
+                               AND invoice.status NOT IN ('draft', 'cancelled')
+                               AND NOT payer.third_party
                                   THEN GREATEST(
                                       invoice.total_gross
                                           - invoice.credited_amount
@@ -175,6 +214,9 @@ const PATIENT_POSITIONS_SQL: &str = r#"WITH source_allocations AS (
                FROM invoices invoice
                LEFT JOIN source_allocations source
                  ON source.advance_invoice_id = invoice.id
+               LEFT JOIN orders ON orders.id = invoice.order_id
+               CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
+               CROSS JOIN LATERAL (SELECT {THIRD_PARTY_PAYER} AS third_party) payer
                WHERE UPPER(invoice.currency) = $1
                GROUP BY invoice.patient_id
            ), external_allocations AS (
@@ -223,6 +265,8 @@ const PATIENT_POSITIONS_SQL: &str = r#"WITH source_allocations AS (
            SELECT patient.id, patient.patient_id AS patient_pid,
                   patient.first_name, patient.last_name, patient.is_active,
                   COALESCE(invoice.invoice_due, 0) AS invoice_due,
+                  COALESCE(invoice.payer_due, 0) AS payer_due,
+                  invoice.payer_names,
                   COALESCE(invoice.available_prepayment, 0) AS available_prepayment,
                   COALESCE(invoice.invoice_cash_credit, 0) AS invoice_cash_credit,
                   COALESCE(invoice.released_invoice_count, 0) AS released_invoice_count,
@@ -240,6 +284,9 @@ const PATIENT_POSITIONS_SQL: &str = r#"WITH source_allocations AS (
 /// advances not applied yet and invoice overpayments. Positive is a debt.
 struct PatientBalance {
     invoice_due: Decimal,
+    /// Open on invoices a third party pays: the payer's debt, not in
+    /// `calculated_balance`.
+    payer_due: Decimal,
     available_prepayment: Decimal,
     external_receivable: Decimal,
     manual_balance: Decimal,
@@ -252,6 +299,7 @@ impl PatientBalance {
     fn from_row(row: &sqlx::postgres::PgRow) -> Self {
         let amount = |column: &str| row.try_get::<Decimal, _>(column).unwrap_or(Decimal::ZERO);
         let invoice_due = amount("invoice_due");
+        let payer_due = amount("payer_due");
         let available_prepayment = amount("available_prepayment");
         let external_receivable = amount("external_receivable");
         let manual_balance = amount("manual_balance");
@@ -263,6 +311,7 @@ impl PatientBalance {
             .round_cents();
         Self {
             invoice_due,
+            payer_due,
             available_prepayment,
             external_receivable,
             manual_balance,
@@ -275,8 +324,9 @@ impl PatientBalance {
 }
 
 /// Open patient receivables (offene Patientenforderungen): the sum of the
-/// positive patient balances ([`PatientBalance`]). The one definition behind
-/// "Долг пациентов" on the company finance page, the CEO dashboard and the
+/// positive patient balances ([`PatientBalance`]) plus what third-party
+/// payers owe. The one definition behind "Долг пациентов" + "Долг
+/// плательщиков" on the company finance page, the CEO dashboard and the
 /// billing dashboard's "Дебиторка" (docs/architecture/company-finance-figures_ua.md).
 /// Unpaid advance invoices are payment requests, not receivables: no service
 /// was rendered yet and they are booked when paid; see
@@ -285,14 +335,14 @@ pub(crate) async fn open_patient_receivables(
     db: &sqlx::PgPool,
     currency: &str,
 ) -> Result<Decimal, sqlx::Error> {
-    let rows = sqlx::query(PATIENT_POSITIONS_SQL)
+    let rows = sqlx::query(&patient_positions_sql())
         .bind(currency)
         .fetch_all(db)
         .await?;
     Ok(rows
         .iter()
-        .map(|row| PatientBalance::from_row(row).calculated_balance)
-        .filter(|balance| *balance > Decimal::ZERO)
+        .map(PatientBalance::from_row)
+        .map(|balance| balance.calculated_balance.max(Decimal::ZERO) + balance.payer_due)
         .sum::<Decimal>()
         .round_cents())
 }
@@ -404,7 +454,7 @@ async fn get_company_financial_position(
         available_currencies.sort();
     }
 
-    let patient_rows = match sqlx::query(PATIENT_POSITIONS_SQL)
+    let patient_rows = match sqlx::query(&patient_positions_sql())
         .bind(&currency)
         .fetch_all(&state.db)
         .await
@@ -420,6 +470,7 @@ async fn get_company_financial_position(
     };
 
     let mut patient_receivables = Decimal::ZERO;
+    let mut payer_receivables = Decimal::ZERO;
     let mut patient_credits = Decimal::ZERO;
     let mut unreconciled_external_receivables = Decimal::ZERO;
     let mut reconciliation_count = 0_u64;
@@ -427,6 +478,7 @@ async fn get_company_financial_position(
     for row in patient_rows {
         let PatientBalance {
             invoice_due,
+            payer_due,
             available_prepayment,
             external_receivable,
             manual_balance,
@@ -439,11 +491,15 @@ async fn get_company_financial_position(
         } else if calculated_balance < Decimal::ZERO {
             patient_credits += -calculated_balance;
         }
+        payer_receivables += payer_due;
         if reconciliation_required {
             reconciliation_count += 1;
             unreconciled_external_receivables += external_receivable;
         }
-        if calculated_balance == Decimal::ZERO && !reconciliation_required {
+        if calculated_balance == Decimal::ZERO
+            && payer_due == Decimal::ZERO
+            && !reconciliation_required
+        {
             continue;
         }
         let patient_name = [
@@ -462,6 +518,8 @@ async fn get_company_financial_position(
             "patient_name": patient_name,
             "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
             "invoice_due": decimal_to_string(invoice_due),
+            "payer_due": decimal_to_string(payer_due),
+            "payer_names": row.try_get::<Option<String>, _>("payer_names").unwrap_or_default(),
             "external_receivable": decimal_to_string(external_receivable),
             "manual_balance": decimal_to_string(manual_balance),
             "available_prepayment": decimal_to_string(available_prepayment),
@@ -842,12 +900,14 @@ async fn get_company_financial_position(
     };
 
     patient_receivables = patient_receivables.round_cents();
+    payer_receivables = payer_receivables.round_cents();
     patient_credits = patient_credits.round_cents();
     provider_payables = provider_payables.round_cents();
     expected_provider_costs = expected_provider_costs.round_cents();
     unreconciled_external_receivables = unreconciled_external_receivables.round_cents();
     let calculated_net_position =
-        (patient_receivables - patient_credits - provider_payables).round_cents();
+        (patient_receivables + payer_receivables - patient_credits - provider_payables)
+            .round_cents();
     let reconciliation_required = reconciliation_count > 0;
 
     Json(json!({
@@ -860,6 +920,7 @@ async fn get_company_financial_position(
         },
         "summary": {
             "patient_receivables_calculated": decimal_to_string(patient_receivables),
+            "payer_receivables_calculated": decimal_to_string(payer_receivables),
             "patient_credits": decimal_to_string(patient_credits),
             "provider_payables": decimal_to_string(provider_payables),
             "expected_provider_costs": decimal_to_string(expected_provider_costs),

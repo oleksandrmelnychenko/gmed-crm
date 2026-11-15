@@ -72,6 +72,11 @@ describe("concierge billing queue model", () => {
       kind: "bill",
       href: "/patients/p1?tab=billing",
     });
+    expect(conciergeQueueAction({ ...item("d", "p1", "Anna", null), sale_price: null, receipt_invoice_id: "inv 2", receipt_invoice_number: "INV-2" })).toEqual({
+      kind: "billed_by_receipt",
+      href: "/invoices?invoice=inv%202",
+      invoiceNumber: "INV-2",
+    });
   });
 
   it("links to the patient's billing tab and shows a badge only for open work", () => {

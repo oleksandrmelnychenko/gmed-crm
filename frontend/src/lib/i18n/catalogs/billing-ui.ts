@@ -44,6 +44,14 @@ export const billingUiDe = {
     "Kein aktives Standard-Steuerprofil: die MwSt. der Concierge-Leistung ist unbekannt. Bitte in den Steuerprofilen festlegen.",
   "api_billing_invoice_bills_changed_concierge_service":
     "Eine Concierge-Leistung des Entwurfs hat sich seit dem Entwurf geändert ({services_label}). Bitte den Entwurf stornieren und eine neue Rechnung erstellen.",
+  "api_billing_concierge_service_billed_by_receipt":
+    "Die Concierge-Leistung „{service_label}“ ist bereits als Beleg berechnet.",
+  "api_billing_concierge_service_with_its_receipt":
+    "Bitte die Concierge-Leistung „{service_label}“ oder ihren Beleg wählen, nicht beides.",
+  "api_billing_concierge_receipt_service_billed":
+    "Die Concierge-Leistung dieses Belegs ist bereits zum Verkaufspreis berechnet.",
+  "api_billing_invoice_bills_concierge_service_twice":
+    "Eine Concierge-Leistung ist bereits auf dem anderen Weg berechnet (Verkaufspreis oder Beleg).",
   "api_billing_advance_rest_already_closed": "Die Anzahlungsrechnung hat keinen offenen Rest mehr.",
   "api_billing_advance_not_settled_by_final_invoice":
     "Noch keine ausgestellte Schlussrechnung rechnet diese Anzahlung ab.",
@@ -89,6 +97,14 @@ export const billingUiRu = {
     "Нет активного налогового профиля по умолчанию: НДС услуги Concierge неизвестен. Задайте его в налоговых профилях.",
   "api_billing_invoice_bills_changed_concierge_service":
     "Услуга Concierge в черновике изменилась после его создания ({services_label}). Отмените черновик и создайте новый счёт.",
+  "api_billing_concierge_service_billed_by_receipt":
+    "Услуга Concierge «{service_label}» уже выставлена как расход по чеку.",
+  "api_billing_concierge_service_with_its_receipt":
+    "Выберите услугу Concierge «{service_label}» или её чек, не оба.",
+  "api_billing_concierge_receipt_service_billed":
+    "Услуга Concierge этого чека уже выставлена по цене продажи.",
+  "api_billing_invoice_bills_concierge_service_twice":
+    "Услуга Concierge уже выставлена другим способом (по цене продажи или по чеку).",
   "api_billing_advance_rest_already_closed": "У авансового счёта больше нет открытого остатка.",
   "api_billing_advance_not_settled_by_final_invoice": "Этот аванс ещё не закрыт выпущенным финальным счётом.",
 } as const satisfies Record<keyof typeof billingUiDe, string>;

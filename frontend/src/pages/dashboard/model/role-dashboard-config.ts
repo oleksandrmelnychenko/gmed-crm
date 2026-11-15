@@ -173,8 +173,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
         subtitle: subtitle(lang, "billing"),
         primaryModules: modules("billing"),
         metrics: [
-          // Same figure as "Долг пациентов" on the company finance page.
-          metric(lang, "outstanding_receivables_total", { ru: "Дебиторка", de: "Offene Forderungen" }, { ru: "долг пациентов, без авансовых счетов", de: "Patientenforderungen ohne Anzahlungsrechnungen" }, "currency"),
+          // "Долг пациентов" + "Долг плательщиков" on the company finance page.
+          metric(lang, "outstanding_receivables_total", { ru: "Дебиторка", de: "Offene Forderungen" }, { ru: "долг пациентов и плательщиков, без авансовых счетов", de: "Patienten- und Zahlerforderungen ohne Anzahlungsrechnungen" }, "currency"),
           metric(lang, "open_advance_requests_total", { ru: "Запрошенные авансы", de: "Angeforderte Anzahlungen" }, { ru: "не оплачены, в дебиторку не входят", de: "unbezahlt, nicht in den Forderungen" }, "currency"),
           metric(lang, "overdue_invoice_count", { ru: "Просроченные счета", de: "Überfällige Rechnungen" }, { ru: "требуют действия", de: "Handlungsbedarf" }),
           metric(lang, "invoices_30d", { ru: "Счета", de: "Rechnungen" }, { ru: "создано за 30 дней", de: "in 30 Tagen erstellt" }),

@@ -618,6 +618,14 @@ async fn a_ready_concierge_service_is_billed_once_from_the_patient_billing_tab()
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(billing_status_of(&pool, priced_id).await, "ready");
+    // No longer billed: no billing date either (money QA D-03).
+    let billed_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT billed_at FROM concierge_services WHERE id = $1")
+            .bind(priced_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(billed_at.is_none());
     let (status, body) = json_request(
         &app,
         "POST",

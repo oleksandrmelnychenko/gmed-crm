@@ -43,6 +43,13 @@ describe("concierge services in the patient billing tab", () => {
     expect(conciergeServiceState(service(), { orderId: "o1", currency: "USD" })).toBe("other_currency");
   });
 
+  it("does not offer a service whose receipt is re-billed or chosen for the same draft (QA D-02)", () => {
+    expect(conciergeServiceState(service({ receipt_invoice_id: "i2", billable: false }), { orderId: "o1", currency: "EUR" })).toBe("billed_by_receipt");
+    const withReceipt = service({ receipt_external_invoice_ids: ["e1"] });
+    expect(conciergeServiceState(withReceipt, { orderId: "o1", currency: "EUR", selectedExpenseIds: ["e1"] })).toBe("receipt_selected");
+    expect(conciergeServiceState(withReceipt, { orderId: "o1", currency: "EUR", selectedExpenseIds: ["e2"] })).toBe("selectable");
+  });
+
   it("adds the VAT on the rounded net like the server", () => {
     expect(conciergeLineAmounts(service(), "19")).toEqual({ net: 120, vat: 22.8, gross: 142.8 });
     expect(conciergeLineAmounts(service({ sale_price_net: "49.99" }), "19")).toEqual({ net: 49.99, vat: 9.5, gross: 59.49 });

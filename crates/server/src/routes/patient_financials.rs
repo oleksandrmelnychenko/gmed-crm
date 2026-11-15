@@ -64,7 +64,7 @@ struct PatientFinancialQuery {
 }
 
 /// The recipient of `invoice`: frozen for released invoices, live for drafts.
-const INVOICE_RECIPIENT_VALUE: &str = r#"COALESCE(invoice.recipient_snapshot, invoice_recipient_resolve(
+pub(crate) const INVOICE_RECIPIENT_VALUE: &str = r#"COALESCE(invoice.recipient_snapshot, invoice_recipient_resolve(
         invoice.patient_id, invoice.payer_patient_id, invoice.payer_patient_relation_id,
         invoice.payer_contact_name, invoice.payer_contact_email,
         invoice.payer_address_street, invoice.payer_address_zip, invoice.payer_address_city,
@@ -73,6 +73,15 @@ const INVOICE_RECIPIENT_VALUE: &str = r#"COALESCE(invoice.recipient_snapshot, in
 fn recipient_sql(sql: &str) -> String {
     sql.replace("{INVOICE_RECIPIENT_VALUE}", INVOICE_RECIPIENT_VALUE)
 }
+
+/// A third party (Kostenübernehmer) receives and pays `invoice`: its own
+/// payer's role, else the order's. Needs `rcpt.value` and `orders`.
+pub(crate) const THIRD_PARTY_PAYER: &str = r#"(COALESCE((rcpt.value ->> 'is_payer')::boolean, false)
+        AND (CASE WHEN invoice.payer_patient_id IS NOT NULL
+                       OR invoice.payer_patient_relation_id IS NOT NULL
+                       OR NULLIF(btrim(invoice.payer_contact_name), '') IS NOT NULL
+                  THEN invoice.payer_role ELSE orders.payer_role END)
+            IS NOT DISTINCT FROM 'cost_bearer')"#;
 
 #[derive(Deserialize)]
 struct CreatePatientBalanceAdjustmentRequest {
@@ -305,13 +314,19 @@ async fn load_patient_settlement_ledger(
     currency: &str,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
+    viewer: Option<Uuid>,
 ) -> Result<SettlementLedger, sqlx::Error> {
-    let rows = sqlx::query(
+    let sql = recipient_sql(
         r#"WITH scoped_invoices AS (
                SELECT invoice.*, orders.order_number
                FROM invoices invoice
                LEFT JOIN orders ON orders.id = invoice.order_id
+               CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
                WHERE invoice.patient_id = $1
+                 -- In the portal a third party's invoice (and the other
+                 -- parent's) is not the patient's own debt (owner 2026-11-12
+                 -- #7, QA D-05): out of the portal balance like its totals.
+                 AND NOT ($5::boolean AND ({THIRD_PARTY_PAYER} OR {OTHER_REPRESENTATIVE}))
                  AND ($3::uuid IS NULL OR invoice.order_id = $3)
                  AND ($4::uuid IS NULL OR EXISTS (
                         SELECT 1
@@ -751,14 +766,21 @@ async fn load_patient_settlement_ledger(
 
            ORDER BY entry_date, occurred_at, movement_id"#,
     )
-    .bind(patient_id)
-    .bind(to)
-    .bind(query.order_id)
-    .bind(query.package_id)
-    .bind(portal_scope)
-    .bind(currency)
-    .fetch_all(&state.db)
-    .await?;
+    .replace("{THIRD_PARTY_PAYER}", THIRD_PARTY_PAYER)
+    .replace(
+        "{OTHER_REPRESENTATIVE}",
+        &crate::routes::invoices::payer::other_representative_payer_sql("invoice", "$7"),
+    );
+    let rows = sqlx::query(&sql)
+        .bind(patient_id)
+        .bind(to)
+        .bind(query.order_id)
+        .bind(query.package_id)
+        .bind(portal_scope)
+        .bind(currency)
+        .bind(viewer.filter(|_| portal_scope))
+        .fetch_all(&state.db)
+        .await?;
 
     let mut source_movements = rows
         .into_iter()
@@ -1199,7 +1221,10 @@ async fn load_patient_account_statement(
             // the services once: an advance only with the part no final
             // invoice has settled and no credit note has closed (QA D3-01:
             // 1.000 € of services read as 1.600 € billed).
-            invoiced_gross += if invoice_type == "advance" {
+            // A draft is not invoiced yet (QA D-03): listed, not counted.
+            invoiced_gross += if status == "draft" {
+                Decimal::ZERO
+            } else if invoice_type == "advance" {
                 (total_gross - credited - allocated).max(Decimal::ZERO)
             } else {
                 (total_gross - credited).max(Decimal::ZERO)
@@ -1394,7 +1419,7 @@ async fn load_patient_account_statement(
                       external.service_delivered, external.amount_gross,
                       external.currency,
                       balance.patient_receivable_gross + balance.waived_receivable_gross AS original_receivable_gross,
-                      balance.order_service_billed,
+                      balance.order_service_billed, balance.concierge_sale_billed,
                       CASE WHEN $3::date IS NULL THEN balance.waived_receivable_gross ELSE COALESCE((
                           SELECT SUM(waiver.amount_gross)
                           FROM external_invoice_rebilling_waivers waiver
@@ -1503,6 +1528,14 @@ async fn load_patient_account_statement(
             let payment_state = if order_service_billed && source_receivable > Decimal::ZERO {
                 // GMED's cost of a service the patient is billed for.
                 "order_service_cost"
+            } else if row
+                .try_get::<bool, _>("concierge_sale_billed")
+                .unwrap_or(false)
+                && source_receivable > Decimal::ZERO
+            {
+                // A concierge receipt whose service is billed at its sale
+                // price: GMED's cost, not re-billed (QA D-02).
+                "concierge_sale_cost"
             } else if waived_receivable > Decimal::ZERO
                 && remaining_receivable <= Decimal::ZERO
                 && allocated_receivable <= Decimal::ZERO
@@ -1658,9 +1691,17 @@ async fn load_patient_account_statement(
     // (not of credit balances), plus external receivables not yet on a
     // patient invoice.
     let total_due = amount_to_pay + external_receivable;
-    let settlement =
-        load_patient_settlement_ledger(state, patient_id, query, portal_scope, &currency, from, to)
-            .await?;
+    let settlement = load_patient_settlement_ledger(
+        state,
+        patient_id,
+        query,
+        portal_scope,
+        &currency,
+        from,
+        to,
+        viewer,
+    )
+    .await?;
     let reconciliation_required = settlement.settlement_invoice_debit > Decimal::ZERO
         && settlement.external_balance > Decimal::ZERO;
     let settlement_complete = !reconciliation_required
@@ -2248,10 +2289,13 @@ async fn get_patient_financial_summary(
         && expense_currency_mismatch_count == 0
         && receivable_currency_mismatch_count == 0;
     let margin_net = revenue_net - expenses_net;
-    let margin_percent = if revenue_net > Decimal::ZERO {
-        (margin_net / revenue_net * Decimal::new(100, 0)).round_commercial(2)
+    // Without any recorded cost (no supplier invoice or receipt yet) the
+    // margin is not known; never 100 % (QA D-03).
+    let costs_recorded = expenses_net > Decimal::ZERO;
+    let margin_percent = if revenue_net > Decimal::ZERO && costs_recorded {
+        Some((margin_net / revenue_net * Decimal::new(100, 0)).round_commercial(2))
     } else {
-        Decimal::ZERO
+        None
     };
     let margin_allowed = can_read_profit_margin(auth.role);
     let mut issues = Vec::new();
@@ -2301,7 +2345,11 @@ async fn get_patient_financial_summary(
         "expenses_vat": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(expenses_vat)) } else { Value::Null },
         "expenses_gross": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(expenses_gross)) } else { Value::Null },
         "margin_net": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(margin_net)) } else { Value::Null },
-        "margin_percent": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(margin_percent)) } else { Value::Null },
+        "margin_percent": match margin_percent {
+            Some(value) if margin_allowed && expense_economics_valid => serde_json::json!(decimal_to_string(value)),
+            _ => Value::Null,
+        },
+        "costs_recorded": costs_recorded,
         "margin_visible": margin_allowed,
         "economics_valid": expense_economics_valid,
         "reconciliation_required": reconciliation_required,

@@ -22,6 +22,9 @@ export type ConciergeBillingQueueItem = {
   currency: string;
   /** A live draft of the billing tab already bills the service (F-C8). */
   draft_invoice_id?: string | null;
+  /** A live invoice re-bills a receipt of the service at cost (QA D-02). */
+  receipt_invoice_id?: string | null;
+  receipt_invoice_number?: string | null;
 };
 
 /**
@@ -33,9 +36,18 @@ export type ConciergeBillingQueueItem = {
 export type ConciergeQueueAction =
   | { kind: "set_price"; href: string }
   | { kind: "open_draft"; href: string }
+  | { kind: "billed_by_receipt"; href: string; invoiceNumber: string | null }
   | { kind: "bill"; href: string };
 
 export function conciergeQueueAction(item: ConciergeBillingQueueItem): ConciergeQueueAction {
+  // One billing path per concierge cost: its receipt is already re-billed.
+  if (item.receipt_invoice_id) {
+    return {
+      kind: "billed_by_receipt",
+      href: `/invoices?invoice=${encodeURIComponent(item.receipt_invoice_id)}`,
+      invoiceNumber: item.receipt_invoice_number ?? null,
+    };
+  }
   if (item.sale_price === null) return { kind: "set_price", href: conciergeServiceHref(item.id) };
   if (item.draft_invoice_id) {
     return { kind: "open_draft", href: `/invoices?invoice=${encodeURIComponent(item.draft_invoice_id)}` };

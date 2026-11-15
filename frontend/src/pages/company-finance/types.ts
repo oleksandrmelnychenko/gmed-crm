@@ -9,6 +9,8 @@ export type CompanyProviderSettlementStatus =
 
 export type CompanyFinancialSummary = {
   patient_receivables_calculated: string;
+  /** Open on invoices third-party payers pay; not in the patients' debt. */
+  payer_receivables_calculated?: string;
   patient_credits: string;
   provider_payables: string;
   expected_provider_costs: string;
@@ -32,6 +34,9 @@ export type CompanyPatientPosition = {
   patient_name: string;
   is_active: boolean;
   invoice_due: string;
+  /** Open on invoices a third-party payer pays; not in `calculated_balance`. */
+  payer_due?: string;
+  payer_names?: string | null;
   external_receivable: string;
   manual_balance: string;
   available_prepayment: string;

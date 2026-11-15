@@ -25,7 +25,7 @@ const METRIC_ROUTES: Record<string, string> = {
   converted_leads_30d: "/leads?status=converted&status_within_days=30",
   // The rate is converted / created in 90 days: the list shows its numerator.
   lead_to_patient_conversion_rate_pct: "/leads?status=converted&status_within_days=90",
-  // Same figure as "Долг пациентов" on the company finance page.
+  // "Долг пациентов" + "Долг плательщиков" on the company finance page.
   outstanding_receivables_total: "/company-finance",
   // Open advance invoices only, the rule of `open_advance_requests` (release QA 2026-11-13, C F2).
   open_advance_requests_total: "/invoices?open_advances=1",

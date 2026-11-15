@@ -817,6 +817,32 @@ async fn a_third_party_invoice_stays_out_of_the_patients_portal_balance() {
         .expect("the third party's invoice is listed");
     assert_eq!(listed["paid_by"], "third_party");
     assert_eq!(listed["recipient_name"], "Lukas Beispiel");
+    // Money QA D-05: the payer's invoice is no movement of the patient's
+    // portal account, so the closing balance is the patient's own 100.
+    assert_eq!(portal["summary"]["closing_balance"], "100", "{portal}");
+    assert_eq!(portal["summary"]["balance_side"], "debit", "{portal}");
+    assert!(
+        !portal["movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|movement| movement["document_number"] == format!("PAYER-{tag}")),
+        "{portal}"
+    );
+
+    // Money QA D-03: a draft is listed for staff but not counted as invoiced.
+    sqlx::query(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_type, status, total_net, total_vat,
+                total_gross, line_items, created_by
+           ) VALUES ($1, $2, 'final', 'draft', 70, 0, 70, '[]', $3)"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, staff) = request_json(
         &app,

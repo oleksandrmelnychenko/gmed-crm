@@ -36,6 +36,11 @@ export const BILLING_API_ERROR_KEYS: Record<string, string> = {
   concierge_service_other_currency: "api_billing_concierge_service_other_currency",
   concierge_service_no_tax_profile: "api_billing_concierge_service_no_tax_profile",
   invoice_bills_changed_concierge_service: "api_billing_invoice_bills_changed_concierge_service",
+  // One billing path per concierge cost: sale price or receipt (QA D-02).
+  concierge_service_billed_by_receipt: "api_billing_concierge_service_billed_by_receipt",
+  concierge_service_with_its_receipt: "api_billing_concierge_service_with_its_receipt",
+  concierge_receipt_service_billed: "api_billing_concierge_receipt_service_billed",
+  invoice_bills_concierge_service_twice: "api_billing_invoice_bills_concierge_service_twice",
   // advance_settlement.rs
   advance_rest_already_closed: "api_billing_advance_rest_already_closed",
   advance_not_settled_by_final_invoice: "api_billing_advance_not_settled_by_final_invoice",

@@ -43,6 +43,10 @@ const STATEMENT_STATE_LABELS: Record<string, Pair> = {
     "GMED-Kosten – über die Auftragsleistung berechnet",
     "Расход GMED — пациенту выставляется услуга заказа",
   ],
+  concierge_sale_cost: [
+    "GMED-Kosten – Concierge-Leistung zum Verkaufspreis berechnet",
+    "Расход GMED — услуга Concierge выставлена по цене продажи",
+  ],
   rebilling_waived: [
     "Trägt GMED – nicht weiterberechnet",
     "За счёт GMED — не перевыставляется",

@@ -1947,6 +1947,7 @@ function usePatientInvoicesTabContent({
             "invoiced",
             "reconciled_to_patient_invoice",
             "order_service_cost",
+            "concierge_sale_cost",
           ].includes(item.payment_state);
           return (
             <span

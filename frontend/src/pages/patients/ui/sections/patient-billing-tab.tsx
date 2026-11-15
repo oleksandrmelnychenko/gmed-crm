@@ -79,6 +79,11 @@ type BillingExpense = {
   /** The order of the cost: its own, else the order of its Concierge service. */
   proposed_order_id?: string | null;
   concierge_receipt?: boolean;
+  /** The receipt's concierge service and the live invoice that bills it at its sale price (QA D-02). */
+  concierge_service_id?: string | null;
+  concierge_sale_billed?: boolean;
+  concierge_sale_invoice_id?: string | null;
+  concierge_sale_invoice_number?: string | null;
   /** The order's settlement is closed: its waivers stay. */
   settlement_closed?: boolean;
   latest_patient_invoice_id: string | null;
@@ -174,6 +179,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMED", unpaid: "Unbezahlt",
     ready: "Nicht berechnet", reserved: "Im Entwurf / berechnet", afterPayment: "Nach Zahlung", notRequired: "Nicht erforderlich",
     orderService: "Über die Auftragsleistung",
+    conciergeSale: "Bereits als Concierge-Leistung berechnet",
+    conciergeChosen: "Concierge-Leistung gewählt",
     viaConciergeService: "Auftrag der Concierge-Leistung",
     proposedOrder: (order: string) => `Auftrag ${order} aus dem Beleg bzw. seiner Concierge-Leistung übernommen. Bei Bedarf einen anderen wählen.`,
     transitWarning: (order: string, lines: string) => `Auftrag ${order} enthält eine Durchlaufposition (${lines}). Concierge-Kosten werden über die Belege weiterberechnet; eine Durchlaufposition gilt nur für einen vorab bekannten Preis. Prüfen, dass diese Kosten nicht zusätzlich über die Durchlaufposition berechnet werden.`,
@@ -193,6 +200,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     conciergeEmpty: "Keine abrechnungsbereiten Concierge-Leistungen mit Verkaufspreis.",
     conciergeState: {
       in_draft: "Im Entwurf",
+      billed_by_receipt: "Bereits als Beleg berechnet",
+      receipt_selected: "Beleg gewählt",
       other_order: "Anderer Auftrag",
       other_currency: "Andere Währung",
       no_price: "Kein Verkaufspreis",
@@ -213,6 +222,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMED", unpaid: "Не оплачен",
     ready: "Не выставлено", reserved: "В черновике / выставлено", afterPayment: "После оплаты", notRequired: "Не требуется",
     orderService: "Через услугу заказа",
+    conciergeSale: "Уже выставлено как услуга Concierge",
+    conciergeChosen: "Выбрана услуга Concierge",
     viaConciergeService: "Заказ услуги Concierge",
     proposedOrder: (order: string) => `Подставлен заказ ${order} из расхода или его услуги Concierge. При необходимости выберите другой.`,
     transitWarning: (order: string, lines: string) => `В заказе ${order} есть транзитная позиция (${lines}). Расходы Concierge выставляются через перевыставление чеков; транзитная позиция — только для заранее известной цены. Проверьте, что эти расходы не выставляются ещё раз через транзитную позицию.`,
@@ -232,6 +243,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     conciergeEmpty: "Нет готовых к выставлению услуг Concierge с ценой продажи.",
     conciergeState: {
       in_draft: "В черновике",
+      billed_by_receipt: "Уже выставлено как расход по чеку",
+      receipt_selected: "Выбран чек услуги",
       other_order: "Другой заказ",
       other_currency: "Другая валюта",
       no_price: "Нет цены продажи",
@@ -285,9 +298,9 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const readOnly = !canCreate;
   const conciergeServices = workspace?.concierge_services ?? [];
   const pricedConcierge = conciergeServices.filter(hasSalePrice);
-  const unpricedConcierge = conciergeServices.filter(service => !hasSalePrice(service));
+  const unpricedConcierge = conciergeServices.filter(service => !hasSalePrice(service) && !service.receipt_invoice_id);
   const conciergeVatRate = workspace?.concierge_vat_rate ?? null;
-  const conciergeDraft = { orderId, currency: activeCurrency };
+  const conciergeDraft = { orderId, currency: activeCurrency, selectedExpenseIds: selectedExpenses };
   const billableConciergeIds = selectedConcierge.filter(id => {
     const service = pricedConcierge.find(item => item.id === id);
     return Boolean(service) && conciergeServiceState(service as BillingConciergeService, conciergeDraft) === "selectable";
@@ -305,11 +318,11 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     setSelectedConcierge(current => {
       const next = current.filter(id => {
         const service = (workspace?.concierge_services ?? []).find(item => item.id === id);
-        return Boolean(service) && conciergeServiceState(service as BillingConciergeService, { orderId, currency: activeCurrency }) === "selectable";
+        return Boolean(service) && conciergeServiceState(service as BillingConciergeService, { orderId, currency: activeCurrency, selectedExpenseIds: selectedExpenses }) === "selectable";
       });
       return next.length === current.length ? current : next;
     });
-  }, [activeCurrency, orderId, quoteId, quotes, workspace]);
+  }, [activeCurrency, orderId, quoteId, quotes, workspace, selectedExpenses]);
 
   const serviceTotal = selectedLines.reduce((sum, index) => {
     const line = serviceLines[index];
@@ -422,12 +435,18 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     }
   }
 
+  // The receipt's concierge service is ticked at its sale price for this draft.
+  const conciergeChosenFor = (expense: BillingExpense) =>
+    Boolean(expense.concierge_service_id) && billableConciergeIds.includes(expense.concierge_service_id as string);
   const activeWaivers = (expense: BillingExpense) =>
     (expense.rebilling_waivers ?? []).filter(waiver => !waiver.reversed_at);
   const expenseState = (expense: BillingExpense) => {
     if (expense.paid_by === "patient") return copy.notRequired;
     // GMED's cost of an order service: the patient pays the service line.
     if (expense.order_service_billed) return copy.orderService;
+    // One billing path per concierge cost (QA D-02).
+    if (expense.concierge_sale_billed) return copy.conciergeSale;
+    if (conciergeChosenFor(expense)) return copy.conciergeChosen;
     // GMED bears the whole rest: nothing of it is (still) on a patient invoice.
     if (Number(expense.remaining_receivable_gross) <= 0
       && Number(expense.waived_receivable_gross ?? 0) > 0
@@ -470,12 +489,12 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const paymentLabel = (expense: BillingExpense) => expense.paid_by === "patient"
     ? copy.patientPaid : Number(expense.company_paid_gross) > 0 ? copy.gmedPaid : copy.unpaid;
   const expenseColumns: ColumnDef<BillingExpense>[] = [
-    { id: "select", label: "", accessor: row => selectedExpenses.includes(row.id), width: 52, required: true, render: row => <input className={checkboxClass} type="checkbox" disabled={!row.billable || row.currency !== activeCurrency || saving} checked={selectedExpenses.includes(row.id)} aria-label={`${copy.expenses}: ${row.external_invoice_number}`} onChange={event => toggleExpense(row, event.target.checked)} /> },
+    { id: "select", label: "", accessor: row => selectedExpenses.includes(row.id), width: 52, required: true, render: row => <input className={checkboxClass} type="checkbox" disabled={!row.billable || row.currency !== activeCurrency || conciergeChosenFor(row) || saving} checked={selectedExpenses.includes(row.id)} aria-label={`${copy.expenses}: ${row.external_invoice_number}`} onChange={event => toggleExpense(row, event.target.checked)} /> },
     { id: "document", label: de ? "Beleg" : "Документ", accessor: row => row.external_invoice_number, width: 190, render: row => <span className="font-mono font-semibold">{row.external_invoice_number}</span> },
     { id: "provider", label: de ? "Leistungserbringer" : "Поставщик", accessor: row => row.provider_name ?? "", width: 210, render: row => row.provider_name || "—" },
     { id: "source", label: copy.source, accessor: row => row.source_order_number ?? linkedOrderNumber(row) ?? "", width: 170, render: row => row.source_order_number ? <span className="font-mono text-xs">{row.source_order_number}</span> : linkedOrderNumber(row) ? <span className="font-mono text-xs" title={copy.viaConciergeService}>{linkedOrderNumber(row)}</span> : <StatusBadge tone="neutral">{de ? "Ohne Auftrag" : "Без заказа"}</StatusBadge> },
     { id: "payment", label: copy.payment, accessor: paymentLabel, width: 135, render: row => <StatusBadge tone={row.paid_by === "patient" ? "info" : Number(row.company_paid_gross) > 0 ? "success" : "neutral"}>{paymentLabel(row)}</StatusBadge> },
-    { id: "patient_invoice", label: copy.patientInvoice, accessor: expenseState, width: 190, render: row => row.latest_patient_invoice_id ? <StaffLink className="font-mono text-xs font-semibold text-primary" to={`/invoices?invoice=${row.latest_patient_invoice_id}`}>{row.latest_patient_invoice_number || expenseState(row)}</StaffLink> : <StatusBadge tone={row.billable ? "warning" : "neutral"}>{expenseState(row)}</StatusBadge> },
+    { id: "patient_invoice", label: copy.patientInvoice, accessor: expenseState, width: 190, render: row => row.concierge_sale_billed && row.concierge_sale_invoice_id ? <StaffLink className="text-xs font-semibold text-primary" to={`/invoices?invoice=${row.concierge_sale_invoice_id}`}>{[copy.conciergeSale, row.concierge_sale_invoice_number].filter(Boolean).join(" · ")}</StaffLink> : row.latest_patient_invoice_id ? <StaffLink className="font-mono text-xs font-semibold text-primary" to={`/invoices?invoice=${row.latest_patient_invoice_id}`}>{row.latest_patient_invoice_number || expenseState(row)}</StaffLink> : <StatusBadge tone={row.billable ? "warning" : "neutral"}>{expenseState(row)}</StatusBadge> },
     { id: "amount", label: copy.amount, accessor: row => Number(row.remaining_receivable_gross), width: 145, render: row => <span className="block text-right font-mono font-semibold tabular-nums">{formatMoneyAmount(row.billable ? row.remaining_receivable_gross : row.amount_gross, row.currency)}</span> },
     // CEO and Billing drop an unbilled rest from re-billing (GMED bears it)
     // or put a waived part back (owner 2026-10-12).
@@ -524,6 +543,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
               <span>{details}</span>
               {state !== "selectable" ? <StatusBadge tone="neutral">{copy.conciergeState[state]}</StatusBadge> : null}
               {service.invoice_id ? <StaffLink className="font-mono font-semibold text-primary hover:underline" to={`/invoices?invoice=${encodeURIComponent(service.invoice_id)}`}>{service.invoice_number || copy.open}</StaffLink> : null}
+              {!service.invoice_id && service.receipt_invoice_id ? <StaffLink className="font-mono font-semibold text-primary hover:underline" to={`/invoices?invoice=${encodeURIComponent(service.receipt_invoice_id)}`}>{service.receipt_invoice_number || copy.open}</StaffLink> : null}
             </span>
           </span>
           <span className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums">{formatMoneyAmount(String(amounts.gross), service.currency)}</span>
