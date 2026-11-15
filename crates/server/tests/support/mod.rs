@@ -529,6 +529,15 @@ async fn start_docker_postgres() -> Result<TestDatabaseBackend, String> {
         "-p",
         "127.0.0.1::5432",
         &image,
+        // A throwaway test server: durability buys nothing here, and every
+        // suite creates a database and runs all migrations, so fsync made
+        // the CI gate disk-bound (2-5x slower when several runs share it).
+        "-c",
+        "fsync=off",
+        "-c",
+        "synchronous_commit=off",
+        "-c",
+        "full_page_writes=off",
     ])?;
 
     let port_output = docker_stdout(&["port", &container_id, "5432/tcp"]).inspect_err(|_| {
