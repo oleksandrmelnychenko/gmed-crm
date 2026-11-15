@@ -24,6 +24,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { uiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { documentPartyUploadTypeLabel } from "@/pages/documents/model/document-model";
+import { isOutdatedCurrentVersion } from "@/pages/documents/model/outdated-document-version";
 import {
   DEFAULT_DOCUMENT_PAGE_SIZE,
   DOCUMENT_PAGE_SIZE_OPTIONS,
@@ -39,6 +40,8 @@ type DocumentsGridItem = {
   translation_source_document_id?: string | null;
   version_number: number;
   is_latest_version: boolean;
+  /** `false`: the order or its terms changed after this PDF was made. */
+  terms_current?: boolean | null;
   patient_name: string | null;
   patient_pid: string | null;
   /** A lead's document has no patient yet: the lead names it. */
@@ -501,14 +504,27 @@ export function DocumentsGrid({
       label: statusLabel,
       accessor: (item) => item.status,
       sortable: true,
-      width: 140,
+      width: 170,
       render: (item) => (
-        <Badge
-          variant="outline"
-          className={cn("rounded-full text-[10px]", statusBadge(item.status))}
-        >
-          {formatStatusLabel(item.status)}
-        </Badge>
+        <div className="flex min-w-0 items-center gap-1">
+          <Badge
+            variant="outline"
+            className={cn("shrink-0 rounded-full text-[10px]", statusBadge(item.status))}
+          >
+            {formatStatusLabel(item.status)}
+          </Badge>
+          {/* Needs a new version before it is signed (owner 2026-11-15). */}
+          {isOutdatedCurrentVersion(item) ? (
+            <Badge
+              variant="outline"
+              className="min-w-0 truncate rounded-full border-amber-300 bg-amber-50 text-[10px] text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+              title={lang === "de" ? "Veraltet, neue Version nötig" : "Устарел, нужна новая версия"}
+              data-testid={`document-outdated-${item.id}`}
+            >
+              {lang === "de" ? "Veraltet" : "Устарел"}
+            </Badge>
+          ) : null}
+        </div>
       ),
     },
     {

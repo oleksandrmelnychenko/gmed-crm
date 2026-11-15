@@ -1,5 +1,5 @@
 import { HeadingMarker, SectionHeading } from "@/components/ui/section-heading";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { FileCheck2, FileSearch, FileText, LoaderCircle, PenTool, ScanText } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
@@ -33,14 +33,25 @@ type Props = {
   disabled?: boolean;
   signed?: boolean;
   onDone?: () => void;
+  /** Controlled dialog: opened by the caller, e.g. right after a new version was made. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Only the dialog, without its own button (the caller opens it). */
+  hideTrigger?: boolean;
+  /** The outdated version this one replaces: its last request's recipients are the suggested signers. */
+  prefillSignersFrom?: string;
+  /** More actions in the dialog header, e.g. «Передать клиенту» for a new version. */
+  headerExtra?: ReactNode;
 } & ({ documentId: string; scope?: never } | { documentId?: never; scope: DocumentScope });
 
 // Opening a dialog is read-only. The existing signing API remains the authority
 // for document ACLs, PDF eligibility and permission to send invitations.
-export function DocumentSignatureAction({ documentId, scope, title, showRequestDetails, iconOnly, disabled, signed = false, onDone }: Props) {
+export function DocumentSignatureAction({ documentId, scope, title, showRequestDetails, iconOnly, disabled, signed = false, onDone, open: controlledOpen, onOpenChange, hideTrigger = false, prefillSignersFrom, headerExtra }: Props) {
   const { user } = useAuth();
   const { lang } = useLang();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (nextOpen: boolean) => { setUncontrolledOpen(nextOpen); onOpenChange?.(nextOpen); };
   const [dirty, setDirty] = useState(false);
   const changed = useRef(false);
   const summary = useSignatureSummary(user && SIGNING_ROLES.includes(user.role) ? user.id : undefined, documentId);
@@ -71,7 +82,7 @@ export function DocumentSignatureAction({ documentId, scope, title, showRequestD
   }
 
   return <>
-    <Button
+    {hideTrigger ? null : <Button
       type="button" variant={iconOnly ? "ghost" : "default"} size={iconOnly ? "icon-sm" : "sm"}
       title={presentation.label} aria-label={`${showRequestDetails ? requestAction : label}: ${title}`} disabled={disabled}
       aria-description={summary ? presentation.label : undefined}
@@ -81,7 +92,7 @@ export function DocumentSignatureAction({ documentId, scope, title, showRequestD
       onKeyDown={event => event.stopPropagation()}
     >
       <TriggerIcon aria-hidden="true" className="size-4" />{!iconOnly && (showRequestDetails ? requestAction : presentation.label)}
-    </Button>
+    </Button>}
     <Dialog open={open} onOpenChange={changeOpen} dirty={dirty}>
       <DialogContent className="grid h-[min(940px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:h-[min(92dvh,940px)] sm:w-[96vw] sm:max-w-[1480px]" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
         if (["Enter", " ", "ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) event.stopPropagation();
@@ -89,15 +100,16 @@ export function DocumentSignatureAction({ documentId, scope, title, showRequestD
         <DialogHeader className="border-b border-border/70 px-5 py-4 pr-14">
           <DialogTitle><SectionHeading icon={PenTool}>{label}</SectionHeading></DialogTitle>
           <DialogDescription className="wrap-anywhere text-xs">{title}</DialogDescription>
+          {headerExtra ? <div className="flex flex-wrap items-center gap-2 pt-1">{headerExtra}</div> : null}
         </DialogHeader>
-          {open ? <SignatureWorkspace key={documentId ?? `${scope?.patientId}:${scope?.orderId}:${scope?.leadId}`} documentId={documentId} scope={scope} title={title} onDirtyChange={setDirty} onSent={finishSend} onDone={() => { changed.current = true; }} /> : null}
+          {open ? <SignatureWorkspace key={documentId ?? `${scope?.patientId}:${scope?.orderId}:${scope?.leadId}`} documentId={documentId} scope={scope} title={title} prefillSignersFrom={prefillSignersFrom} onDirtyChange={setDirty} onSent={finishSend} onDone={() => { changed.current = true; }} /> : null}
       </DialogContent>
     </Dialog>
   </>;
 }
 
-function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange, onSent }: {
-  documentId?: string; scope?: DocumentScope; title: string; onDone?: () => void; onDirtyChange: (dirty: boolean) => void; onSent: (testMode: boolean) => void;
+function SignatureWorkspace({ documentId, scope, title, prefillSignersFrom, onDone, onDirtyChange, onSent }: {
+  documentId?: string; scope?: DocumentScope; title: string; prefillSignersFrom?: string; onDone?: () => void; onDirtyChange: (dirty: boolean) => void; onSent: (testMode: boolean) => void;
 }) {
   const { lang } = useLang();
   const overlay = useContext(OverlayDirtyContext);
@@ -205,7 +217,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange, o
       {previewId ? <SignatureDocumentPreview key={previewId} documentId={previewId} packageDocuments={packageDocuments} onReady={handlePreviewReady} /> : null}
     </section>
     <section aria-label={tx("Подписание документа", "Dokument unterzeichnen")} className="min-w-0 space-y-4 bg-muted/10 p-3.5 lg:overflow-y-auto">
-    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} onSent={onSent} previewReady={previewedDocuments.includes(selectedId)} previewedDocumentIds={previewedDocuments} onPreviewRelated={(id, kind) => setRelatedPreview({ id, kind })} onPackageSelectionChange={setPackageSelection} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setRelatedPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setRelatedPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
+    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} prefillSignersFrom={selectedId === documentId ? prefillSignersFrom : undefined} onSent={onSent} previewReady={previewedDocuments.includes(selectedId)} previewedDocumentIds={previewedDocuments} onPreviewRelated={(id, kind) => setRelatedPreview({ id, kind })} onPackageSelectionChange={setPackageSelection} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setRelatedPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setRelatedPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
       clearApiCache("/documents");
       refreshSignatureSummaries();
       onDone?.();

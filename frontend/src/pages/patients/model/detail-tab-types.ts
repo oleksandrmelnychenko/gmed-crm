@@ -97,6 +97,8 @@ export type DocumentItem = {
   version_root_document_id?: string | null;
   replaces_document_id?: string | null;
   version_number?: number | null;
+  /** `false`: the order or its terms changed after this PDF was made (`document_terms_current`). */
+  terms_current?: boolean | null;
   file_size?: number | null;
   is_medical?: boolean;
   art?: string | null;

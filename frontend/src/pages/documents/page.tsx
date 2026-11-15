@@ -271,6 +271,14 @@ import type {
 } from "./model/types";
 import { MarkComplianceSignedControl } from "./ui/mark-compliance-signed-control";
 import { DocumentSignatureAction } from "./ui/document-signature-action";
+import { OutdatedSignatureDocuments } from "./ui/signature-status";
+import { isOutdatedCurrentVersion, outdatedDocumentIds } from "./model/outdated-document-version";
+import {
+  OutdatedDocumentChip,
+  RenewOutdatedDocumentButton,
+  useCanRenewOutdatedDocuments,
+  useOutdatedDocumentRenewal,
+} from "./ui/outdated-document-renewal";
 import { DocumentPreviewSurface } from "./ui/document-preview-surface";
 import {
   DocumentTranslationDialog,
@@ -1674,6 +1682,38 @@ function StaffDocumentsPage({
     () => templateForDocument(templates, detail),
     [detail, templates],
   );
+  // Outdated order documents (`terms_current: false`) of patients too, whose
+  // lead wizard is frozen: the signature dialog says «Устарел», and one click
+  // makes the new version and opens its signature dialog (owner 2026-11-15).
+  const canRenewOutdated = useCanRenewOutdatedDocuments() && canManage;
+  const pageOutdatedIds = useMemo(
+    () => outdatedDocumentIds(detail ? [...documents, detail] : documents),
+    [detail, documents],
+  );
+  const detailOutdated = Boolean(detail && isOutdatedCurrentVersion(detail));
+  const outdatedRenewal = useOutdatedDocumentRenewal({
+    onRenewed: (created) => {
+      refresh();
+      if (detail?.id !== created.id) openDocument(created.id);
+    },
+    onNeedsForm: (previousId) => {
+      const target = detail?.id === previousId ? detail : null;
+      if (target) void openReplacementTemplate(target);
+      else openDocument(previousId);
+    },
+  });
+  // «Создать новую версию» from a card whose template needs manual input
+  // lands here with `new_version=1`: the replacement form opens prefilled.
+  const requestedNewVersion = searchParams.get("new_version") === "1";
+  const newVersionOpened = useRef("");
+  useEffect(() => {
+    if (!requestedNewVersion || !canManage || !detail || !currentDetailTemplate) return;
+    if (newVersionOpened.current === detail.id) return;
+    if (!detail.is_latest_version || detail.status === "archived") return;
+    newVersionOpened.current = detail.id;
+    void openReplacementTemplate(detail);
+    // openReplacementTemplate reads the current detail; it runs once per document.
+  }, [requestedNewVersion, canManage, detail, currentDetailTemplate]);
   const canReviewSelectedDocument = Boolean(
     !canManage &&
       canManageIntake &&
@@ -3509,7 +3549,9 @@ function StaffDocumentsPage({
   }
 
   return (
+    <OutdatedSignatureDocuments.Provider value={pageOutdatedIds}>
     <div className="space-y-4">
+      {canRenewOutdated ? outdatedRenewal.dialog : null}
       <DocumentWorkspaceNav
         showTranslationQueue={canViewQueue}
         showIntakeQueue={canManageIntake}
@@ -6703,6 +6745,16 @@ function StaffDocumentsPage({
                       {selectedDocumentReleasable ? (
                         <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} onDone={() => refresh()} />
                       ) : null}
+                      {/* The order changed after this PDF was made: one click makes
+                          the new version from the current data (owner 2026-11-15). */}
+                      {detailOutdated ? <OutdatedDocumentChip className="shrink-0" /> : null}
+                      {canRenewOutdated && detailOutdated ? (
+                        <RenewOutdatedDocumentButton
+                          documentId={detail.id}
+                          busyId={outdatedRenewal.busyId}
+                          onRenew={(id) => void outdatedRenewal.renew(id)}
+                        />
+                      ) : null}
                       {/* The server only replaces the newest, non-archived version. */}
                       {canManage &&
                       currentDetailTemplate &&
@@ -8205,6 +8257,7 @@ function StaffDocumentsPage({
         );
       })()}
     </div>
+    </OutdatedSignatureDocuments.Provider>
   );
 }
 

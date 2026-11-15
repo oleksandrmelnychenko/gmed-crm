@@ -64,6 +64,16 @@ import {
   documentTranslationActionLabel,
 } from "@/pages/documents/ui/document-translation-dialog";
 import { fetchDocumentBlob } from "@/pages/documents/data/document-api";
+import { OutdatedSignatureDocuments } from "@/pages/documents/ui/signature-status";
+import { isOutdatedCurrentVersion, outdatedDocumentIds } from "@/pages/documents/model/outdated-document-version";
+import {
+  OutdatedDocumentChip,
+  RenewOutdatedDocumentButton,
+  useCanRenewOutdatedDocuments,
+  useOutdatedDocumentRenewal,
+} from "@/pages/documents/ui/outdated-document-renewal";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
+import { DocumentPortalReleaseAction } from "@/pages/documents/ui/document-portal-release-action";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -277,6 +287,19 @@ export function PatientDocumentsTab({
   const [recognizingDocumentId, setRecognizingDocumentId] = useState<string | null>(null);
   const [translationDocument, setTranslationDocument] = useState<DocumentItem | null>(null);
   const [translationEditing, setTranslationEditing] = useState<DocumentTranslationEditTarget | null>(null);
+  const { staffGo } = useStaffNavigate();
+  // A converted patient's order documents whose terms changed after they were
+  // made: a new version from the current data, then the signature dialog
+  // (owner request 2026-11-15). The lead wizard is frozen after conversion.
+  const canRenewOutdated = useCanRenewOutdatedDocuments() && canManageDocuments;
+  const outdatedIds = useMemo(() => outdatedDocumentIds(documents), [documents]);
+  const renewal = useOutdatedDocumentRenewal({
+    onRenewed: () => {
+      closeDocumentPreview();
+      onDocumentGenerated();
+    },
+    onNeedsForm: (previousId) => staffGo(`/documents/${encodeURIComponent(previousId)}?new_version=1`),
+  });
 
   // A saved translation opens in the translation editor (original on the
   // left, editable text on the right) instead of the read-only preview.
@@ -565,15 +588,20 @@ export function PatientDocumentsTab({
         // Status and the DEMO signature side by side, never clipped.
         width: 240,
         render: (doc) => (
-          <DocumentStatusBadges
-            documentId={doc.id}
-            statusLabel={doc.status ? statusLabel(doc.status) : commonNotSet}
-            statusClassName={cn(
-              "rounded-full",
-              statusColors[doc.status ?? ""] ??
-                "border-border/60 bg-muted/25 text-muted-foreground",
-            )}
-          />
+          <span className="flex min-w-0 items-center gap-1.5">
+            <DocumentStatusBadges
+              documentId={doc.id}
+              statusLabel={doc.status ? statusLabel(doc.status) : commonNotSet}
+              statusClassName={cn(
+                "rounded-full",
+                statusColors[doc.status ?? ""] ??
+                  "border-border/60 bg-muted/25 text-muted-foreground",
+              )}
+            />
+            {isOutdatedCurrentVersion(doc) ? (
+              <OutdatedDocumentChip className="shrink-0 whitespace-nowrap" />
+            ) : null}
+          </span>
         ),
       },
       {
@@ -621,6 +649,7 @@ export function PatientDocumentsTab({
 
   return (
     <TabsContent value="documents" className="space-y-4 mt-4 min-h-[400px]">
+      <OutdatedSignatureDocuments.Provider value={outdatedIds}>
       {!tabLoading &&
       documentAlerts &&
       documentAlerts.configured_rule_count > 0 &&
@@ -683,6 +712,15 @@ export function PatientDocumentsTab({
           onRowClick={(doc) => void openPatientDocumentPreview(doc)}
           rowActions={(doc) => (
             <>
+              {canRenewOutdated && isOutdatedCurrentVersion(doc) ? (
+                <RenewOutdatedDocumentButton
+                  documentId={doc.id}
+                  busyId={renewal.busyId}
+                  onRenew={(id) => void renewal.renew(id)}
+                  title={documentDisplayName(doc, l)}
+                  iconOnly
+                />
+              ) : null}
               {canManageDocuments ? (
                 <>
                   {onRecognizeDocument && canRecognizePatientDocument(doc) ? (
@@ -737,7 +775,7 @@ export function PatientDocumentsTab({
             </>
           )}
           rowActionsAlwaysVisible
-          rowActionsWidth={canManageDocuments ? 118 : 46}
+          rowActionsWidth={canManageDocuments ? (canRenewOutdated && outdatedIds.length > 0 ? 150 : 118) : 46}
           emptyState={
             <EmptyCell>
               {documents.length === 0
@@ -869,7 +907,17 @@ export function PatientDocumentsTab({
               </div>
               {documentPreview ? (
                 <div className="flex flex-wrap items-center gap-2">
+                {canRenewOutdated && outdatedIds.includes(documentPreview.id) ? (
+                  <RenewOutdatedDocumentButton
+                    documentId={documentPreview.id}
+                    busyId={renewal.busyId}
+                    onRenew={(id) => void renewal.renew(id)}
+                  />
+                ) : null}
                 <DocumentSignatureAction documentId={documentPreview.id} title={documentPreview.title} onDone={onDocumentGenerated} />
+                {canRenewOutdated && !outdatedIds.includes(documentPreview.id) ? (
+                  <DocumentPortalReleaseAction key={documentPreview.id} documentId={documentPreview.id} onReleased={onDocumentGenerated} />
+                ) : null}
                 <Button
                   type="button"
                   size="sm"
@@ -953,7 +1001,12 @@ export function PatientDocumentsTab({
               setGenerateOpen(open);
               if (!open) setGenerateTemplateId(null);
             }}
-            onGenerated={onDocumentGenerated}
+            onGenerated={(created) => {
+              onDocumentGenerated();
+              // Next steps for the new document right away: signature or the
+              // client's portal, each an explicit click (owner 2026-11-15).
+              if (canRenewOutdated) renewal.offer(created);
+            }}
           />
           <PatientDocumentEditSheet
             open={Boolean(editDocumentId)}
@@ -965,6 +1018,8 @@ export function PatientDocumentsTab({
           />
         </>
       ) : null}
+      {canRenewOutdated ? renewal.dialog : null}
+      </OutdatedSignatureDocuments.Provider>
     </TabsContent>
   );
 }

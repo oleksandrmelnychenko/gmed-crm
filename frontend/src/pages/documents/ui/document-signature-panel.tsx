@@ -213,9 +213,17 @@ type SignaturePanelProps = {
   previewedDocumentIds?: string[];
   expanded?: boolean;
   previewReady?: boolean;
+  /** The outdated version this document replaces: its last request's recipients are suggested. */
+  prefillSignersFrom?: string;
 };
 
-export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, onPackageSelectionChange, previewedDocumentIds = [], expanded = false, previewReady = true }: SignaturePanelProps) {
+/** The recipients of a document's most recent signature request, without the frames of that PDF. */
+export function previousRequestSigners(state: Pick<SignatureState, "requests"> | null | undefined): Signer[] {
+  const last = state?.requests[0];
+  return (last?.signers ?? []).map(({ first_name, last_name, email, role }) => ({ first_name, last_name, email, role }));
+}
+
+export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, onPackageSelectionChange, previewedDocumentIds = [], expanded = false, previewReady = true, prefillSignersFrom }: SignaturePanelProps) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [open, setOpen] = useState(expanded);
@@ -391,6 +399,30 @@ export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChan
     const next = signersForPolicy(mergeSuggestions(documentSuggestions, candidates.suggested_signers), policy);
     setSigners(next); setBaseline(next); setExcludedSigners([]); setEditingSigners([]);
   }, [candidates, policy, documentSuggestions]);
+
+  // A new version of an outdated document goes to the people the previous
+  // version was sent to (owner request 2026-11-15). Only a suggestion: staff
+  // still check the list and press «Отправить» themselves; nothing is sent here.
+  const prefillRequested = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    if (!prefillSignersFrom || !state || prefillRequested.current) return;
+    prefillRequested.current = true;
+    // The new version's own requests come first.
+    if (state.requests.length > 0) return;
+    const signerPolicy = state.signer_policy;
+    fetchSignatureState(prefillSignersFrom)
+      .then(previous => {
+        const recipients = previousRequestSigners(previous);
+        if (!mounted.current || signersTouched.current || recipients.length === 0) return;
+        const next = signersForPolicy(recipients, signerPolicy);
+        signersTouched.current = true;
+        setSigners(next); setBaseline(next); setExcludedSigners([]); setEditingSigners([]);
+      })
+      // Only a convenience: without it the server's suggestions stay.
+      .catch(() => undefined);
+  }, [prefillSignersFrom, state]);
 
   // The parent keys the component by document ID: draft recipients cannot cross documents.
   if (forbidden) return expanded ? <p role="alert" className="text-sm text-destructive">{tx("Недостаточно прав для электронного подписания этого документа.", "Keine Berechtigung für die elektronische Signatur dieses Dokuments.")}</p> : null;

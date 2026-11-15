@@ -213,6 +213,7 @@ import {
   withSignedTermsConfirmation,
 } from "./model/client-signature";
 import { OrderResignAction } from "./ui/order-resign-action";
+import { OrderOutdatedDocuments } from "./ui/order-outdated-documents";
 import { skipPassiveOrderRefresh } from "./model/order-realtime";
 import { billingSourceLabel } from "./model/billing-source";
 import {
@@ -4449,6 +4450,19 @@ function useOrdersPageContent() {
                             ) : null}
                           </span>
                         </Banner>
+                      </div>
+                    ) : null}
+                    {orderDetail.status !== "cancelled" ? (
+                      <div className="mt-3 empty:hidden">
+                        <OrderOutdatedDocuments
+                          orderId={orderDetail.id}
+                          documents={orderDocuments}
+                          lang={lang}
+                          onChanged={() => {
+                            clearApiCache(`/documents?order_id=${orderDetail.id}`);
+                            triggerReload();
+                          }}
+                        />
                       </div>
                     ) : null}
                   </div>

@@ -72,7 +72,8 @@ type PatientDocumentGenerateDialogProps = {
   initialTemplateId?: string | null;
   onOpenChange: (open: boolean) => void;
   /** Called after a document is generated (the list also refreshes via realtime). */
-  onGenerated?: () => void;
+  /** The created document, so the card can offer signature and the client's portal next. */
+  onGenerated?: (created: { id: string; title: string }) => void;
 };
 
 export function PatientDocumentGenerateDialog({
@@ -377,7 +378,10 @@ export function PatientDocumentGenerateDialog({
           `Dokument erstellt: ${response.auto_name}`,
         ),
       );
-      onGenerated?.();
+      onGenerated?.({
+        id: response.id,
+        title: response.original_filename || response.auto_name || selectedTemplate.label,
+      });
       onOpenChange(false);
     } catch (error) {
       // Every refusal in the user's language (QA 2026-10-11 B-19).

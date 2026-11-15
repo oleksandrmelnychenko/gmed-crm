@@ -922,6 +922,12 @@ export type SupportingDocumentOption = {
   category?: string | null;
   has_stored_file?: boolean;
   file_deleted_at?: string | null;
+  status?: string | null;
+  /** Empty while the order still belongs to a lead (its wizard makes new versions). */
+  patient_id?: string | null;
+  is_latest_version?: boolean | null;
+  /** `false`: the order or its terms changed after this PDF was made (`document_terms_current`). */
+  terms_current?: boolean | null;
 };
 
 export type ExternalInvoiceFormState = {
