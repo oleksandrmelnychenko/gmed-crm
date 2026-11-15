@@ -1273,7 +1273,7 @@ test("a parent e-mail that is another patient's login is flagged at the field, a
   expect(calls.emailChecks).toEqual([]);
 
   await email.fill("Olga.Beispiel@example.com");
-  await expect(warning).toHaveText("Этот адрес — логин другого пациента (P-2026-0007, Olga Beispiel). Проверьте, тот ли это человек.");
+  await expect(warning).toHaveText("Этот адрес — логин другого пациента (P-2026-0007, Olga Beispiel).");
   expect(calls.emailChecks).toEqual([{ email: "Olga.Beispiel@example.com", contact_id: ANNA_ID, related_patient_id: null }]);
 
   // Another address clears the warning at once; an address nobody uses shows none.

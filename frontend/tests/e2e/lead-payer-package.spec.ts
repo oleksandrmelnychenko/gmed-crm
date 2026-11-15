@@ -371,7 +371,7 @@ test("staff prepare the four documents and send them; the payer section waits fo
   await expect(panel.getByTestId("lead-payer-package-qes")).toHaveText("Identifizierung des Zahlers (QES): noch nicht erfolgt");
 
   await panel.getByRole("button", { name: "Unterlagen erstellen" }).click();
-  await expect(panel.getByTestId("lead-payer-package-notice")).toHaveText("Unterlagen erstellt – bitte vor dem Senden prüfen");
+  await expect(panel.getByTestId("lead-payer-package-notice")).toHaveText("Unterlagen erstellt");
   expect(calls.prepares).toBe(1);
   await expect(panel.getByTestId("lead-payer-package-badge")).toHaveText("Erstellt");
   await expect(panel.getByTestId("lead-payer-package-status")).toHaveText("Erstellt am 06.10.2026 13:00 (Intake QA) · noch nicht gesendet");

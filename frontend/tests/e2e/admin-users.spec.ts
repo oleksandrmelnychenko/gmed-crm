@@ -269,7 +269,7 @@ test("IT admin resets the second factor only after confirming; the open dialog s
   // The first click only asks.
   await resetButton.click();
   const confirm = page.getByRole("alertdialog");
-  await expect(confirm).toContainText("Второй фактор будет удалён");
+  await expect(confirm).toContainText("Сбросить двухфакторный вход этого сотрудника? Все его сессии завершатся.");
   await confirm.getByRole("button", { name: "Отмена", exact: true }).click();
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
   expect(state.totpResets).toEqual([]);

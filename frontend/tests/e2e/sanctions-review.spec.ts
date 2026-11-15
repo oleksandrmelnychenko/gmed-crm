@@ -366,7 +366,7 @@ test("confirming warns that the stop is final (German, phone width)", async ({ p
   const card = page.getByTestId("sanctions-hit");
   await card.getByRole("button", { name: "Treffer bestätigen" }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("kann nicht zurückgenommen werden");
+  await expect(dialog).toContainText("Die Bestätigung ist endgültig");
   await page.screenshot({ path: "../tmp/sanctions-confirm-mobile-de.png", fullPage: true });
   await dialog.getByLabel("Begründung").fill("Name, Geburtsdatum und Staatsangehörigkeit stimmen überein");
   await dialog.getByRole("button", { name: "Treffer bestätigen" }).click();

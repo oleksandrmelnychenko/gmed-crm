@@ -134,7 +134,8 @@ test("it admin lands on the technical cabinet without patients", async ({ page }
     ],
     ["patients", "leads", "orders", "invoices", "appointments", "chat"],
   );
-  await expect(page.getByText("Технический кабинет", { exact: false })).toBeVisible();
+  // Role blurbs were dropped (fix-67); the cabinet shows the greeting like the others.
+  await expect(page.getByTestId("role-dashboard-greeting")).toBeVisible();
   await expect(page.getByRole("link", { name: "Пациенты", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Пользователи и роли", exact: true })).toBeVisible();
 });

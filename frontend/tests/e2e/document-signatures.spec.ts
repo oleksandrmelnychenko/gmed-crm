@@ -529,7 +529,7 @@ test("registry action opens the selected PDF without navigating the row and also
   const fixture = await prepare(page);
   const stateReads: string[] = [];
   page.on("request", request => { if (request.url().endsWith("/signature-requests")) stateReads.push(request.url()); });
-  await page.route(`**/api/v1/documents/${documentId}/download`, route => route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\n%%EOF" }));
+  await page.route(`**/api/v1/documents/${documentId}/download`, route => route.fulfill({ contentType: "application/pdf", body: previewPdf }));
   await page.goto("/documents");
   const action = page.locator(`[data-document-signature-id="${documentId}"]:visible`);
   await expect(action).toBeVisible();
@@ -546,15 +546,15 @@ test("registry action opens the selected PDF without navigating the row and also
   await page.keyboard.press("Escape");
   await expect(signing).toHaveCount(0);
   await page.locator(`[data-document-preview-id="${documentId}"]:visible`).click();
-  const preview = page.getByRole("dialog").filter({ has: page.locator("iframe") });
+  // PDFs are drawn by pdf.js (504b8ea2), not in an <iframe>.
+  const preview = page.getByRole("dialog", { name: "vertrag.pdf", exact: true });
   await expect(preview).toBeVisible();
+  await expect(preview.getByTestId("pdf-pages-preview")).toHaveAttribute("data-state", "ready");
   await preview.locator(`[data-document-signature-id="${documentId}"]`).click();
   await expect(signing.getByLabel("Vorname", { exact: true }).first()).toHaveValue("");
   await page.setViewportSize({ width: 390, height: 844 });
   await signing.screenshot({ path: "../artifacts/design-qa/signature-nested-mobile.png" });
-  // Chrome's PDF viewer in the preview underneath takes keyboard focus once its PDF has
-  // loaded, which may happen after the signing dialog opened. Press Escape from inside
-  // the signing dialog, as a user working in it would.
+  // Press Escape from inside the signing dialog, as a user working in it would.
   await signing.getByLabel("Vorname", { exact: true }).first().press("Escape");
   await expect(signing).toHaveCount(0);
   await expect(preview).toBeVisible();

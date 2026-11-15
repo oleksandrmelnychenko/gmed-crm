@@ -50,6 +50,13 @@ async function prepare(page: Page, lang = "ru") {
       return route.fulfill({ json: invoice });
     }
     if (path === `/invoices/${invoiceId}/pdf`) { fixture.pdfReads++; return route.fulfill({ contentType: "application/pdf", body: previewPdf }); }
+    // The prepayment advance split comes from the server (bca23f8d).
+    if (path === `/quotes/${quoteId}/advance-preview`) {
+      return route.fulfill({ json: {
+        quote_id: quoteId, billed_advances_gross: "0", total_net: "420.17", total_vat: "79.83", total_gross: "500.00",
+        lines: [{ is_cost_passthrough: false, vat_rate: "19", net: "420.17", vat: "79.83", gross: "500.00" }],
+      } });
+    }
     if (path === "/quotes" && fixture.quotesError) return route.fulfill({ status: 500, json: { error: "Quotes unavailable" } });
     let body: unknown = [];
     if (path === "/me") body = { id: "invoice-test-user", email: "invoice@example.org", name: "Invoice QA", role: "ceo", created_at: "2026-01-01T00:00:00Z" };
@@ -167,7 +174,9 @@ test("an advance invoice bills the order's required prepayment unless positions 
   const dialog = page.getByRole("dialog", { name: "Новый счёт", exact: true });
   await expect(dialog.getByRole("radio", { name: /Требуемая предоплата · 500,00/ })).toBeChecked();
   const prepayment = dialog.getByTestId("invoice-prepayment-advance");
-  await expect(prepayment).toContainText("KV-TEST-1");
+  // The split shown is the server preview (bca23f8d); the quote stays in its picker.
+  await expect(dialog.getByRole("combobox", { name: "Предложение", exact: true })).toContainText("KV-TEST-1");
+  await expect(prepayment).toContainText("Доля с НДС 19 %");
   await expect(prepayment).toContainText("500,00");
   await expect(dialog.getByRole("checkbox", { name: "Позиция: Service 1", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();

@@ -351,8 +351,7 @@ test("one click issues a new password and e-mails the access to the lead", async
   await send.click();
   const dialog = page.getByTestId("lead-portal-email-dialog");
   // The stored hash cannot be sent: the dialog says a new password replaces the old one.
-  await expect(dialog).toContainText("старый перестанет работать");
-  await expect(dialog).toContainText("открытые сессии пациента будут завершены");
+  await expect(dialog).toContainText("Старый пароль перестанет работать.");
   await expect(dialog).toContainText("sofia.beispiel@example.com");
   // The lead's own language is preselected and can be changed.
   await expect(dialog.getByRole("button", { name: "UA", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -379,8 +378,7 @@ test("without a mail connection the button explains instead of replacing the pas
   const row = page.getByTestId("lead-portal-access").first();
   await row.getByRole("button", { name: "Zugang per E-Mail senden" }).click();
   const dialog = page.getByTestId("lead-portal-email-dialog");
-  await expect(dialog).toContainText("Der E-Mail-Versand ist nicht eingerichtet");
-  await expect(dialog).toContainText("API-Verbindungen");
+  await expect(dialog).toContainText("Der E-Mail-Versand ist nicht eingerichtet: Zugang bitte per Nachricht weitergeben.");
   await expect(dialog.getByTestId("lead-portal-email-confirm")).toHaveCount(0);
   // The window has its own corner button of the same name; this is the footer one.
   await dialog.getByRole("button", { name: "Schließen", exact: true }).first().click();

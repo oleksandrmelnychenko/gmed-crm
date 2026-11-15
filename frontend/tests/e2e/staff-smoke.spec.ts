@@ -1767,7 +1767,9 @@ test.describe("staff smoke flows", () => {
     await statusCell.scrollIntoViewIfNeeded();
     const statusMargins = await statusCell.evaluate(cell => {
       const bounds = cell.getBoundingClientRect();
-      return [...cell.querySelectorAll("span")].map(badge => {
+      // The status badge and the DEMO chip side by side (the cell wraps them in an outer span).
+      const chip = cell.querySelector("[data-testid^=\"document-demo-signature-\"]");
+      return [...(chip?.parentElement?.children ?? [])].map(badge => {
         const rect = badge.getBoundingClientRect();
         return [rect.top - bounds.top, bounds.bottom - rect.bottom, rect.left - bounds.left, bounds.right - rect.right];
       });
@@ -2067,10 +2069,9 @@ test.describe("staff smoke flows", () => {
     ).toBeVisible();
 
     await sheet.getByRole("button", { name: /Datei/i }).click();
-    const deleteDialog = page.getByRole("dialog").filter({
-      hasText: "gespeicherte Datei",
-    });
+    const deleteDialog = page.getByRole("dialog", { name: "Datei löschen", exact: true });
     await expect(deleteDialog).toBeVisible();
+    await expect(deleteDialog).toContainText("Die Datei wird unwiderruflich gelöscht.");
     await deleteDialog
       .getByPlaceholder(/Warum wird die gespeicherte Datei entfernt/i)
       .fill("Patient requested binary removal after handoff.");

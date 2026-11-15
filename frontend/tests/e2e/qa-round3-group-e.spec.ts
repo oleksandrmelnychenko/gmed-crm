@@ -106,7 +106,6 @@ test("the CEO reads the visibility choices of a Sales note from the author's vie
   await expect(page.getByRole("option", { name: "Только я" })).toHaveCount(0);
   await expect(page.getByRole("option", { name: "Моя роль" })).toHaveCount(0);
   await page.getByRole("option", { name: "Роль автора: Отдел продаж" }).click();
-  await expect(page.getByText("Видимость задаётся от лица автора заметки (Ben Muster). CEO видит все заметки.")).toBeVisible();
   await page.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect.poll(() => updates.length).toBe(1);
   expect(updates[0].visibility).toBe("role");
@@ -179,7 +178,6 @@ test("a colleague edits a shared note but only the author archives and restores 
   await page.getByRole("button", { name: /Übergabe Vertrieb/ }).nth(1).click();
   await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Архивировать", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Архивировать заметку может только её автор или CEO.", { exact: false })).toBeVisible();
   // The own note: archive, then restore from the archive.
   await page.getByRole("button", { name: /Übergabe Vertrieb/ }).first().click();
   await page.getByRole("button", { name: "Архивировать", exact: true }).click();

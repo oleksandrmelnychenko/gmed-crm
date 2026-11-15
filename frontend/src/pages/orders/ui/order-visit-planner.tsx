@@ -121,7 +121,9 @@ export function OrderVisitPlanner({
   const [drafts, setDrafts] = useState<DraftVisit[]>([]);
   const [popover, setPopover] = useState<Popover>(null);
   // An opened popover scrolls fully into the grid's view (a late-hour slot sits low).
+  const popoverElement = useRef<HTMLDivElement | null>(null);
   const revealPopover = useCallback((element: HTMLDivElement | null) => {
+    popoverElement.current = element;
     element?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, []);
   const [busy, setBusy] = useState<BusySlot[]>([]);
@@ -321,11 +323,16 @@ export function OrderVisitPlanner({
 
   useEffect(() => {
     if (!popover) return;
+    // Checked in the capture phase, before an open list in the editor (the
+    // interpreter picker) closes itself on the same key: that Escape closes
+    // only the list, not the editor with it.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPopover(null);
+      if (event.key !== "Escape") return;
+      if (popoverElement.current?.querySelector('[aria-expanded="true"]')) return;
+      setPopover(null);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [popover]);
 
   const onDrop = (event: DragEvent<HTMLElement>, date: string, start: number) => {
