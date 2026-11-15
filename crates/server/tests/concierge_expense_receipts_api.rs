@@ -2106,10 +2106,18 @@ async fn a_concierge_service_is_billed_by_its_sale_price_or_its_receipt_never_bo
     let billing_id = seed_user(&context.pool, "billing", &format!("once-review-{tag}")).await;
     let (patient_id, _provider_id, service_id, order_id, _order_leistung_id) =
         seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    // The service follows its task: the task is completed first.
+    sqlx::query(
+        "UPDATE tasks SET provider_id = NULL, status = 'completed' WHERE concierge_service_id = $1",
+    )
+    .bind(service_id)
+    .execute(&context.pool)
+    .await
+    .unwrap();
     sqlx::query(
         r#"UPDATE concierge_services
            SET provider_id = NULL, order_id = $2, status = 'completed',
-               completed_at = now(), billing_status = 'ready',
+               completed_at = COALESCE(completed_at, now()), billing_status = 'ready',
                quantity = 1, unit_price = 150
            WHERE id = $1"#,
     )
@@ -2118,11 +2126,6 @@ async fn a_concierge_service_is_billed_by_its_sale_price_or_its_receipt_never_bo
     .execute(&context.pool)
     .await
     .unwrap();
-    sqlx::query("UPDATE tasks SET provider_id = NULL WHERE concierge_service_id = $1")
-        .bind(service_id)
-        .execute(&context.pool)
-        .await
-        .unwrap();
     let account_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO company_financial_accounts (
                name, account_type, currency, opening_balance, opening_balance_on,
