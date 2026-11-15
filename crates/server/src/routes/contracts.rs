@@ -1112,7 +1112,7 @@ async fn newest_estimate_document_tx(
     tx: &mut Transaction<'_, Postgres>,
     order_id: Uuid,
 ) -> Result<Option<(bool, Option<bool>, Option<String>)>, sqlx::Error> {
-    sqlx::query_as::<_, (bool, Option<bool>, Option<String>)>(&format!(
+    sqlx::query_as::<_, (bool, Option<bool>, Option<String>)>(sqlx::AssertSqlSafe(format!(
         r#"SELECT d.signed_at IS NOT NULL, document_terms_current(d.id),
                   {ESTIMATE_QUOTE_NUMBER}
            FROM documents d
@@ -1122,7 +1122,7 @@ async fn newest_estimate_document_tx(
              AND d.file_deleted_at IS NULL
            ORDER BY d.created_at DESC, d.id DESC
            LIMIT 1"#
-    ))
+    )))
     .bind(order_id)
     .fetch_optional(&mut **tx)
     .await
@@ -1195,9 +1195,9 @@ async fn quote_of_signed_estimate_tx(
     // changed confirms terms the order no longer has; one made for another
     // quote prints another estimate number (release QA 2026-11-11: a new
     // quote was accepted on the signature given for the one it replaced).
-    let (current, printed): (Option<bool>, Option<String>) = sqlx::query_as(&format!(
+    let (current, printed): (Option<bool>, Option<String>) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT document_terms_current(d.id), {ESTIMATE_QUOTE_NUMBER} FROM documents d WHERE d.id = $1"
-    ))
+    )))
     .bind(document_id)
     .fetch_one(&mut **tx)
     .await?;

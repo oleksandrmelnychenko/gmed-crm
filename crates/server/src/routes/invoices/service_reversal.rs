@@ -166,7 +166,7 @@ async fn plan(
            {}"#,
         if lock { "FOR UPDATE OF service" } else { "" }
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(leistung_id)
         .fetch_optional(&mut *conn)
         .await?

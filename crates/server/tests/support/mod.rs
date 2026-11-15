@@ -106,10 +106,12 @@ pub async fn isolated_schema_database() -> Result<IsolatedSchemaDatabase, String
         .await
         .map_err(|error| format!("connect test admin database: {error}"))?;
     let database_name = format!("gmed_schema_test_{}", Uuid::new_v4().simple());
-    sqlx::query(&format!(r#"CREATE DATABASE "{database_name}""#))
-        .execute(&admin_pool)
-        .await
-        .map_err(|error| format!("create schema test database: {error}"))?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"CREATE DATABASE "{database_name}""#
+    )))
+    .execute(&admin_pool)
+    .await
+    .map_err(|error| format!("create schema test database: {error}"))?;
     let pool = connect_pool(&backend.admin_database_url, &database_name, 2)
         .await
         .map_err(|error| format!("connect schema test database: {error}"))?;
@@ -389,7 +391,7 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
     );
     let create_sql = format!(r#"CREATE DATABASE "{database_name}""#);
 
-    sqlx::query(&create_sql)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&create_sql))
         .execute(&admin_pool)
         .await
         .map_err(|error| format!("create database {database_name}: {error}"))?;
@@ -404,14 +406,18 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
         Ok(pool) => pool,
         Err(error) => {
             let drop_sql = format!(r#"DROP DATABASE IF EXISTS "{database_name}""#);
-            let _ = sqlx::query(&drop_sql).execute(&admin_pool).await;
+            let _ = sqlx::query(sqlx::AssertSqlSafe::<&str>(&drop_sql))
+                .execute(&admin_pool)
+                .await;
             return Err(format!("connect database {database_name}: {error}"));
         }
     };
 
     if let Err(error) = gmed_db::run_migrations(&pool).await {
         let drop_sql = format!(r#"DROP DATABASE IF EXISTS "{database_name}""#);
-        let _ = sqlx::query(&drop_sql).execute(&admin_pool).await;
+        let _ = sqlx::query(sqlx::AssertSqlSafe::<&str>(&drop_sql))
+            .execute(&admin_pool)
+            .await;
         return Err(format!("run migrations for {database_name}: {error}"));
     }
 
@@ -624,7 +630,9 @@ impl Drop for SuiteDatabase {
                 .await;
 
                 let drop_sql = format!(r#"DROP DATABASE IF EXISTS "{database_name}""#);
-                let _ = sqlx::query(&drop_sql).execute(&admin_pool).await;
+                let _ = sqlx::query(sqlx::AssertSqlSafe::<&str>(&drop_sql))
+                    .execute(&admin_pool)
+                    .await;
                 admin_pool.close().await;
             });
         })

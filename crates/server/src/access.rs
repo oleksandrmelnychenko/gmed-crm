@@ -238,7 +238,7 @@ pub async fn can_view_appointment_row(
                   )"#
     );
     if scope.interpreter_team
-        && sqlx::query_scalar::<_, bool>(&team_context_sql)
+        && sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe::<&str>(&team_context_sql))
             .bind(row.appointment_id)
             .fetch_one(pool)
             .await?

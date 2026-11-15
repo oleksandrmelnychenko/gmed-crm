@@ -103,7 +103,7 @@ pub async fn grant_in_tx(
     let today = crate::app_time::today();
     let counts_sql = format!("SELECT {}", active_booking_sql("$1", "$2", "$3", "$4"));
     for (patient_id, interpreter_id) in pairs {
-        let counts = sqlx::query_scalar::<_, bool>(&counts_sql)
+        let counts = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe::<&str>(&counts_sql))
             .bind(patient_id)
             .bind(interpreter_id)
             .bind(days as i32)
@@ -220,7 +220,7 @@ async fn end_links_without_booking(
         return Ok(0);
     }
     let days = access_days(conn).await?;
-    let ended = sqlx::query(&format!(
+    let ended = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"UPDATE patient_assignments link
            SET revoked_at = now()
            WHERE link.id = ANY($1)
@@ -236,7 +236,7 @@ async fn end_links_without_booking(
                         AND booking.interpreter_response IS DISTINCT FROM 'declined')
                          AS last_booking_date"#,
         active_booking_sql("link.patient_id", "link.user_id", "$2", "$3")
-    ))
+    )))
     .bind(link_ids)
     .bind(days as i32)
     .bind(today)
@@ -278,7 +278,7 @@ pub async fn end_expired_links(
 ) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await?;
     let days = access_days(&mut tx).await?;
-    let candidates = sqlx::query_scalar::<_, Uuid>(&format!(
+    let candidates = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
         r#"SELECT link.id
            FROM patient_assignments link
            WHERE link.source = 'interpreter_booking'
@@ -287,7 +287,7 @@ pub async fn end_expired_links(
            ORDER BY link.id
            FOR UPDATE OF link SKIP LOCKED"#,
         active_booking_sql("link.patient_id", "link.user_id", "$1", "$2")
-    ))
+    )))
     .bind(days as i32)
     .bind(today)
     .fetch_all(&mut *tx)

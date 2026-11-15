@@ -210,7 +210,7 @@ async fn load_inner(
         .as_ref()
         .map(|roles| (roles.paying.clone(), roles.receiving.clone()))
         .unwrap_or_default();
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.date_of_birth,
                   g.former_citizenships, g.has_representative, g.under_guardianship,
                   g.pep_self, g.pep_related, g.sanctions_links, g.id_document_unreadable,
@@ -302,7 +302,7 @@ async fn load_inner(
                WHERE o.source_lead_id = l.id AND o.status <> 'cancelled'
            ) lead_orders ON true
            WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .bind(&paying)
     .bind(&receiving)

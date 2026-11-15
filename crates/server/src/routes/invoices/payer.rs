@@ -647,7 +647,7 @@ async fn inherit(
             payer_columns("o", "own_"),
             payer_columns("h", "head_"),
         );
-        if let Some(row) = sqlx::query(&sql)
+        if let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
             .bind(order_id)
             .fetch_optional(&mut *conn)
             .await?
@@ -1398,7 +1398,7 @@ async fn evaluate_recipient(
                    ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#,
                 covers = super::advance_settlement::FINAL_QUOTE_COVERS_ADVANCE,
             );
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
                 .bind(order_id)
                 .bind(patient_id)
                 .bind(&live)
@@ -1500,7 +1500,7 @@ async fn later_payer_missing(
            WHERE i.id = $1"#,
         columns = payer_columns("i", ""),
     );
-    let row = sqlx::query(&sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(invoice_id)
         .fetch_one(&mut *conn)
         .await?;
@@ -1878,7 +1878,7 @@ pub(crate) async fn update_invoice_payer(
         "SELECT i.patient_id, i.released_at IS NOT NULL AS released, {} FROM invoices i WHERE i.id = $1 FOR UPDATE",
         payer_columns("i", "")
     );
-    let locked = match sqlx::query(&sql)
+    let locked = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(invoice_id)
         .fetch_optional(&mut *transaction)
         .await

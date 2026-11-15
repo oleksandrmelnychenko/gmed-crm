@@ -1045,7 +1045,7 @@ pub(crate) async fn build_patient_export_payload(
     .await, "consents")?;
 
     let documents = require_patient_export_section(
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"SELECT d.id, d.order_id, d.appointment_id, d.auto_name, d.original_filename, d.art,
                   d.category, d.status, d.visibility, d.is_medical, d.mime_type, d.file_size,
                   d.klinik, d.ursprung, d.notes, d.version_number, d.created_at, d.updated_at,
@@ -1056,7 +1056,7 @@ pub(crate) async fn build_patient_export_payload(
            ORDER BY d.created_at DESC"#,
             other_person_document_sql(),
             export_documents_selection_sql()
-        ))
+        )))
         .bind(patient_id)
         .bind(portal_login)
         .bind(&PORTAL_EXPORT_CLOSED_TYPES[..])
@@ -1687,7 +1687,7 @@ async fn load_patient_export_files(
     patient_id: Uuid,
     portal_login: Option<Uuid>,
 ) -> Result<ExportedDocumentFiles, axum::response::Response> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key,
                   d.art, d.created_at, {} AS other_person
            FROM documents d
@@ -1698,7 +1698,7 @@ async fn load_patient_export_files(
            ORDER BY d.created_at"#,
         other_person_document_sql(),
         export_documents_selection_sql()
-    ))
+    )))
     .bind(patient_id)
     .bind(portal_login)
     .bind(&PORTAL_EXPORT_CLOSED_TYPES[..])
@@ -2489,7 +2489,7 @@ async fn create_patient_privacy_request(
 
     // The request takes a snapshot of the patient's retention, so the review
     // shows from the start until when the medical documentation is kept.
-    let request_id = match sqlx::query_scalar::<_, Uuid>(&format!(
+    let request_id = match sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
         r#"INSERT INTO patient_privacy_requests (
                 patient_id, requested_by, request_type, source, status, reason, due_at, context,
                 retention_until
@@ -2497,7 +2497,7 @@ async fn create_patient_privacy_request(
                 $1, $2, $3, $4, 'requested', $5, $6, $7, {PATIENT_RETENTION_SNAPSHOT_SQL}
            )
            RETURNING id"#
-    ))
+    )))
     .bind(patient_id)
     .bind(auth.user_id)
     .bind(&request_type)
@@ -2572,7 +2572,7 @@ async fn list_patient_privacy_requests(
         return e;
     }
 
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {PRIVACY_REQUEST_COLUMNS}
            FROM patient_privacy_requests pr
            JOIN patients p ON p.id = pr.patient_id
@@ -2581,7 +2581,7 @@ async fn list_patient_privacy_requests(
            LEFT JOIN users ex ON ex.id = pr.executed_by
            WHERE pr.patient_id = $1
            ORDER BY pr.created_at DESC"#
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -2670,7 +2670,7 @@ async fn list_privacy_requests(
 
     let requires_assignment = access::requires_patient_assignment(auth.role);
     let rows = if requires_assignment {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"SELECT {PRIVACY_REQUEST_COLUMNS}
                FROM patient_privacy_requests pr
                JOIN patients p ON p.id = pr.patient_id
@@ -2686,12 +2686,12 @@ async fn list_privacy_requests(
                )
                ORDER BY pr.created_at DESC
                LIMIT 100"#
-        ))
+        )))
         .bind(auth.user_id)
         .fetch_all(&state.db)
         .await
     } else {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"SELECT {PRIVACY_REQUEST_COLUMNS}
                FROM patient_privacy_requests pr
                JOIN patients p ON p.id = pr.patient_id
@@ -2700,7 +2700,7 @@ async fn list_privacy_requests(
                LEFT JOIN users ex ON ex.id = pr.executed_by
                ORDER BY pr.created_at DESC
                LIMIT 100"#
-        ))
+        )))
         .fetch_all(&state.db)
         .await
     };
@@ -3662,7 +3662,7 @@ async fn fetch_privacy_request_payload(
     state: &AppState,
     request_id: Uuid,
 ) -> Result<Value, axum::response::Response> {
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {PRIVACY_REQUEST_COLUMNS}
            FROM patient_privacy_requests pr
            JOIN patients p ON p.id = pr.patient_id
@@ -3670,7 +3670,7 @@ async fn fetch_privacy_request_payload(
            LEFT JOIN users rv ON rv.id = pr.reviewed_by
            LEFT JOIN users ex ON ex.id = pr.executed_by
            WHERE pr.id = $1"#
-    ))
+    )))
     .bind(request_id)
     .fetch_optional(&state.db)
     .await
@@ -3852,7 +3852,7 @@ async fn notify_patient_of_privacy_outcome(
         title_sql = crate::patient_notice_language::text_sql("$3", "u", "pr.patient_id"),
         body_sql = crate::patient_notice_language::text_sql("$4", "u", "pr.patient_id"),
     );
-    let rows = sqlx::query(&insert_sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&insert_sql))
         .bind(request_id)
         .bind(kind)
         .bind(title_texts.to_json())
@@ -4178,17 +4178,17 @@ async fn erase_patient_relations_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_id: Uuid,
 ) -> Result<ErasedRelations, sqlx::Error> {
-    let kept: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let kept: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT relation.id
            FROM patient_relations relation
            WHERE relation.patient_id = $1
              AND {RELATION_NAMED_BY_BUSINESS_RECORD_SQL}
            FOR UPDATE OF relation"#
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&mut **tx)
     .await?;
-    let linked_kept: Vec<(Uuid, bool)> = sqlx::query_as(&format!(
+    let linked_kept: Vec<(Uuid, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"SELECT relation.id,
                   EXISTS (SELECT 1 FROM invoices invoice
                           WHERE invoice.payer_patient_relation_id = relation.id
@@ -4198,7 +4198,7 @@ async fn erase_patient_relations_in_tx(
              AND relation.patient_id <> $1
              AND {RELATION_NAMED_BY_BUSINESS_RECORD_SQL}
            FOR UPDATE OF relation"#
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&mut **tx)
     .await?;
@@ -4611,7 +4611,7 @@ async fn scrub_patient_free_text_in_tx(
     let mut counts = Vec::with_capacity(statements.len());
     for (statement, ids) in &statements {
         counts.push(
-            sqlx::query(statement)
+            sqlx::query(sqlx::AssertSqlSafe::<&str>(statement))
                 .bind(*ids)
                 .bind(&pattern)
                 .bind(&replacement)
@@ -4628,7 +4628,7 @@ async fn scrub_patient_free_text_in_tx(
     scrubbed.appointment_communications = counts[5];
     scrubbed.interpreter_reports = counts[6];
     scrubbed.task_events = scrub_task_history_in_tx(tx, &task_ids, &pattern, &replacement).await?;
-    scrubbed.appointment_requests = sqlx::query(&scrub_statement(
+    scrubbed.appointment_requests = sqlx::query(sqlx::AssertSqlSafe::<&str>(&scrub_statement(
         "patient_appointment_requests",
         &[
             ("reason", None),
@@ -4637,7 +4637,7 @@ async fn scrub_patient_free_text_in_tx(
             ("cancellation_reason", None),
         ],
         "patient_id = $1",
-    ))
+    )))
     .bind(patient_id)
     .bind(&pattern)
     .bind(&replacement)
@@ -4646,7 +4646,7 @@ async fn scrub_patient_free_text_in_tx(
     .rows_affected();
     // QA 2026-11-01 (R5-1, Art. 17): the recommendations kept "Paul Empfehlung"
     // and the staff note after the erasure, in no report.
-    scrubbed.recommendations = sqlx::query(&scrub_statement(
+    scrubbed.recommendations = sqlx::query(sqlx::AssertSqlSafe::<&str>(&scrub_statement(
         "patient_recommendations",
         &[
             ("title", None),
@@ -4656,29 +4656,29 @@ async fn scrub_patient_free_text_in_tx(
             ("note_intern", None),
         ],
         "patient_id = $1",
-    ))
+    )))
     .bind(patient_id)
     .bind(&pattern)
     .bind(&replacement)
     .execute(&mut **tx)
     .await?
     .rows_affected();
-    scrubbed.recommendations += sqlx::query(&scrub_statement(
+    scrubbed.recommendations += sqlx::query(sqlx::AssertSqlSafe::<&str>(&scrub_statement(
         "patient_recommendation_decisions",
         &[("note", None)],
         "recommendation_id IN (SELECT id FROM patient_recommendations WHERE patient_id = $1)",
-    ))
+    )))
     .bind(patient_id)
     .bind(&pattern)
     .bind(&replacement)
     .execute(&mut **tx)
     .await?
     .rows_affected();
-    scrubbed.reminders = sqlx::query(&scrub_statement(
+    scrubbed.reminders = sqlx::query(sqlx::AssertSqlSafe::<&str>(&scrub_statement(
         "reminders",
         &[("title", None), ("description", None)],
         "appointment_id = ANY($1)",
-    ))
+    )))
     .bind(&appointment_ids)
     .bind(&pattern)
     .bind(&replacement)
@@ -4888,7 +4888,7 @@ async fn scrub_patient_free_text_in_tx(
         ),
     ];
     for statement in &clinical_notes {
-        scrubbed.clinical_notes += sqlx::query(statement)
+        scrubbed.clinical_notes += sqlx::query(sqlx::AssertSqlSafe::<&str>(statement))
             .bind(patient_id)
             .bind(&pattern)
             .bind(&replacement)
@@ -4898,7 +4898,7 @@ async fn scrub_patient_free_text_in_tx(
     }
     scrubbed.clinical_versions =
         scrub_clinical_history_in_tx(tx, patient_id, &pattern, &replacement).await?;
-    scrubbed.feedback = sqlx::query(&scrub_statement(
+    scrubbed.feedback = sqlx::query(sqlx::AssertSqlSafe::<&str>(&scrub_statement(
         "patient_feedback_forms",
         &[
             ("comments", None),
@@ -4907,7 +4907,7 @@ async fn scrub_patient_free_text_in_tx(
             ("review_note", None),
         ],
         "patient_id = $1",
-    ))
+    )))
     .bind(patient_id)
     .bind(&pattern)
     .bind(&replacement)
@@ -4966,7 +4966,7 @@ async fn scrub_patient_free_text_in_tx(
         ),
     ];
     for statement in &order_notes {
-        scrubbed.order_notes += sqlx::query(statement)
+        scrubbed.order_notes += sqlx::query(sqlx::AssertSqlSafe::<&str>(statement))
             .bind(patient_id)
             .bind(&pattern)
             .bind(&replacement)
@@ -4977,11 +4977,11 @@ async fn scrub_patient_free_text_in_tx(
     // The shared internal notes link to no patient: every note (archived
     // ones too) is searched, for the strong identifiers only. `$1` is unused.
     if let Some(strong_pattern) = identity_terms_pattern(&terms.strong) {
-        scrubbed.internal_notes = sqlx::query(&scrub_statement(
+        scrubbed.internal_notes = sqlx::query(sqlx::AssertSqlSafe::<&str>(&scrub_statement(
             "internal_notes",
             &[("title", Some(255)), ("body", Some(20000))],
             "$1::uuid IS NOT NULL",
-        ))
+        )))
         .bind(patient_id)
         .bind(&strong_pattern)
         .bind(&replacement)
@@ -5043,7 +5043,7 @@ async fn scrub_clinical_history_in_tx(
         .await?;
     let mut scrubbed = 0;
     for statement in &statements {
-        scrubbed += sqlx::query(statement)
+        scrubbed += sqlx::query(sqlx::AssertSqlSafe::<&str>(statement))
             .bind(patient_id)
             .bind(pattern)
             .bind(replacement)
@@ -5130,22 +5130,22 @@ async fn erase_patient_task_attachments_in_tx(
                WHERE patient_id = $1
                   OR appointment_id IN (SELECT id FROM appointments WHERE patient_id = $1)
                   OR order_id IN (SELECT id FROM orders WHERE patient_id = $1))"#;
-    let storage_keys: Vec<String> = sqlx::query_scalar(&format!(
+    let storage_keys: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"UPDATE concierge_operational_task_attachments
            SET deleted_at = now(), deleted_by = $2, file_name = {NEUTRAL_NAME}
            WHERE {task_filter} AND deleted_at IS NULL
            RETURNING storage_key"#
-    ))
+    )))
     .bind(patient_id)
     .bind(actor_id)
     .fetch_all(&mut **tx)
     .await?;
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"UPDATE concierge_operational_task_attachments
            SET file_name = {NEUTRAL_NAME}
            WHERE {task_filter} AND deleted_at IS NOT NULL
              AND file_name <> {NEUTRAL_NAME}"#
-    ))
+    )))
     .bind(patient_id)
     .execute(&mut **tx)
     .await?;

@@ -114,9 +114,9 @@ async fn review_name(
         });
     }
     // The field is a constant from check_pair, never request text.
-    let exact = sqlx::query_scalar::<_, Option<String>>(&format!(
+    let exact = sqlx::query_scalar::<_, Option<String>>(sqlx::AssertSqlSafe(format!(
         "SELECT MIN({field}) FROM medication_name_pairs WHERE {field}_key = $1"
-    ))
+    )))
     .bind(&key)
     .fetch_one(db)
     .await?;
@@ -128,11 +128,11 @@ async fn review_name(
         });
     }
     let limit = if length >= 8 { 2 } else { 1 };
-    let candidates = sqlx::query_scalar::<_, String>(&format!(
+    let candidates = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
         "SELECT MIN({field}) FROM medication_name_pairs
          WHERE char_length({field}_key) BETWEEN $1 AND $2
          GROUP BY {field}_key ORDER BY (left({field}_key, 2) = $3) DESC, {field}_key LIMIT 500"
-    ))
+    )))
     .bind((length - limit) as i32)
     .bind((length + limit) as i32)
     .bind(key.chars().take(2).collect::<String>())
@@ -497,7 +497,7 @@ async fn search_names(
          ORDER BY ({field}_key LIKE $3) DESC, {field}_key
          LIMIT $4"
     );
-    match sqlx::query_scalar::<_, String>(&statement)
+    match sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe::<&str>(&statement))
         .bind(format!("%{term}%"))
         .bind(related)
         .bind(format!("{term}%"))

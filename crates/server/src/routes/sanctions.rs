@@ -508,9 +508,9 @@ async fn list_hits(
         );
     }
     let result = async {
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "{HIT_SELECT} WHERE ($1 = 'all' OR h.status = $1) ORDER BY h.created_at DESC LIMIT 500"
-        ))
+        )))
         .bind(&status)
         .fetch_all(&state.db)
         .await?;
@@ -550,7 +550,7 @@ async fn get_hit(
     if let Err(response) = auth.require_capability(Capability::SanctionsReview) {
         return response;
     }
-    let row = match sqlx::query(&format!("{HIT_SELECT} WHERE h.id = $1"))
+    let row = match sqlx::query(sqlx::AssertSqlSafe(format!("{HIT_SELECT} WHERE h.id = $1")))
         .bind(hit_id)
         .fetch_optional(&state.db)
         .await
@@ -688,7 +688,7 @@ async fn decide_hit(
                 )
                 .await;
             }
-            match sqlx::query(&format!("{HIT_SELECT} WHERE h.id = $1"))
+            match sqlx::query(sqlx::AssertSqlSafe(format!("{HIT_SELECT} WHERE h.id = $1")))
                 .bind(hit_id)
                 .fetch_one(&state.db)
                 .await

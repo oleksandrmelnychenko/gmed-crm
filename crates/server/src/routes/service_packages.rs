@@ -1957,7 +1957,7 @@ async fn list_patient_service_packages(
         return resp;
     }
 
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT psp.id, psp.package_id, psp.order_id, sp.name AS package_name, psp.status,
                   psp.portal_visible,
                   psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
@@ -1998,7 +1998,7 @@ async fn list_patient_service_packages(
                     spi.description, spi.included_quantity,
                     spi.unit_label, spi.requires_patient_approval
            ORDER BY psp.assigned_at DESC, spi.sort_order"#,
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -2084,7 +2084,7 @@ async fn list_my_subscriptions(
     // financial scope. If an order has multiple released subscriptions, the
     // shared balance is not repeated on every card; patients can inspect the
     // authoritative amount once in the invoices workspace.
-    let rows = match sqlx::query(&format!(
+    let rows = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT psp.id, psp.package_id, psp.order_id, psp.status,
                   psp.starts_on, psp.ends_on, psp.assigned_at, psp.portal_visible,
                   sp.name AS package_name, sp.description AS package_description,
@@ -2174,7 +2174,7 @@ async fn list_my_subscriptions(
                psp.assigned_at DESC,
                spi.sort_order,
                spi.created_at"#,
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -2455,7 +2455,7 @@ async fn notify_patient_of_subscription(
         title_sql = crate::patient_notice_language::text_sql("$4", "u", "pa.patient_id"),
         body_sql = crate::patient_notice_language::text_sql("$5", "u", "pa.patient_id"),
     );
-    let rows = sqlx::query(&insert_sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&insert_sql))
         .bind(patient_id)
         .bind(package_id)
         .bind(kind)
@@ -2924,7 +2924,7 @@ async fn create_package_consumption(
         .map(|context| context.requires_patient_approval)
         .unwrap_or(false);
     let package_item_id = item_context.as_ref().map(|context| context.id);
-    let used_quantity = match sqlx::query_scalar::<_, Decimal>(&format!(
+    let used_quantity = match sqlx::query_scalar::<_, Decimal>(sqlx::AssertSqlSafe(format!(
         r#"SELECT COALESCE(SUM({COUNTED_QUANTITY_SQL}), 0)
            FROM service_package_consumptions spc
            WHERE spc.patient_service_package_id = $1
@@ -2932,7 +2932,7 @@ async fn create_package_consumption(
                     ($2::uuid IS NULL AND spc.package_item_id IS NULL)
                  OR spc.package_item_id = $2
              )"#,
-    ))
+    )))
     .bind(patient_service_package_id)
     .bind(package_item_id)
     .fetch_one(&state.db)

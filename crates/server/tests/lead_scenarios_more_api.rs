@@ -1818,12 +1818,13 @@ async fn scenario_unsigned_minor_request_is_purged_with_the_parents_access() {
         "lead_invoice_recipients",
         "lead_portal_uploads",
     ] {
-        let rows: i64 =
-            sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE lead_id = $1"))
-                .bind(lead)
-                .fetch_one(pool)
-                .await
-                .unwrap();
+        let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM {table} WHERE lead_id = $1"
+        )))
+        .bind(lead)
+        .fetch_one(pool)
+        .await
+        .unwrap();
         assert_eq!(rows, 0, "{table} keeps rows of the purged lead");
     }
     let gwg_answers: i64 = sqlx::query_scalar(

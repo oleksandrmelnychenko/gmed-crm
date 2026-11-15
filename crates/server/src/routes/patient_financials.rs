@@ -772,7 +772,7 @@ async fn load_patient_settlement_ledger(
         "{OTHER_REPRESENTATIVE}",
         &crate::routes::invoices::payer::other_representative_payer_sql("invoice", "$7"),
     );
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(patient_id)
         .bind(to)
         .bind(query.order_id)
@@ -972,7 +972,7 @@ async fn load_patient_account_statement(
     let available_recipients = if portal_scope {
         Vec::new()
     } else {
-        sqlx::query(&recipient_sql(
+        sqlx::query(sqlx::AssertSqlSafe::<&str>(&recipient_sql(
             r#"SELECT DISTINCT ON (invoice_recipient_identity(rcpt.value))
                       invoice_recipient_identity(rcpt.value) AS identity,
                       rcpt.value ->> 'name' AS name,
@@ -984,7 +984,7 @@ async fn load_patient_account_statement(
                      WHERE storno.invoice_id = invoice.id AND storno.issued_on > $2
                  )))
                ORDER BY invoice_recipient_identity(rcpt.value), invoice.created_at DESC"#,
-        ))
+        )))
         .bind(patient_id)
         .bind(to)
         .fetch_all(&state.db)
@@ -1000,7 +1000,7 @@ async fn load_patient_account_statement(
         .collect::<Vec<_>>()
     };
 
-    let invoice_rows = sqlx::query(&recipient_sql(
+    let invoice_rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&recipient_sql(
         r#"SELECT invoice.id, invoice.order_id, invoice.invoice_number,
                   invoice.invoice_type, invoice.status, invoice.issued_at,
                   invoice.due_date, invoice.total_gross,
@@ -1096,7 +1096,7 @@ async fn load_patient_account_statement(
     .replace(
         "{OTHER_REPRESENTATIVE}",
         &crate::routes::invoices::payer::other_representative_payer_sql("invoice", "$9"),
-    ))
+    )))
     .bind(patient_id)
     .bind(from)
     .bind(to)
@@ -1309,7 +1309,7 @@ async fn load_patient_account_statement(
         }
     }
 
-    let credit_rows = sqlx::query(&recipient_sql(
+    let credit_rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&recipient_sql(
         r#"SELECT credit.id, credit.transaction_type, credit.document_number,
                   credit.reason, credit.amount_gross, credit.issued_on,
                   credit.portal_visible, invoice.id AS invoice_id,
@@ -1345,7 +1345,7 @@ async fn load_patient_account_statement(
                     )
              )
            ORDER BY credit.issued_on DESC, credit.created_at DESC"#,
-    ))
+    )))
     .bind(patient_id)
     .bind(from)
     .bind(to)
@@ -3116,7 +3116,7 @@ async fn export_patient_financial_ledger(
     };
     let margin_allowed = can_read_profit_margin(auth.role);
 
-    let rows = match sqlx::query(&recipient_sql(
+    let rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&recipient_sql(
         r#"SELECT ae.id, ae.entry_date, ae.direction, ae.category, ae.description,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
                   invoice.invoice_number, ei.external_invoice_number, o.order_number,
@@ -3153,7 +3153,7 @@ async fn export_patient_financial_ledger(
                       )
              ))
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
-    ))
+    )))
     .bind(patient_id)
     .bind(from)
     .bind(to)

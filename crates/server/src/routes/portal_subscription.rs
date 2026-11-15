@@ -53,9 +53,9 @@ async fn subscription_matches(
     patient_id: Uuid,
     condition: &str,
 ) -> Result<bool, Response> {
-    sqlx::query_scalar::<_, bool>(&format!(
+    sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
         "SELECT {condition} FROM patients p WHERE p.id = $1"
-    ))
+    )))
     .bind(patient_id)
     .fetch_optional(&state.db)
     .await

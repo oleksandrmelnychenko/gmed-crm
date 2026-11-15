@@ -115,7 +115,7 @@ async fn get_me(
                 && !password_change_required
                 && !totp_enrolment_required
             {
-                match sqlx::query(&format!(
+                match sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT p.id, p.patient_id, p.first_name, p.last_name, a.source,
                             {} AS has_active_subscription,
                             {} AS subscription_paused
@@ -125,7 +125,7 @@ async fn get_me(
                      ORDER BY p.last_name, p.first_name, p.id",
                     super::portal_subscription::ACTIVE_SUBSCRIPTION_SQL,
                     super::portal_subscription::PAUSED_SUBSCRIPTION_SQL,
-                )).bind(auth.user_id).fetch_all(&state.db).await {
+                ))).bind(auth.user_id).fetch_all(&state.db).await {
                     Ok(rows) => rows.into_iter().map(|row| serde_json::json!({
                         "id": row.get::<Uuid, _>("id"),
                         "patient_number": row.get::<String, _>("patient_id"),
@@ -520,7 +520,7 @@ async fn list_my_document_alerts(
         Ok(summary) => summary,
         Err(resp) => return resp,
     };
-    let visible_document_ids = match sqlx::query_scalar::<_, Uuid>(&format!(
+    let visible_document_ids = match sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
         r#"SELECT d.id
            FROM documents d
            WHERE d.patient_id = $1
@@ -533,7 +533,7 @@ async fn list_my_document_alerts(
                    AND ds.shared_with_user_id = $2
                    AND ds.revoked_at IS NULL
              )"#
-    ))
+    )))
     .bind(patient_id)
     .bind(auth.user_id)
     .fetch_all(&state.db)
@@ -570,7 +570,7 @@ async fn list_my_documents(
         Err(resp) => return resp,
     };
 
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.klinik, d.ursprung,
@@ -605,7 +605,7 @@ async fn list_my_documents(
              AND d.visibility = 'patient_visible'
              AND {PORTAL_CURRENT_DOCUMENT_SQL}
            ORDER BY COALESCE(ds.shared_at, d.updated_at) DESC"#
-    ))
+    )))
     .bind(auth.user_id)
     .bind(patient_id)
     .fetch_all(&state.db)
@@ -668,7 +668,7 @@ async fn download_my_document(
         Err(resp) => return resp,
     };
 
-    let row = match sqlx::query(&format!(
+    let row = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key, d.file_deleted_at
            FROM documents d
            JOIN document_shares ds
@@ -681,7 +681,7 @@ async fn download_my_document(
              AND {PORTAL_CURRENT_DOCUMENT_SQL}
            ORDER BY ds.shared_at DESC
            LIMIT 1"#
-    ))
+    )))
     .bind(auth.user_id)
     .bind(id)
     .bind(patient_id)
@@ -769,7 +769,7 @@ async fn confirm_my_document_release(
         Err(resp) => return resp,
     };
 
-    let updated = match sqlx::query(&format!(
+    let updated = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"UPDATE document_shares ds
            SET confirmed = true,
                confirmed_at = COALESCE(ds.confirmed_at, now())
@@ -782,7 +782,7 @@ async fn confirm_my_document_release(
              AND d.visibility = 'patient_visible'
              AND {PORTAL_CURRENT_DOCUMENT_SQL}
            RETURNING ds.id, ds.confirmed_at"#
-    ))
+    )))
     .bind(id)
     .bind(auth.user_id)
     .bind(patient_id)

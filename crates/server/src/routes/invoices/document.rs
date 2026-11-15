@@ -258,7 +258,7 @@ pub(super) async fn load_invoice_recipient(
     let sql = format!(
         "SELECT {RECIPIENT_COLUMNS}, i.patient_id, i.order_id FROM invoices i WHERE i.id = $1"
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(invoice_id)
         .fetch_optional(&mut *conn)
         .await?
@@ -456,7 +456,7 @@ async fn services_not_rendered(
            FROM order_leistungen service
            WHERE service.id = ANY($1)"#
     );
-    let row = sqlx::query(&sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(&source_line_ids)
         .fetch_one(&mut *conn)
         .await?;
@@ -498,7 +498,7 @@ async fn load_rendered_service_period(
                  AND NOT {SERVICE_NOT_RENDERED_SQL}
            ) days"#
     );
-    let row = sqlx::query(&sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(&source_line_ids)
         .fetch_one(&mut *conn)
         .await?;

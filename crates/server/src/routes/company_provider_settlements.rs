@@ -227,7 +227,7 @@ async fn load_payment_in_transaction(
     payment_id: Uuid,
 ) -> Result<Option<Value>, sqlx::Error> {
     let query = format!("{PAYMENT_RESPONSE_QUERY} WHERE payment_tx.id = $1");
-    sqlx::query(&query)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&query))
         .bind(payment_id)
         .fetch_optional(&mut **transaction)
         .await
@@ -291,7 +291,7 @@ async fn get_provider_settlement(
     let payment_query = format!(
         "{PAYMENT_RESPONSE_QUERY} WHERE payment_tx.external_invoice_id = $1 ORDER BY payment_tx.paid_on DESC, payment_tx.created_at DESC, payment_tx.id DESC"
     );
-    let payment_rows = match sqlx::query(&payment_query)
+    let payment_rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&payment_query))
         .bind(external_invoice_id)
         .fetch_all(&state.db)
         .await

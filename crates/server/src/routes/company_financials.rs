@@ -335,7 +335,7 @@ pub(crate) async fn open_patient_receivables(
     db: &sqlx::PgPool,
     currency: &str,
 ) -> Result<Decimal, sqlx::Error> {
-    let rows = sqlx::query(&patient_positions_sql())
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&patient_positions_sql()))
         .bind(currency)
         .fetch_all(db)
         .await?;
@@ -454,7 +454,7 @@ async fn get_company_financial_position(
         available_currencies.sort();
     }
 
-    let patient_rows = match sqlx::query(&patient_positions_sql())
+    let patient_rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&patient_positions_sql()))
         .bind(&currency)
         .fetch_all(&state.db)
         .await

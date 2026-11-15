@@ -31,7 +31,7 @@ pub async fn load_appointment_interpreter_suggestions(
     pool: &gmed_db::DbPool,
     appointment_id: Uuid,
 ) -> Result<Vec<InterpreterSuggestion>, sqlx::Error> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"WITH target AS (
                 SELECT a.id, a.patient_id, a.date, a.time_start, a.time_end,
                        COALESCE(p.languages, ARRAY[]::text[]) AS patient_languages
@@ -126,7 +126,7 @@ pub async fn load_appointment_interpreter_suggestions(
                     u.name
            LIMIT 50"#,
         assignable = crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
-    ))
+    )))
     .bind(appointment_id)
     .fetch_all(pool)
     .await?;

@@ -670,7 +670,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .await
         .unwrap();
     let database = format!("signature_test_{}", Uuid::new_v4().simple());
-    sqlx::query(&format!("CREATE DATABASE {database}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {database}")))
         .execute(&admin)
         .await
         .unwrap();
@@ -1323,10 +1323,12 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         documents::remove_document_blob(&key).await;
     }
     pool.close().await;
-    sqlx::query(&format!("DROP DATABASE {database} WITH (FORCE)"))
-        .execute(&admin)
-        .await
-        .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE {database} WITH (FORCE)"
+    )))
+    .execute(&admin)
+    .await
+    .unwrap();
     admin.close().await;
 }
 

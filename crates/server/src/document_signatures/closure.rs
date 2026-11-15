@@ -176,7 +176,7 @@ pub(crate) async fn notify_archived(state: &AppState, row: &PgRow, status: &str,
 pub async fn close_stuck_requests(state: &AppState) -> Result<u64, sqlx::Error> {
     let days = stuck_days(state).await;
     let mut tx = state.db.begin().await?;
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"UPDATE document_signature_requests r
            SET status = 'error',
                closed_kind = 'auto_expired',
@@ -190,7 +190,7 @@ pub async fn close_stuck_requests(state: &AppState) -> Result<u64, sqlx::Error> 
              AND r.created_at < now() - ($1::bigint * interval '1 day')
              AND (r.lease_until IS NULL OR r.lease_until < now())
            RETURNING r.id, r.source_document_id, r.requested_by, r.close_reason"#
-    ))
+    )))
     .bind(days)
     .fetch_all(&mut *tx)
     .await?;

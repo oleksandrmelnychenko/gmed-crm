@@ -905,9 +905,9 @@ async fn load_statement(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<Statement>, sqlx::Error> {
-    Ok(sqlx::query(&format!(
+    Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {STATEMENT_COLUMNS} FROM lead_payer_statements WHERE lead_id = $1"
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -2048,7 +2048,7 @@ async fn load_context(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<LeadContext>, sqlx::Error> {
-    let Some(lead) = sqlx::query(&format!(
+    let Some(lead) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.first_name, l.last_name, l.primary_language, l.portal_submitted_at,
                   l.converted_patient_id, ({PORTAL_LEAD_SQL}) AS open,
                   l.wizard_state->>'step1_fill_mode' AS fill_mode,
@@ -2058,7 +2058,7 @@ async fn load_context(
                       AS contact_consent_by_staff
            FROM leads l
            WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -2715,13 +2715,13 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
         .bind(lead_id)
         .execute(&mut *conn)
         .await?;
-    let Some(row) = sqlx::query(&format!(
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {LINK_COLUMNS}, ({PORTAL_LEAD_SQL}) AS lead_open
            FROM lead_payer_links k
            JOIN leads l ON l.id = k.lead_id
            WHERE k.token_hash = $1
            FOR UPDATE OF k"#
-    ))
+    )))
     .bind(token_hash)
     .fetch_optional(&mut *conn)
     .await?
@@ -5080,7 +5080,7 @@ async fn newest_link(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<(Link, Option<String>, Option<String>)>, sqlx::Error> {
-    let Some(row) = sqlx::query(&format!(
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {LINK_COLUMNS}, u.name AS sent_by_name,
                   (SELECT e.status FROM lead_payer_link_emails e
                    WHERE e.link_id = k.id AND e.kind = 'invitation'
@@ -5090,7 +5090,7 @@ async fn newest_link(
            WHERE k.lead_id = $1
            ORDER BY k.created_at DESC, k.id DESC
            LIMIT 1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -5803,9 +5803,9 @@ async fn staff_send(
     let link = if reuse {
         // Bind the token to this lead before reading its link; never accept an
         // expired, revoked, locked or reassigned payer invitation.
-        let row = match sqlx::query(&format!(
+        let row = match sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {LINK_COLUMNS} FROM lead_payer_links k WHERE k.lead_id = $1 AND k.token_hash = $2 FOR UPDATE"
-        )).bind(lead_id).bind(hash_token(&token)).fetch_optional(&mut *tx).await {
+        ))).bind(lead_id).bind(hash_token(&token)).fetch_optional(&mut *tx).await {
             Ok(row) => row,
             Err(error) => return intake::internal(error, "load prepared payer link"),
         };
@@ -5840,12 +5840,12 @@ async fn staff_send(
         link.language = language;
         link
     } else {
-        let inserted = sqlx::query(&format!(
+        let inserted = sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"INSERT INTO lead_payer_links AS k
                (lead_id, token_hash, email, language, payer_key, sent_by, expires_at)
            VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(days => $7))
            RETURNING {LINK_COLUMNS}"#
-        ))
+        )))
         .bind(lead_id)
         .bind(hash_token(&token))
         .bind(email)
@@ -6466,7 +6466,7 @@ async fn reset_statement(
         reason,
         "payer_changed" | "email_changed"
     ) {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 r#"UPDATE documents d
                SET status = 'archived',
                    auto_name = CASE WHEN d.auto_name LIKE '{PREVIOUS_PAYER_PREFIX}%' THEN d.auto_name
@@ -6481,7 +6481,7 @@ async fn reset_statement(
                  AND u.withdrawn_at IS NULL
                  AND d.lead_id = $1
                RETURNING d.id, u.kind"#
-            ))
+            )))
             .bind(lead_id)
             .fetch_all(&mut *conn)
             .await?
@@ -6493,7 +6493,7 @@ async fn reset_statement(
     // (QA 2026-11-01, Z2 BUG-1); a signed one stays as the record of what was
     // done.
     if matches!(reason, "payer_changed" | "email_changed") {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"UPDATE documents d
                SET status = 'archived',
                    auto_name = '{PREVIOUS_PAYER_PREFIX}' || d.auto_name,
@@ -6509,7 +6509,7 @@ async fn reset_statement(
                                                      'patient_payer_statement',
                                                      'payer_cost_estimate',
                                                      'payer_self_disclosure'))"#
-        ))
+        )))
         .bind(lead_id)
         .execute(&mut *conn)
         .await?;
@@ -6601,10 +6601,10 @@ async fn sent_statement_snapshot(
     lead_id: Uuid,
     declaration: &Declaration,
 ) -> Result<Option<SentStatementSnapshot>, sqlx::Error> {
-    let Some(row) = sqlx::query(&format!(
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT source, {STATEMENT_COLUMNS} FROM lead_payer_statements \
          WHERE lead_id = $1 AND submitted_at IS NOT NULL"
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?

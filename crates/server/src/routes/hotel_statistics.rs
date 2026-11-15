@@ -235,7 +235,7 @@ async fn update_breakfast(
         "task_id"
     };
     let sql = include_str!("hotel_breakfast_update.sql").replace("__SOURCE_KEY__", key);
-    let saved = sqlx::query_scalar::<_, Uuid>(&sql)
+    let saved = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(&source)
         .bind(id)
         .bind(&body.breakfast_mode)

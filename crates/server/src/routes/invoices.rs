@@ -1998,10 +1998,10 @@ async fn load_existing_dunning_levels(
     state: &AppState,
     invoice_id: Uuid,
 ) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query_scalar::<_, String>(&format!(
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
         "SELECT level FROM invoice_dunning_events dunning WHERE invoice_id = $1 ORDER BY {}",
         dunning_level_order("dunning")
-    ))
+    )))
     .bind(invoice_id)
     .fetch_all(&state.db)
     .await
@@ -5528,7 +5528,7 @@ async fn advance_detail_figures(
                ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#,
             covers = advance_settlement::FINAL_QUOTE_COVERS_ADVANCE,
         );
-        let advance_ids = sqlx::query_scalar::<_, Uuid>(&sql)
+        let advance_ids = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe::<&str>(&sql))
             .bind(invoice_id)
             .bind(order_id)
             .fetch_all(&mut *conn)
@@ -6291,7 +6291,7 @@ async fn load_invoice_pdf_context_on(
         vat_id = release::issued_tax_registration_sql("i", "vat_id"),
         tax_number = release::issued_tax_registration_sql("i", "tax_number"),
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(invoice_id)
         .fetch_optional(&mut *conn)
         .await?
@@ -7119,7 +7119,7 @@ async fn list_my_invoices(
         Err(resp) => return resp,
     };
 
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.notes,
@@ -7182,7 +7182,7 @@ async fn list_my_invoices(
                   OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $3)
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
         other_representative = payer::other_representative_payer_sql("i", "$1"),
-    ))
+    )))
     .bind(auth.user_id)
     .bind(patient_id)
     .bind(query.status)
@@ -12689,7 +12689,7 @@ async fn load_invoice_for_credit_note(
            {}"#,
         if lock { "FOR UPDATE OF invoice" } else { "" }
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(invoice_id)
         .fetch_optional(&mut *conn)
         .await?
@@ -14053,7 +14053,7 @@ async fn load_einvoice(
         vat_id = release::issued_tax_registration_sql("i", "vat_id"),
         tax_number = release::issued_tax_registration_sql("i", "tax_number"),
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(invoice_id)
         .fetch_optional(&mut *conn)
         .await?
@@ -14475,7 +14475,7 @@ async fn load_dunning_event_rows(
     let mut conn = state.db.acquire().await?;
     let term_days = dunning_letters::load_dunning_payment_term_days(&mut conn).await?;
     let order = dunning_level_order("ide");
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT ide.id, ide.level, ide.note, ide.due_date_snapshot, ide.balance_due,
                   ide.sent_at, ide.created_at, ide.payment_due_date, ide.automatic,
                   u.name AS created_by_name, u.role AS created_by_role,
@@ -14486,7 +14486,7 @@ async fn load_dunning_event_rows(
            LEFT JOIN invoice_documents letter ON letter.dunning_event_id = ide.id
            WHERE ide.invoice_id = $1
            ORDER BY {order}"#
-    ))
+    )))
     .bind(invoice_id)
     .fetch_all(&mut *conn)
     .await?;

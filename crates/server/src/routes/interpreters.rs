@@ -2629,8 +2629,8 @@ async fn save_structured_access(
 #[allow(clippy::result_large_err)]
 async fn replace_string_values(
     tx: &mut Transaction<'_, Postgres>,
-    delete_sql: &str,
-    insert_sql: &str,
+    delete_sql: &'static str,
+    insert_sql: &'static str,
     interpreter_id: Uuid,
     discriminator: Option<&str>,
     values: &[String],

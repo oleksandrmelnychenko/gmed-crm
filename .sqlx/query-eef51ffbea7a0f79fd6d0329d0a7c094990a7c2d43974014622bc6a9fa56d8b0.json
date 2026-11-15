@@ -6,7 +6,13 @@
       {
         "ordinal": 0,
         "name": "locked!",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "field_access_policies",
+            "name": "is_system_locked"
+          }
+        }
       }
     ],
     "parameters": {

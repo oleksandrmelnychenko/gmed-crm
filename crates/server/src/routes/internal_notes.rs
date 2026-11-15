@@ -259,7 +259,7 @@ async fn list_notes(
            ORDER BY {order}
            LIMIT 500"#,
     );
-    let rows = match sqlx::query(&sql)
+    let rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(search)
         .bind(auth.user_id)
         .bind(role_code(auth.role))

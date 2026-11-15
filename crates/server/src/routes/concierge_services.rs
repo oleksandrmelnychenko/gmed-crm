@@ -1180,7 +1180,7 @@ async fn list_concierge_services(
            ORDER BY COALESCE(cs.starts_at, cs.created_at) DESC, cs.created_at DESC
            LIMIT 200"#
     );
-    let rows = match sqlx::query(&sql)
+    let rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(search_pattern)
         .bind(query.patient_id)
         .bind(query.appointment_id)
@@ -1476,11 +1476,11 @@ async fn concierge_service_billing_reversal_options(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let candidates = match sqlx::query(&format!(
+    let candidates = match sqlx::query(sqlx::AssertSqlSafe(format!(
         "{BILLING_REVERSAL_CANDIDATES_SQL}
          ORDER BY (line.order_id = $2) DESC NULLS LAST, line.created_at DESC, line.id
          LIMIT 30"
-    ))
+    )))
     .bind(patient_id)
     .bind(appointment_order_id)
     .fetch_all(&mut *conn)
@@ -1575,9 +1575,9 @@ async fn cancel_concierge_service_with_billing_reversal(
     }
     let patient_id: Uuid = service.try_get("patient_id").unwrap_or_default();
     if let Some(line_id) = body.order_leistung_id {
-        let candidate = sqlx::query_scalar::<_, Uuid>(&format!(
+        let candidate = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
             "{BILLING_REVERSAL_CANDIDATES_SQL} AND line.id = $2"
-        ))
+        )))
         .bind(patient_id)
         .bind(line_id)
         .fetch_optional(&state.db)
@@ -6111,7 +6111,7 @@ async fn deliver_patient_service_notice(
         title_sql = crate::patient_notice_language::text_sql("$3", "u", "cs.patient_id"),
         body_sql = crate::patient_notice_language::text_sql("$4", "u", "cs.patient_id"),
     );
-    let inserted = sqlx::query(&insert_sql)
+    let inserted = sqlx::query(sqlx::AssertSqlSafe::<&str>(&insert_sql))
         .bind(service_id)
         .bind(kind)
         .bind(notice_title.to_json())
@@ -6230,7 +6230,9 @@ async fn load_service_row(
     state: &AppState,
     service_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
-    sqlx::query(&format!("{SERVICE_ROW_SELECT} WHERE cs.id = $1"))
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{SERVICE_ROW_SELECT} WHERE cs.id = $1"
+    )))
     .bind(service_id)
     .fetch_optional(&state.db)
     .await

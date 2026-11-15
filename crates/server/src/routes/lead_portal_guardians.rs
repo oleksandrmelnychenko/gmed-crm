@@ -133,10 +133,10 @@ pub(crate) async fn auto_link_parent_logins_in_tx(
     lead_id: Uuid,
     actor: Option<Uuid>,
 ) -> Result<Vec<(Uuid, Uuid)>, sqlx::Error> {
-    let Some(lead) = sqlx::query(&format!(
+    let Some(lead) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.date_of_birth, l.trusted_contacts, l.portal_user_id
            FROM leads l WHERE l.id = $1 AND {PORTAL_LEAD_SQL}"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut **tx)
     .await?
@@ -349,7 +349,7 @@ async fn link_contact_to_own_patient_in_tx(
 /// load, also for contacts entered before 2026-10-19. Best effort; returns
 /// the leads that got an access.
 pub(crate) async fn auto_link_for_login(state: &AppState, user_id: Uuid) -> Vec<Uuid> {
-    let leads: Vec<Uuid> = match sqlx::query_scalar(&format!(
+    let leads: Vec<Uuid> = match sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l, users u
            WHERE u.id = $1 AND u.role = 'patient' AND u.is_active
              AND {PORTAL_LEAD_SQL}
@@ -362,7 +362,7 @@ pub(crate) async fn auto_link_for_login(state: &AppState, user_id: Uuid) -> Vec<
              AND NOT EXISTS (
                  SELECT 1 FROM lead_portal_access a WHERE a.lead_id = l.id AND a.user_id = u.id
              )"#
-    ))
+    )))
     .bind(user_id)
     .fetch_all(&state.db)
     .await
@@ -414,7 +414,7 @@ pub(crate) async fn has_other_active_links(
     user_id: Uuid,
     lead_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT EXISTS(
                    SELECT 1 FROM patient_assignments
                    WHERE user_id = $1 AND revoked_at IS NULL
@@ -428,7 +428,7 @@ pub(crate) async fn has_other_active_links(
                    WHERE a.user_id = $1 AND a.lead_id <> $2 AND a.revoked_at IS NULL
                      AND {PORTAL_LEAD_SQL}
                )"#,
-    ))
+    )))
     .bind(user_id)
     .bind(lead_id)
     .fetch_one(&mut **tx)
@@ -959,7 +959,7 @@ async fn active_guardian_link(
     // managed, for the 409 `use_patient_access` — the parent's own open
     // request (newest) and own patient record (not a child's record reached
     // through a guardian grant).
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT a.user_id, u.email, u.is_active,
                   EXISTS(SELECT 1 FROM patient_assignments pa
                          WHERE pa.user_id = a.user_id AND pa.revoked_at IS NULL
@@ -981,7 +981,7 @@ async fn active_guardian_link(
            FROM lead_portal_access a
            JOIN users u ON u.id = a.user_id
            WHERE a.id = $1 AND a.lead_id = $2 AND a.kind = 'guardian' AND a.revoked_at IS NULL"#,
-    ))
+    )))
     .bind(access_id)
     .bind(lead_id)
     .fetch_optional(&state.db)

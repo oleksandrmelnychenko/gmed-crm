@@ -1517,20 +1517,20 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     // back to the savepoint, the session renewal is still committed (a
     // transaction left aborted would have lost it).
     let suffix = lead_id.simple().to_string();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"CREATE FUNCTION test_fail_payer_submit_{suffix}() RETURNS trigger
            LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test: submit fails'; END $$"#
-    ))
+    )))
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"CREATE TRIGGER test_fail_payer_submit_{suffix}
            BEFORE UPDATE ON lead_payer_statements FOR EACH ROW
            WHEN (OLD.submitted_at IS NULL AND NEW.submitted_at IS NOT NULL
                  AND NEW.lead_id = '{lead_id}'::uuid)
            EXECUTE FUNCTION test_fail_payer_submit_{suffix}()"#
-    ))
+    )))
     .execute(pool)
     .await
     .unwrap();
@@ -1549,16 +1549,18 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         Some(json!({ "declared_correct": true })),
     )
     .await;
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "DROP TRIGGER test_fail_payer_submit_{suffix} ON lead_payer_statements"
-    ))
+    )))
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query(&format!("DROP FUNCTION test_fail_payer_submit_{suffix}()"))
-        .execute(pool)
-        .await
-        .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP FUNCTION test_fail_payer_submit_{suffix}()"
+    )))
+    .execute(pool)
+    .await
+    .unwrap();
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
     let renewed: bool = sqlx::query_scalar(
         r#"SELECT last_seen_at > '2000-01-02T00:00:00Z'::timestamptz FROM lead_payer_links

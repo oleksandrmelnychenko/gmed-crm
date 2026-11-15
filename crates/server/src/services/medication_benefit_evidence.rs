@@ -173,7 +173,7 @@ pub async fn load_exact_benefit_evidence(
                     page.patient_group_id"#,
         selector.kind.array_column()
     );
-    let rows = sqlx::query(&statement)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&statement))
         .bind(snapshot_id)
         .bind(GBA_AIS_SOURCE_ID)
         .bind(&selector.value)

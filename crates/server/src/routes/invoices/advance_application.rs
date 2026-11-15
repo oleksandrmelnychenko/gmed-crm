@@ -131,7 +131,7 @@ pub(crate) async fn apply_available_advances_tx(
            FOR UPDATE OF advance"#,
         settles = super::advance_settlement::FINAL_SETTLES_ADVANCE,
     );
-    let advances = sqlx::query(&advances_sql)
+    let advances = sqlx::query(sqlx::AssertSqlSafe::<&str>(&advances_sql))
         .bind(order_id)
         .bind(patient_id)
         .bind(target_invoice_id)
@@ -211,7 +211,7 @@ pub(crate) async fn open_final_invoices_for_advance_tx(
                     final_invoice.id"#,
         settles = super::advance_settlement::FINAL_SETTLES_ADVANCE,
     );
-    sqlx::query_scalar::<_, Uuid>(&sql)
+    sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(advance_invoice_id)
         .fetch_all(&mut **transaction)
         .await

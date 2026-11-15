@@ -680,10 +680,12 @@ async fn load_template_json<'e, E>(executor: E, id: Uuid) -> Result<Option<Value
 where
     E: sqlx::PgExecutor<'e>,
 {
-    let row = sqlx::query(&format!("{TEMPLATE_SELECT} WHERE t.id = $1"))
-        .bind(id)
-        .fetch_optional(executor)
-        .await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{TEMPLATE_SELECT} WHERE t.id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(executor)
+    .await?;
     Ok(row.as_ref().map(template_json))
 }
 
@@ -964,11 +966,11 @@ async fn list_templates(
     if let Err(resp) = auth.require_any_role(TEMPLATE_ROLES) {
         return resp;
     }
-    let rows = match sqlx::query(&format!(
+    let rows = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"{TEMPLATE_SELECT}
            ORDER BY CASE t.status WHEN 'draft' THEN 0 WHEN 'active' THEN 1 ELSE 2 END,
                     lower(t.label), t.version_number DESC"#
-    ))
+    )))
     .fetch_all(&state.db)
     .await
     {

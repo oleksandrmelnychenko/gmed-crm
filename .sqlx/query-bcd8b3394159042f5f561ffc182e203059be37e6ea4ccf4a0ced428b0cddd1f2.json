@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "beschreibung",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "symptome",
+            "name": "beschreibung"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "fachrichtung",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "symptome",
+            "name": "fachrichtung"
+          }
+        }
       }
     ],
     "parameters": {

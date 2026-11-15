@@ -92,13 +92,13 @@ async fn issue_patient_portal_access(
         }
         Err(response) => return response,
     }
-    let patient = match sqlx::query(&format!(
+    let patient = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT p.first_name, p.last_name, p.email, p.birth_date, p.lifecycle_status,
                   login.id AS user_id, login.email AS login_email, login.is_active AS login_active
            FROM patients p
            LEFT JOIN LATERAL ({PATIENT_PORTAL_LOGIN_SQL}) login ON true
            WHERE p.id = $1"#
-    ))
+    )))
     .bind(patient_id)
     .fetch_optional(&state.db)
     .await

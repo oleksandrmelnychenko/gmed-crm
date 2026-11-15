@@ -1698,7 +1698,7 @@ pub(crate) async fn load_payer_state(
         .map(|column| format!("d.{}", column.trim()))
         .collect::<Vec<_>>()
         .join(", ");
-    let Some(row) = sqlx::query(&format!(
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT lead.citizenships AS lead_citizenships, {declaration_columns},
                   latest_order.id AS order_id, latest_order.order_number,
                   latest_order.signed_patient, latest_order.signed_agency,
@@ -1753,7 +1753,7 @@ pub(crate) async fn load_payer_state(
                LIMIT 1
            ) cost ON true
            WHERE lead.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -3858,9 +3858,9 @@ pub(crate) async fn load_declaration(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<Declaration>, sqlx::Error> {
-    let Some(mut declaration) = sqlx::query(&format!(
+    let Some(mut declaration) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {DECLARATION_COLUMNS} FROM lead_payer_declarations WHERE lead_id = $1"
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -3900,14 +3900,14 @@ pub(crate) async fn patient_declaration(
         .map(|column| format!("d.{}", column.trim()))
         .collect::<Vec<_>>()
         .join(", ");
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT d.lead_id, l.status_changed_at AS converted_at, {declaration_columns}
            FROM lead_payer_declarations d
            JOIN leads l ON l.id = d.lead_id
            WHERE d.patient_id = $1 AND l.converted_patient_id = $1
            ORDER BY l.status_changed_at DESC NULLS LAST, d.updated_at DESC, d.lead_id DESC
            LIMIT 1"#
-    ))
+    )))
     .bind(patient_id)
     .fetch_optional(&mut *conn)
     .await?;
@@ -4581,10 +4581,10 @@ async fn sync_order_payers(
     declaration: &Declaration,
     actor: Option<Uuid>,
 ) -> Result<(), sqlx::Error> {
-    let orders = sqlx::query(&format!(
+    let orders = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT o.id, {} FROM orders o WHERE o.source_lead_id = $1 FOR UPDATE",
         payer_columns("o", "")
-    ))
+    )))
     .bind(lead_id)
     .fetch_all(&mut *tx)
     .await?;
@@ -4849,10 +4849,10 @@ pub(crate) async fn preset_order_payer_from_patient(
     patient_id: Uuid,
     actor: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let Some(order) = sqlx::query(&format!(
+    let Some(order) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {} FROM orders o WHERE o.id = $1 FOR UPDATE",
         payer_columns("o", "")
-    ))
+    )))
     .bind(order_id)
     .fetch_optional(&mut *tx)
     .await?

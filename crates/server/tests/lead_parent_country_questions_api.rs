@@ -750,11 +750,13 @@ async fn a_short_parent_form_can_send_the_child_request_but_cannot_create_a_cont
     };
     // The parent's own billing answers below name the roles.
     for table in ["lead_invoice_recipients", "lead_payer_declarations"] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE lead_id = $1"))
-            .bind(app.lead)
-            .execute(&app.suite.pool)
-            .await
-            .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE lead_id = $1"
+        )))
+        .bind(app.lead)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
     }
     let (status, consent) = request(
         &app,

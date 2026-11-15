@@ -1078,13 +1078,13 @@ async fn get_identity_data(
     if !lead_payer::may_view(&auth) {
         return forbidden();
     }
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {IDENTITY_SELECT}
            FROM leads l
            LEFT JOIN lead_gwg_declarations x ON x.lead_id = l.id
            LEFT JOIN users u ON u.id = x.id_data_entered_by
            WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&state.db)
     .await;
@@ -1213,12 +1213,12 @@ async fn put_identity_data(
         )
         .await?;
         store::reassess(&mut tx, lead_id, Cause::Staff, Some(auth.user_id)).await?;
-        let row = sqlx::query(&format!(
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"SELECT {IDENTITY_SELECT}
                FROM lead_gwg_declarations x
                LEFT JOIN users u ON u.id = x.id_data_entered_by
                WHERE x.lead_id = $1"#
-        ))
+        )))
         .bind(lead_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -1394,12 +1394,12 @@ async fn put_representative_identity_data(
         )
         .await?;
         store::reassess(&mut tx, lead_id, Cause::Staff, Some(auth.user_id)).await?;
-        let row = sqlx::query(&format!(
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"SELECT {IDENTITY_SELECT}
                FROM lead_representatives x
                LEFT JOIN users u ON u.id = x.id_data_entered_by
                WHERE x.lead_id = $1 AND x.contact_id = $2"#
-        ))
+        )))
         .bind(lead_id)
         .bind(representative_id)
         .fetch_one(&mut *tx)

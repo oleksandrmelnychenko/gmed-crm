@@ -571,7 +571,7 @@ async fn load_medication(
            ) verified ON TRUE
            WHERE pm.id = $1 AND pm.patient_id = $2{lock}"#,
     );
-    let row = sqlx::query(&sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(medication_id)
         .bind(patient_id)
         .fetch_optional(&mut **tx)

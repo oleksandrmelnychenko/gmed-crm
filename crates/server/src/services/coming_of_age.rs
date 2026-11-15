@@ -201,7 +201,7 @@ pub async fn run_on(state: &AppState, today: NaiveDate) -> Result<ComingOfAgeRep
         publish_ended_lead_accesses(state, outcome.ended_lead_accesses).await;
     }
 
-    let leads: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let leads: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l
            WHERE l.date_of_birth IS NOT NULL
              AND l.date_of_birth <= ($1::date - INTERVAL '18 years')::date
@@ -211,7 +211,7 @@ pub async fn run_on(state: &AppState, today: NaiveDate) -> Result<ComingOfAgeRep
                            AND a.revoked_at IS NULL)
            ORDER BY l.id"#,
         PORTAL_LEAD_SQL = crate::routes::lead_portal_intake::PORTAL_LEAD_SQL,
-    ))
+    )))
     .bind(today)
     .fetch_all(&state.db)
     .await?;
@@ -294,13 +294,13 @@ async fn process_lead(
     let mut tx = state.db.begin().await?;
     // Serialises with the cabinet and staff, and re-checks under the lock (a
     // corrected date of birth or a conversion meanwhile wins).
-    let adult: Option<bool> = sqlx::query_scalar(&format!(
+    let adult: Option<bool> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.date_of_birth IS NOT NULL
                   AND l.date_of_birth <= ($2::date - INTERVAL '18 years')::date
                   AND {PORTAL_LEAD_SQL}
            FROM leads l WHERE l.id = $1 FOR UPDATE"#,
         PORTAL_LEAD_SQL = crate::routes::lead_portal_intake::PORTAL_LEAD_SQL,
-    ))
+    )))
     .bind(lead_id)
     .bind(today)
     .fetch_optional(&mut *tx)
@@ -479,7 +479,7 @@ pub async fn run_advance_notices_on(
         publish_advance_notice(state, "patient", patient_id, &notice).await;
     }
 
-    let leads: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let leads: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l
            WHERE l.date_of_birth IS NOT NULL
              AND (l.date_of_birth + INTERVAL '18 years')::date > $1::date
@@ -492,7 +492,7 @@ pub async fn run_advance_notices_on(
                              WHERE action = $3 AND entity_type = 'lead' AND entity_id = l.id)
            ORDER BY l.id"#,
         PORTAL_LEAD_SQL = crate::routes::lead_portal_intake::PORTAL_LEAD_SQL,
-    ))
+    )))
     .bind(today)
     .bind(ADVANCE_NOTICE_DAYS)
     .bind(LEAD_SOON_NOTIFIED_ACTION)
@@ -676,7 +676,7 @@ async fn advance_notice_lead(
     today: NaiveDate,
 ) -> Result<Option<AdvanceNotice>, sqlx::Error> {
     let mut tx = state.db.begin().await?;
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.date_of_birth,
                   btrim(coalesce(l.first_name, '') || ' ' || coalesce(l.last_name, '')) AS name,
                   ({PORTAL_LEAD_SQL}
@@ -688,7 +688,7 @@ async fn advance_notice_lead(
                                      AND entity_id = l.id)) AS due
            FROM leads l WHERE l.id = $1 FOR UPDATE"#,
         PORTAL_LEAD_SQL = crate::routes::lead_portal_intake::PORTAL_LEAD_SQL,
-    ))
+    )))
     .bind(lead_id)
     .bind(LEAD_SOON_NOTIFIED_ACTION)
     .fetch_optional(&mut *tx)

@@ -161,7 +161,7 @@ pub(crate) async fn settling_final_invoice(
                     final_invoice.id
            LIMIT 1"#
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(advance_invoice_id)
         .fetch_optional(&mut *conn)
         .await?
@@ -331,7 +331,7 @@ pub(super) async fn close_settled_advances_tx(
            WHERE final_invoice.id = $1
            ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#
     );
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(final_invoice_id)
         .fetch_all(&mut **transaction)
         .await

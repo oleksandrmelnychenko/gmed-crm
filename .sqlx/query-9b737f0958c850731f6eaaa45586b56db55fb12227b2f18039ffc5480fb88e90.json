@@ -6,47 +6,101 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "title",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "title"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "date",
-        "type_info": "Date"
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "date"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "time_start",
-        "type_info": "Time"
+        "type_info": "Time",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "time_start"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "time_end",
-        "type_info": "Time"
+        "type_info": "Time",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "time_end"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "appointment_type",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "appointment_type"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "status",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "status"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "location",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "location"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "notes",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "appointments",
+            "name": "notes"
+          }
+        }
       }
     ],
     "parameters": {

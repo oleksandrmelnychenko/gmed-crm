@@ -373,7 +373,7 @@ async fn seed_invoice(
            )"#
     );
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(order_id)
         .bind(patient_id)
         .bind(format!("INV-{tag}-{}", Uuid::new_v4().simple()))
@@ -412,7 +412,7 @@ async fn seed_invoice_at(
            )"#
     );
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(order_id)
         .bind(patient_id)
         .bind(format!("INV-{tag}-{}", Uuid::new_v4().simple()))
@@ -446,7 +446,7 @@ async fn seed_lead(
            )"#
     );
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(format!("Lead {tag}"))
         .bind(country)
         .bind(format!("{tag}-{country}@example.com"))
@@ -478,7 +478,7 @@ async fn seed_quote(
            )"#
     );
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(order_id)
         .bind(format!("KV-{tag}-{}", Uuid::new_v4().simple()))
         .bind(total_gross - (total_gross * 19 / 119))
@@ -508,7 +508,7 @@ async fn seed_task(
            )"#
     );
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(title)
         .bind(assignee_id)
         .bind(assigned_by)

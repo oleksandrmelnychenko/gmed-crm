@@ -107,7 +107,7 @@ pub(super) async fn load_dunning_letter_context(
            WHERE dunning.id = $1 AND dunning.invoice_id = $2"#,
         recipient_columns = document::RECIPIENT_COLUMNS,
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(dunning_event_id)
         .bind(invoice_id)
         .fetch_optional(&mut *conn)

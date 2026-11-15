@@ -77,11 +77,13 @@ pub(crate) async fn list_importable(
     let Some(user_id) = employee.user_id else {
         return Json(json!([])).into_response();
     };
-    let rows = match sqlx::query(&format!("{PROFILE_DOCUMENTS} ORDER BY d.created_at DESC"))
-        .bind(user_id)
-        .bind(employee.id)
-        .fetch_all(&state.db)
-        .await
+    let rows = match sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{PROFILE_DOCUMENTS} ORDER BY d.created_at DESC"
+    )))
+    .bind(user_id)
+    .bind(employee.id)
+    .fetch_all(&state.db)
+    .await
     {
         Ok(rows) => rows,
         Err(error) => return internal(error, "list profile documents"),
@@ -139,12 +141,14 @@ pub(crate) async fn import_profile_document(
             "The personnel file is not linked to an account with a profile",
         );
     };
-    let row = match sqlx::query(&format!("{PROFILE_DOCUMENTS} AND d.id = $3"))
-        .bind(user_id)
-        .bind(employee.id)
-        .bind(body.document_id)
-        .fetch_optional(&state.db)
-        .await
+    let row = match sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{PROFILE_DOCUMENTS} AND d.id = $3"
+    )))
+    .bind(user_id)
+    .bind(employee.id)
+    .bind(body.document_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Profile document not found"),

@@ -1871,10 +1871,10 @@ async fn demo_conversion(repeat: bool) {
         .bind(result).bind(lead).bind(app.patient_manager_id).bind(&result_key).execute(pool).await.unwrap();
     // The immutable snapshot mirrors the context the provider verified.
     let context_sql = "jsonb_build_object('patient_id',d.patient_id,'lead_id',d.lead_id,'order_id',d.order_id,'appointment_id',d.appointment_id,'art',d.art,'template',d.generated_template_id,'bindings',d.generated_bindings,'storage_key',d.storage_key,'version_root',d.version_root_document_id,'version',d.version_number)";
-    sqlx::query(&format!("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,result_document_id,report_storage_key,report_sha256,signed_sha256,is_package) SELECT $1,d.id,$3,$4,{context_sql},'[]','synthetic-demo',true,'pending',$5,$6,$4,$4,true FROM documents d WHERE d.id=$2"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,result_document_id,report_storage_key,report_sha256,signed_sha256,is_package) SELECT $1,d.id,$3,$4,{context_sql},'[]','synthetic-demo',true,'pending',$5,$6,$4,$4,true FROM documents d WHERE d.id=$2")))
         .bind(request).bind(source_ids[0]).bind(app.patient_manager_id).bind(&hash).bind(result).bind(&report_key).execute(pool).await.unwrap();
     for (position, id) in source_ids.iter().enumerate() {
-        sqlx::query(&format!("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context) SELECT $1,d.id,$3,$4,{context_sql} FROM documents d WHERE d.id=$2"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context) SELECT $1,d.id,$3,$4,{context_sql} FROM documents d WHERE d.id=$2")))
             .bind(request).bind(id).bind((position+1) as i16).bind(&hash).execute(pool).await.unwrap();
     }
     for key in [&result_key, &report_key] {
@@ -4829,7 +4829,7 @@ async fn a_failed_retention_notice_leaves_the_lead_to_be_warned_again() {
     let lead = insert_unqualified_lead(&app, &format!("{tag}-atomic"), 12).await;
     // A notice for this one lead fails (scoped, so parallel tests go on).
     let function = format!("fail_notice_{tag}");
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"CREATE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$
            BEGIN
                IF NEW.entity_id = '{lead}'::uuid THEN
@@ -4837,14 +4837,14 @@ async fn a_failed_retention_notice_leaves_the_lead_to_be_warned_again() {
                END IF;
                RETURN NEW;
            END $$"#
-    ))
+    )))
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "CREATE TRIGGER {function} BEFORE INSERT ON user_notifications
          FOR EACH ROW EXECUTE FUNCTION {function}()"
-    ))
+    )))
     .execute(pool)
     .await
     .unwrap();
@@ -4855,11 +4855,13 @@ async fn a_failed_retention_notice_leaves_the_lead_to_be_warned_again() {
         Some(&[lead]),
     )
     .await;
-    sqlx::query(&format!("DROP TRIGGER {function} ON user_notifications"))
-        .execute(pool)
-        .await
-        .unwrap();
-    sqlx::query(&format!("DROP FUNCTION {function}()"))
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP TRIGGER {function} ON user_notifications"
+    )))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP FUNCTION {function}()")))
         .execute(pool)
         .await
         .unwrap();
@@ -4937,11 +4939,11 @@ async fn retention_warning_and_purge_are_signalled_live() {
         .unwrap()
     };
     let notified_live = |kind_filter: &'static str| async move {
-        sqlx::query_scalar::<_, i64>(&format!(
+        sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM realtime_events
              WHERE event_type = 'notification.created' AND $1 = ANY(target_user_ids)
                AND {kind_filter}"
-        ))
+        )))
         .bind(owner)
         .bind(lead.to_string())
         .fetch_one(pool)

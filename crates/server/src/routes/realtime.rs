@@ -657,7 +657,7 @@ async fn can_receive_portal_event(
             };
             // As `GET /me/documents`: released, current and shared to the
             // login.
-            sqlx::query_scalar::<_, bool>(&format!(
+            sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
                 r#"SELECT EXISTS(
                        SELECT 1
                        FROM documents d
@@ -677,7 +677,7 @@ async fn can_receive_portal_event(
                          )
                    )"#,
                 current = super::me::PORTAL_CURRENT_DOCUMENT_SQL
-            ))
+            )))
             .bind(event.entity_id)
             .bind(patient_id)
             .bind(auth.user_id)

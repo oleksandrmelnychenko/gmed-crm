@@ -318,7 +318,7 @@ async fn sync_log(
     log: Log,
     outcome: &mut SyncOutcome,
 ) -> bool {
-    let due = match sqlx::query(&log.claim_sql())
+    let due = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&log.claim_sql()))
         .bind(BATCH)
         .fetch_all(&state.db)
         .await
@@ -350,7 +350,7 @@ async fn sync_log(
             }
         };
         outcome.checked += 1;
-        if let Err(error) = sqlx::query(&log.update_sql())
+        if let Err(error) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&log.update_sql()))
             .bind(id)
             .bind(status.as_str())
             .bind(&provider_status)
@@ -423,11 +423,13 @@ async fn notify_undelivered(
     email_kind: &str,
     status: DeliveryStatus,
 ) {
-    let recipients: Vec<Uuid> = match sqlx::query_scalar(&undelivered_recipients_sql())
-        .bind(lead_id)
-        .bind(sender)
-        .fetch_all(&state.db)
-        .await
+    let recipients: Vec<Uuid> = match sqlx::query_scalar(sqlx::AssertSqlSafe::<&str>(
+        &undelivered_recipients_sql(),
+    ))
+    .bind(lead_id)
+    .bind(sender)
+    .fetch_all(&state.db)
+    .await
     {
         Ok(recipients) => recipients,
         Err(error) => {

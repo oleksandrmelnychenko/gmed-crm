@@ -758,10 +758,12 @@ pub(super) async fn update_invoice_draft(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
-    let locked = match sqlx::query(&format!("{DRAFT_SELECT} FOR UPDATE OF invoice"))
-        .bind(invoice_id)
-        .fetch_optional(&mut *transaction)
-        .await
+    let locked = match sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{DRAFT_SELECT} FOR UPDATE OF invoice"
+    )))
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
     {
         Ok(Some(row)) => draft_row(&row),
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
@@ -1047,10 +1049,12 @@ pub(super) async fn discard_invoice_draft(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
-    let locked = match sqlx::query(&format!("{DRAFT_SELECT} FOR UPDATE OF invoice"))
-        .bind(invoice_id)
-        .fetch_optional(&mut *transaction)
-        .await
+    let locked = match sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{DRAFT_SELECT} FOR UPDATE OF invoice"
+    )))
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
     {
         Ok(Some(row)) => draft_row(&row),
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),

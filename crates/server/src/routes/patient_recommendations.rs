@@ -178,10 +178,12 @@ async fn list_patient_recommendations(
         return resp;
     }
 
-    match sqlx::query(&recommendation_select_sql("WHERE pr.patient_id = $1"))
-        .bind(patient_id)
-        .fetch_all(&state.db)
-        .await
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&recommendation_select_sql(
+        "WHERE pr.patient_id = $1",
+    )))
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
     {
         Ok(rows) => Json(
             rows.iter()
@@ -750,9 +752,9 @@ async fn list_my_recommendations(
         Err(resp) => return resp,
     };
 
-    match sqlx::query(&recommendation_select_sql(
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&recommendation_select_sql(
         "WHERE pr.patient_id = $1 AND pr.portal_visible = true",
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -1301,17 +1303,19 @@ async fn load_recommendation_row(
     state: &AppState,
     recommendation_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
-    sqlx::query(&recommendation_select_sql("WHERE pr.id = $1"))
-        .bind(recommendation_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, recommendation_id = %recommendation_id, "load recommendation");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load recommendation",
-            )
-        })
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&recommendation_select_sql(
+        "WHERE pr.id = $1",
+    )))
+    .bind(recommendation_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, recommendation_id = %recommendation_id, "load recommendation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load recommendation",
+        )
+    })
 }
 
 async fn load_portal_recommendation_row(
@@ -1319,9 +1323,9 @@ async fn load_portal_recommendation_row(
     patient_id: Uuid,
     recommendation_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
-    sqlx::query(&recommendation_select_sql(
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&recommendation_select_sql(
         "WHERE pr.id = $1 AND pr.patient_id = $2 AND pr.portal_visible = true",
-    ))
+    )))
     .bind(recommendation_id)
     .bind(patient_id)
     .fetch_optional(&state.db)
@@ -1786,7 +1790,7 @@ async fn notify_patient_users(
         title_sql = crate::patient_notice_language::text_sql("$3", "u", "pa.patient_id"),
         body_sql = crate::patient_notice_language::text_sql("$4", "u", "pa.patient_id"),
     );
-    if let Ok(rows) = sqlx::query(&insert_sql)
+    if let Ok(rows) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&insert_sql))
         .bind(patient_id)
         .bind(kind)
         .bind(title_texts.to_json())

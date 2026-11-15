@@ -2978,7 +2978,7 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
 /// on, as the erasure does; commits when it succeeds.
 async fn update_task_history_in_erasure(
     pool: &PgPool,
-    statement: &str,
+    statement: &'static str,
     event_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await.unwrap();
@@ -3005,7 +3005,7 @@ async fn update_task_history_in_erasure(
 /// Runs one statement on a version-history row as the erasure would.
 async fn update_clinical_history_in_erasure(
     pool: &PgPool,
-    statement: &str,
+    statement: &'static str,
     version_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await.unwrap();

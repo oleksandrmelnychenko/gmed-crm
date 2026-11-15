@@ -134,7 +134,7 @@ async fn list_projects(
                   project.updated_at DESC
          LIMIT 500"
     );
-    let rows = match sqlx::query(&sql)
+    let rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(search)
         .bind(status)
         .bind(query.patient_id)
@@ -857,7 +857,7 @@ async fn load_project(
            )) END)
          GROUP BY project.id, owner.name, patient.first_name, patient.last_name, creator.name"
     );
-    let row = sqlx::query(&sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(project_id)
         .bind(matches!(auth.role, Role::Ceo))
         .bind(auth.user_id)

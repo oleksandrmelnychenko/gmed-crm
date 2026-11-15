@@ -15876,7 +15876,7 @@ async fn refuse_aml_paper_assignment(
     document_id: Uuid,
     assignee: Uuid,
 ) -> Result<(), axum::response::Response> {
-    let refused = sqlx::query_scalar::<_, bool>(&format!(
+    let refused = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
         r#"SELECT EXISTS(
                SELECT 1
                FROM documents d
@@ -15891,7 +15891,7 @@ async fn refuse_aml_paper_assignment(
                        AND share.revoked_at IS NULL
                  )
            )"#
-    ))
+    )))
     .bind(document_id)
     .bind(assignee)
     .fetch_one(&state.db)
@@ -15929,7 +15929,7 @@ async fn refuse_medical_paper_assignment(
     document_id: Uuid,
     assignee: Uuid,
 ) -> Result<(), axum::response::Response> {
-    let refused = sqlx::query_scalar::<_, bool>(&format!(
+    let refused = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
         r#"SELECT EXISTS(
                SELECT 1
                FROM documents d
@@ -15938,7 +15938,7 @@ async fn refuse_medical_paper_assignment(
                  AND d.is_medical
                  AND assignee.role NOT IN {MEDICAL_TRANSLATION_ASSIGNEE_ROLES_SQL}
            )"#
-    ))
+    )))
     .bind(document_id)
     .bind(assignee)
     .fetch_one(&state.db)
@@ -29538,7 +29538,7 @@ async fn load_lead_self_disclosure(
         .execute(&mut *conn)
         .await
         .map_err(|error| failed(error, "snapshot"))?;
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT first_name, middle_name, last_name, date_of_birth, citizenships,
                   street_address, zip_code, city, country, email, phone, portal_submitted_at,
                   legal_sex,
@@ -29559,7 +29559,7 @@ async fn load_lead_self_disclosure(
            FROM leads l
            WHERE id = $1"#,
         super::lead_portal_intake::CHANGED_SINCE_SUBMIT_SQL,
-    ))
+    )))
     .bind(lead_id)
     .bind(crate::risk::cabinet::FOLLOW_UP_SUBMIT_ACTION)
     .fetch_optional(&mut *conn)
@@ -33804,7 +33804,7 @@ async fn list_document_translation_request_queue(
            LIMIT 1000"#
     );
 
-    let rows = match sqlx::query(&sql)
+    let rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(source)
         .bind(query.patient_id)
         .bind(can_view_all)
@@ -34925,9 +34925,9 @@ async fn list_document_translations(
     if let Err(resp) = authorize_document_translation(&state, &auth, id).await {
         return resp;
     }
-    let rows = match sqlx::query(&format!(
+    let rows = match sqlx::query(sqlx::AssertSqlSafe(format!(
         "{DOCUMENT_TRANSLATION_SELECT}\n       WHERE dt.document_id = $1\n       ORDER BY dt.created_at DESC\n       LIMIT 200"
-    ))
+    )))
     .bind(id)
     .fetch_all(&state.db)
     .await
@@ -35345,9 +35345,9 @@ async fn create_document_translation(
         }),
     ));
 
-    let response_row = match sqlx::query(&format!(
+    let response_row = match sqlx::query(sqlx::AssertSqlSafe(format!(
         "{DOCUMENT_TRANSLATION_SELECT}\n       WHERE dt.id = $1"
-    ))
+    )))
     .bind(translation_id)
     .fetch_one(&state.db)
     .await
@@ -36128,7 +36128,7 @@ async fn validate_translation_assignee(
     user_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let allowed = sqlx::query_scalar::<_, bool>(
-        &format!(
+        sqlx::AssertSqlSafe(format!(
             r#"SELECT EXISTS(
                   SELECT 1
                   FROM users u
@@ -36139,7 +36139,7 @@ async fn validate_translation_assignee(
                     AND {}
                )"#,
             crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
-        ),
+        )),
     )
     .bind(user_id)
     .fetch_one(&state.db)
@@ -40063,7 +40063,7 @@ async fn revoke_document_from_patient_portal(
         title_sql = crate::patient_notice_language::text_sql("$4", "u", "$6::uuid"),
         body_sql = crate::patient_notice_language::text_sql("$5", "u", "$6::uuid"),
     );
-    match sqlx::query(&revoked_notice_sql)
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&revoked_notice_sql))
         .bind(id)
         .bind(&revoked_login_ids)
         .bind(json!({

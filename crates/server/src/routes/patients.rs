@@ -2736,7 +2736,7 @@ async fn list_patients(
            LIMIT 100"#,
         login_sql = crate::routes::patient_portal_access::PATIENT_PORTAL_LOGIN_SQL,
     );
-    let rows = sqlx::query(&list_sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&list_sql))
         .bind(active_only)
         .bind(search_pattern)
         .bind(provider_id)
@@ -10481,7 +10481,7 @@ async fn create_relation(
             .await
             .map_err(|error| relation_write_failed(error, FAILED))?;
     }
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"WITH upserted AS (
                 INSERT INTO patient_relations (
                     patient_id, related_patient_id, related_name, relation_type,
@@ -10492,7 +10492,7 @@ async fn create_relation(
                 RETURNING {RELATION_RETURNING}
            )
            {RELATION_SELECT_FROM_UPSERTED}"#
-    ))
+    )))
     .bind(patient_uuid)
     .bind(body.related_patient_id)
     .bind(body.related_name.trim())
@@ -10650,7 +10650,7 @@ async fn update_relation(
         identity_changed.push("citizenships");
     }
 
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"WITH upserted AS (
                 UPDATE patient_relations
                 SET related_patient_id = $3,
@@ -10673,7 +10673,7 @@ async fn update_relation(
                 RETURNING {RELATION_RETURNING}
            )
            {RELATION_SELECT_FROM_UPSERTED}"#
-    ))
+    )))
     .bind(patient_uuid)
     .bind(relation_id)
     .bind(body.related_patient_id)
@@ -10811,7 +10811,7 @@ async fn link_relation(
         .begin()
         .await
         .map_err(|error| relation_write_failed(error, FAILED))?;
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"WITH upserted AS (
                 UPDATE patient_relations
                 SET related_patient_id = $3, is_organisation = NULL
@@ -10819,7 +10819,7 @@ async fn link_relation(
                 RETURNING {RELATION_RETURNING}
            )
            {RELATION_SELECT_FROM_UPSERTED}"#
-    ))
+    )))
     .bind(patient_uuid)
     .bind(relation_id)
     .bind(body.related_patient_id)
@@ -12115,7 +12115,7 @@ async fn get_patient_timeline(
                 '[]'::jsonb
             ) AS source_facets"#
     );
-    let payload = sqlx::query(&payload_sql)
+    let payload = sqlx::query(sqlx::AssertSqlSafe::<&str>(&payload_sql))
         .bind(patient_uuid)
         .bind(entity_type)
         .bind(category)
@@ -17648,7 +17648,8 @@ async fn load_clinical_report_data(
              LEFT JOIN documents doc ON doc.id = (to_jsonb(r)->>'source_document_id')::uuid
              WHERE r.patient_id = $1 {filter} ORDER BY {order}"
         );
-        let mut query = sqlx::query_scalar::<_, Value>(&query).bind(patient_uuid);
+        let mut query =
+            sqlx::query_scalar::<_, Value>(sqlx::AssertSqlSafe::<&str>(&query)).bind(patient_uuid);
         if key == "medications" {
             query = query.bind(today);
         }

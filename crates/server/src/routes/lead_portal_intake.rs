@@ -566,7 +566,7 @@ pub(crate) async fn own_login_closed<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT EXISTS (
                SELECT 1 FROM leads l
                WHERE l.portal_user_id = $1
@@ -574,7 +574,7 @@ where
                  AND {PORTAL_LEAD_SQL}
                  AND {OWN_LOGIN_CLOSED_SQL}
            )"#
-    ))
+    )))
     .bind(user_id)
     .bind(lead_id)
     .fetch_one(executor)
@@ -629,7 +629,7 @@ pub(crate) async fn accessible_leads<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id, 'self' AS kind, l.created_at
            FROM leads l
            WHERE l.portal_user_id = $1 AND {PORTAL_LEAD_SQL} AND NOT {OWN_LOGIN_CLOSED_SQL}
@@ -643,7 +643,7 @@ where
              AND {PORTAL_LEAD_SQL}
              AND {OWN_LOGIN_CLOSED_SQL}
            ORDER BY 3, 1"#
-    ))
+    )))
     .bind(user_id)
     .fetch_all(executor)
     .await?;
@@ -669,7 +669,7 @@ pub(crate) async fn is_lead_only_login(
     db: &gmed_db::DbPool,
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT NOT EXISTS(
                    SELECT 1 FROM patient_assignments a
                    JOIN patients p ON p.id = a.patient_id
@@ -685,7 +685,7 @@ pub(crate) async fn is_lead_only_login(
                          AND {PORTAL_LEAD_SQL}
                    )
                )"#
-    ))
+    )))
     .bind(user_id)
     .fetch_one(db)
     .await
@@ -844,7 +844,7 @@ pub(crate) async fn lock_my_lead(
         .bind(lead_id)
         .fetch_optional(&mut **tx)
         .await?;
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT CASE
                     -- Staff fill in the form for the client; the handlers let
                     -- only staff who edit leads come this far.
@@ -863,7 +863,7 @@ pub(crate) async fn lock_my_lead(
            FROM leads l
            WHERE l.id = $1 AND {PORTAL_LEAD_SQL}
            FOR UPDATE OF l"#
-    ))
+    )))
     .bind(lead_id)
     .bind(user_id)
     .fetch_optional(&mut **tx)
@@ -885,9 +885,9 @@ pub(crate) async fn my_lead_access(
     user_id: Uuid,
 ) -> Result<Option<AccessKind>, sqlx::Error> {
     if is_staff_user(&state.db, user_id).await? {
-        let open: Option<Uuid> = sqlx::query_scalar(&format!(
+        let open: Option<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT l.id FROM leads l WHERE l.id = $1 AND {PORTAL_LEAD_SQL}"
-        ))
+        )))
         .bind(lead_id)
         .fetch_optional(&state.db)
         .await?;
@@ -1602,9 +1602,9 @@ pub(crate) async fn unsent_personal_fields(
     sent_at: Option<DateTime<Utc>>,
     fields: &[&'static str],
 ) -> Result<Vec<&'static str>, sqlx::Error> {
-    let Some(row) = sqlx::query(&format!(
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {PERSONAL_DATA_COLUMNS}, l.portal_field_updates FROM leads l WHERE l.id = $1"
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -3252,14 +3252,14 @@ pub(crate) async fn request_payload(
     // Every load reassesses a started risk assessment (P3): every write of
     // the cabinet ends here, right after its commit.
     crate::risk::cabinet::reassess_for_cabinet(&state.db, lead_id, user_id).await?;
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.created_at, l.qualification_status,
                   l.services, l.needs_interpreter, l.notes, l.wizard_state,
                   l.compliance_status, l.portal_submitted_at,
                   ({CHANGED_SINCE_SUBMIT_SQL}) AS changed_since_submit
            FROM leads l
            WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_one(&state.db)
     .await?;
@@ -3734,7 +3734,7 @@ async fn guardian_access_ended(
     db: &gmed_db::DbPool,
     user_id: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT CASE
                WHEN EXISTS (
                    SELECT 1 FROM lead_portal_access a
@@ -3762,7 +3762,7 @@ async fn guardian_access_ended(
                    LIMIT 1
                )
            END"#
-    ))
+    )))
     .bind(user_id)
     .fetch_one(db)
     .await
@@ -3778,7 +3778,7 @@ const GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL: &str = r#"(
 /// access (owner 2026-10-12): staff are told once per lead to issue it, with
 /// the notice the cabinet sends for a date of birth under 18. Best effort.
 async fn notify_parents_access_missing(state: &AppState, user_id: Uuid) {
-    let leads: Vec<Uuid> = match sqlx::query_scalar(&format!(
+    let leads: Vec<Uuid> = match sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l
            WHERE l.portal_user_id = $1
              AND {PORTAL_LEAD_SQL}
@@ -3796,7 +3796,7 @@ async fn notify_parents_access_missing(state: &AppState, user_id: Uuid) {
                        WHERE a.lead_id = l.id AND a.kind = 'guardian'
                    ), '-infinity'::timestamptz)
              )"#
-    ))
+    )))
     .bind(user_id)
     .fetch_all(&state.db)
     .await
@@ -8048,7 +8048,7 @@ async fn notify_lead_staff_once(
             return Ok(Vec::new());
         }
         if kind == "lead_portal_minor" {
-            let still_missing: bool = sqlx::query_scalar(&format!(
+            let still_missing: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 // An attempted under-18 DOB is deliberately not persisted.
                 // That explicit report still needs a staff notice even while
                 // the saved date remains adult or absent.
@@ -8056,7 +8056,7 @@ async fn notify_lead_staff_once(
                     AND NOT EXISTS (SELECT 1 FROM lead_portal_access a
                         WHERE a.lead_id = l.id AND a.kind = 'guardian' AND a.revoked_at IS NULL)
                  FROM leads l WHERE l.id = $1",
-            ))
+            )))
             .bind(lead_id)
             .bind(entered_minor_birth_date)
             .fetch_one(&mut *tx)
@@ -8140,8 +8140,9 @@ pub(crate) const DOCUMENTS_ADDED_NOTICE: &str = "lead_portal_documents_added";
 /// the last such notice of the lead gets no second one: a batch of files is
 /// one notice. Best effort.
 async fn notify_documents_added(state: &AppState, lead_id: Uuid) {
-    let stored: Result<Vec<(Uuid, Uuid)>, sqlx::Error> = sqlx::query_as(&format!(
-        r#"WITH recipients AS ({LEAD_NOTIFICATION_RECIPIENTS_SQL})
+    let stored: Result<Vec<(Uuid, Uuid)>, sqlx::Error> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            r#"WITH recipients AS ({LEAD_NOTIFICATION_RECIPIENTS_SQL})
            INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
            SELECT r.id, $2, 'Lead added documents',
                   'The lead added documents to the sent request.', 'lead', $1
@@ -8152,11 +8153,11 @@ async fn notify_documents_added(state: &AppState, lead_id: Uuid) {
                  AND n.entity_id = $1 AND NOT n.is_read
            )
            RETURNING user_id, id"#
-    ))
-    .bind(lead_id)
-    .bind(DOCUMENTS_ADDED_NOTICE)
-    .fetch_all(&state.db)
-    .await;
+        )))
+        .bind(lead_id)
+        .bind(DOCUMENTS_ADDED_NOTICE)
+        .fetch_all(&state.db)
+        .await;
     match stored {
         Ok(stored) => {
             for (recipient, notification_id) in stored {
@@ -8248,7 +8249,7 @@ async fn get_lead_portal_intake(
     if let Err(response) = auth.require_capability(Capability::LeadsView) {
         return response;
     }
-    let row = match sqlx::query(&format!(
+    let row = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.portal_field_updates, l.portal_submitted_at,
                   ({CHANGED_SINCE_SUBMIT_SQL}) AS changed_since_submit,
                   l.portal_trusted_persons,
@@ -8260,7 +8261,7 @@ async fn get_lead_portal_intake(
                   ) AS submitted_by_guardian
            FROM leads l
            WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&state.db)
     .await
@@ -8708,10 +8709,10 @@ async fn get_lead_portal_intake(
     };
     // The lead's own login is closed while the minor's parents have access
     // (QA 2026-10-12, A3-01): the access row says so, and offers no password.
-    let own_login_closed: bool = match sqlx::query_scalar(&format!(
+    let own_login_closed: bool = match sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.portal_user_id IS NOT NULL AND {OWN_LOGIN_CLOSED_SQL}
            FROM leads l WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&state.db)
     .await
@@ -9017,9 +9018,9 @@ async fn move_portal_upload(
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
     };
-    let open: Option<i32> = match sqlx::query_scalar(&format!(
+    let open: Option<i32> = match sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT 1 FROM leads l WHERE l.id = $1 AND {PORTAL_LEAD_SQL} FOR UPDATE"
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *tx)
     .await
@@ -9301,7 +9302,7 @@ pub(crate) async fn attach_list_progress(db: &gmed_db::DbPool, leads: &mut [Valu
     if ids.is_empty() {
         return;
     }
-    let rows = match sqlx::query(&format!(
+    let rows = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id, {PERSONAL_DATA_COLUMNS}, l.portal_submitted_at,
                   -- The medical documents, as before; a copy of the identity
                   -- document is not one of "N documents".
@@ -9313,7 +9314,7 @@ pub(crate) async fn attach_list_progress(db: &gmed_db::DbPool, leads: &mut [Valu
                    WHERE a.lead_id = l.id AND a.revoked_at IS NULL) AS guardians
            FROM leads l
            WHERE l.id = ANY($1)"#
-    ))
+    )))
     .bind(&ids)
     .fetch_all(db)
     .await

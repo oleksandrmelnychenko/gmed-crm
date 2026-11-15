@@ -511,7 +511,7 @@ async fn load_many_on(
          WHERE p.id = ANY($1) AND p.lifecycle_status <> 'deleted'
            AND p.legal_status->>'anonymized_at' IS NULL"
     );
-    let patients: Vec<(Uuid, Value)> = sqlx::query_as(&sql)
+    let patients: Vec<(Uuid, Value)> = sqlx::query_as(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(patient_ids.into_iter().collect::<Vec<_>>())
         .fetch_all(&mut *conn)
         .await?;

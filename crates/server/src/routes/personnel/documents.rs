@@ -455,7 +455,7 @@ pub(crate) async fn archive_in_transaction(
     .map_err(|error| internal(error, "record archive"))?;
     // Read the response inside the transaction: once it commits, the caller
     // must not treat a failure as a rollback and remove the blob.
-    let row = sqlx::query(&document_select("d.id = $1"))
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&document_select("d.id = $1")))
         .bind(document_id)
         .fetch_one(&mut *conn)
         .await
@@ -582,7 +582,7 @@ pub(crate) async fn list_employee_documents(
             "d.employee_id = $1 AND ($2 OR NOT c.is_health) AND ($3 OR d.deleted_at IS NULL)"
         )
     );
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(employee.id)
         .bind(include_health)
         .bind(include_deleted)
@@ -1117,7 +1117,10 @@ pub(crate) async fn list_due_for_deletion(
            ORDER BY due.retention_until, e.last_name"#,
         document_select("d.deleted_at IS NULL AND NOT d.legal_hold")
     );
-    let rows = match sqlx::query(&sql).fetch_all(&state.db).await {
+    let rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await
+    {
         Ok(rows) => rows,
         Err(error) => return internal(error, "list personnel retention"),
     };

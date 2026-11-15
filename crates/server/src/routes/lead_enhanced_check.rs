@@ -326,7 +326,7 @@ async fn load_subjects_inner(
         .unwrap_or_default();
     let guardian_pays = crate::risk::inputs::guardian_pays_sql!("$3");
     let guardian_receives = crate::risk::inputs::guardian_receives_sql!("$4");
-    let Some(row) = sqlx::query(&format!(
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.country,
                   l.citizenships,
                   l.wizard_state ->> 'registration_country' AS registration_country,
@@ -417,7 +417,7 @@ async fn load_subjects_inner(
                       AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id))
            ) hits ON true
            WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .bind(payer_draft)
     .bind(&paying)

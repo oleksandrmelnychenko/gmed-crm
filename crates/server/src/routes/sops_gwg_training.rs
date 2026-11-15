@@ -343,9 +343,9 @@ fn record_json(row: &PgRow) -> Value {
 }
 
 async fn records_of(state: &AppState, employee_ids: &[Uuid]) -> Result<Vec<PgRow>, sqlx::Error> {
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "{RECORD_SELECT} WHERE t.employee_id = ANY($1) {RECORD_ORDER}"
-    ))
+    )))
     .bind(employee_ids)
     .fetch_all(&state.db)
     .await
@@ -355,10 +355,12 @@ async fn record_by_id(
     conn: &mut sqlx::PgConnection,
     record_id: Uuid,
 ) -> Result<Option<PgRow>, sqlx::Error> {
-    sqlx::query(&format!("{RECORD_SELECT} WHERE t.id = $1"))
-        .bind(record_id)
-        .fetch_optional(conn)
-        .await
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{RECORD_SELECT} WHERE t.id = $1"
+    )))
+    .bind(record_id)
+    .fetch_optional(conn)
+    .await
 }
 
 /// Status, last date and due flag of one employee from their records (newest

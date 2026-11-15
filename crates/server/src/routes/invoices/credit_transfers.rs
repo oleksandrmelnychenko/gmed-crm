@@ -199,7 +199,7 @@ pub(crate) async fn load_credit_transfer_targets(
     patient_id: Uuid,
     currency: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT invoice.id, invoice.invoice_number, invoice.invoice_type, invoice.status,
                   invoice.issued_at, invoice.total_gross, invoice.credited_amount,
                   invoice.paid_amount, invoice.prepayment_applied_amount,
@@ -227,7 +227,7 @@ pub(crate) async fn load_credit_transfer_targets(
            ORDER BY invoice.issued_at, invoice.id"#,
         recipient = recipient_value("invoice"),
         source_recipient = recipient_value("source"),
-    ))
+    )))
     .bind(patient_id)
     .bind(invoice_id)
     .bind(currency)
@@ -446,7 +446,7 @@ pub(crate) async fn create_credit_transfer(
     // same patient and the same invoice recipient person, also when its
     // invoice belongs to a cancelled order (owner decision 2026-11-12, QA
     // L12; before, billing could confirm a move to another recipient).
-    let recipients = match sqlx::query(&format!(
+    let recipients = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT invoice_recipient_identity(source.recipient_snapshot)
                   IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
                   AS same_recipient,
@@ -458,7 +458,7 @@ pub(crate) async fn create_credit_transfer(
            WHERE source.id = $1 AND target.id = $2"#,
         source = recipient_value("source"),
         target = recipient_value("target"),
-    ))
+    )))
     .bind(invoice_id)
     .bind(body.target_invoice_id)
     .fetch_one(&mut *transaction)

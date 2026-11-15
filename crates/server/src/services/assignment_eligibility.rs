@@ -65,9 +65,9 @@ pub async fn provider_accepts_new_work(
     pool: &PgPool,
     provider_id: Uuid,
 ) -> Result<Option<bool>, sqlx::Error> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT {PROVIDER_ACCEPTS_NEW_WORK_SQL} FROM providers p WHERE p.id = $1"
-    ))
+    )))
     .bind(provider_id)
     .fetch_optional(pool)
     .await

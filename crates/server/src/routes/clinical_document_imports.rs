@@ -2307,10 +2307,10 @@ async fn list_imports(
     if let Err(response) = ensure_access(&state, &auth, patient_id).await {
         return response;
     }
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         "{} WHERE i.patient_id = $1 AND i.deleted_at IS NULL ORDER BY i.created_at DESC LIMIT 50",
         import_list_select()
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -3610,10 +3610,10 @@ async fn fetch_import(
     patient_id: Uuid,
     import_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "{} WHERE i.id = $1 AND i.patient_id = $2 AND i.deleted_at IS NULL",
         import_select()
-    ))
+    )))
     .bind(import_id)
     .bind(patient_id)
     .fetch_optional(&state.db)

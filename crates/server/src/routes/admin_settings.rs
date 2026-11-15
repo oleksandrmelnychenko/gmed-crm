@@ -151,9 +151,9 @@ pub(crate) async fn count_active_sessions(
     db: &gmed_db::DbPool,
     include_portal_accounts: bool,
 ) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar::<_, i64>(&format!(
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
         "SELECT count(*)::bigint {ACTIVE_SESSIONS_FROM_WHERE}"
-    ))
+    )))
     .bind(include_portal_accounts)
     .fetch_one(db)
     .await
@@ -205,14 +205,14 @@ async fn list_all_sessions(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT tf.id AS family_id, tf.user_id, u.name AS user_name, u.email AS user_email, u.role,
                   tf.device_fingerprint, tf.ip_address, tf.user_agent,
                   tf.created_at, tf.last_activity_at
            {ACTIVE_SESSIONS_FROM_WHERE}
            ORDER BY tf.last_activity_at DESC, tf.id
            LIMIT $2 OFFSET $3"#
-    ))
+    )))
     .bind(include_portal_accounts)
     .bind(limit)
     .bind(offset)
@@ -857,7 +857,7 @@ async fn list_activity(
                        )::BIGINT AS technical_24h
                    FROM audit_log"#
             );
-            let summary = match sqlx::query(&summary_sql).fetch_one(&state.db).await {
+            let summary = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&summary_sql)).fetch_one(&state.db).await {
                 Ok(row) => serde_json::json!({
                     "activity_24h": row.try_get::<i64, _>("activity_24h").unwrap_or_default(),
                     "active_users_24h": row.try_get::<i64, _>("active_users_24h").unwrap_or_default(),

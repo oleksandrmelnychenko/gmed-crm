@@ -210,7 +210,7 @@ async fn list_tax_profiles(
            ORDER BY tp.is_default DESC, tp.is_active DESC, tp.profile_key"#,
         usage = tax_profile_usage_sql("tp.id"),
     );
-    match sqlx::query(&sql).fetch_all(&state.db).await {
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql)).fetch_all(&state.db).await {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
@@ -590,10 +590,10 @@ async fn delete_tax_profile(
             "The default tax profile cannot be removed; choose another default first",
         );
     }
-    let usage_count = match sqlx::query_scalar::<_, i64>(&format!(
+    let usage_count = match sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
         "SELECT {}",
         tax_profile_usage_sql("$1::uuid")
-    ))
+    )))
     .bind(profile_id)
     .fetch_one(&mut *tx)
     .await

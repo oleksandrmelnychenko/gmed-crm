@@ -155,7 +155,7 @@ pub(crate) async fn load_credit_note_pdf_context(
         vat_id = super::release::issued_tax_registration_sql("credit", "vat_id"),
         tax_number = super::release::issued_tax_registration_sql("credit", "tax_number"),
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(credit_note_id)
         .bind(invoice_id)
         .fetch_optional(&mut *conn)
@@ -294,7 +294,7 @@ pub(crate) async fn load_storno_pdf_context(
         vat_id = super::release::issued_tax_registration_sql("storno", "vat_id"),
         tax_number = super::release::issued_tax_registration_sql("storno", "tax_number"),
     );
-    let Some(row) = sqlx::query(&sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(invoice_id)
         .fetch_optional(&mut *conn)
         .await?

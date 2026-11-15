@@ -290,7 +290,7 @@ async fn try_notify_patient(
         title_sql = crate::patient_notice_language::text_sql("$3", "u", "$1::uuid"),
         body_sql = crate::patient_notice_language::text_sql("$4", "u", "$1::uuid"),
     );
-    let inserted = sqlx::query(&insert_sql)
+    let inserted = sqlx::query(sqlx::AssertSqlSafe::<&str>(&insert_sql))
         .bind(patient_id)
         .bind(notice.kind())
         .bind(title.to_json())

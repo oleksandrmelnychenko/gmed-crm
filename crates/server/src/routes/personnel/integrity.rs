@@ -434,7 +434,7 @@ const RUN_SELECT: &str = "SELECT r.id, r.run_trigger, r.started_at, r.finished_a
      FROM personnel_integrity_runs r LEFT JOIN users u ON u.id = r.started_by";
 
 async fn load_run(state: &AppState, run_id: Uuid) -> Result<Value, sqlx::Error> {
-    let row = sqlx::query(&format!("{RUN_SELECT} WHERE r.id = $1"))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!("{RUN_SELECT} WHERE r.id = $1")))
         .bind(run_id)
         .fetch_one(&state.db)
         .await?;
@@ -565,16 +565,18 @@ pub(crate) async fn get_integrity(
     if let Err(response) = auth.require_capability(Capability::PersonnelView) {
         return response;
     }
-    let runs = match sqlx::query(&format!("{RUN_SELECT} ORDER BY r.started_at DESC LIMIT 20"))
-        .fetch_all(&state.db)
-        .await
+    let runs = match sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{RUN_SELECT} ORDER BY r.started_at DESC LIMIT 20"
+    )))
+    .fetch_all(&state.db)
+    .await
     {
         Ok(rows) => rows.iter().map(run_json).collect::<Vec<_>>(),
         Err(error) => return internal(error, "list integrity runs"),
     };
-    let anchors = match sqlx::query(&format!(
+    let anchors = match sqlx::query(sqlx::AssertSqlSafe(format!(
         "{ANCHOR_SELECT} ORDER BY anchor_date DESC LIMIT 60"
-    ))
+    )))
     .fetch_all(&state.db)
     .await
     {
@@ -616,10 +618,12 @@ pub(crate) async fn anchor_now(
     if let Err(error) = stamp_pending(&state).await {
         return internal(error, "time-stamp chain anchors");
     }
-    match sqlx::query(&format!("{ANCHOR_SELECT} WHERE anchor_date = $1"))
-        .bind(crate::app_time::today())
-        .fetch_optional(&state.db)
-        .await
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{ANCHOR_SELECT} WHERE anchor_date = $1"
+    )))
+    .bind(crate::app_time::today())
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => Json(anchor_json(&row)).into_response(),
         Ok(None) => err(

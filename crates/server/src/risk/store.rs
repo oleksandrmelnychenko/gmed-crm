@@ -185,9 +185,9 @@ pub async fn load(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<Assessment>, sqlx::Error> {
-    Ok(sqlx::query(&format!(
+    Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {ASSESSMENT_COLUMNS} FROM lead_risk_assessments WHERE lead_id = $1"
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -199,9 +199,9 @@ async fn load_for_update(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<Assessment>, sqlx::Error> {
-    Ok(sqlx::query(&format!(
+    Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {ASSESSMENT_COLUMNS} FROM lead_risk_assessments WHERE lead_id = $1 FOR UPDATE"
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?
@@ -1527,7 +1527,7 @@ async fn evaluate_and_store(
     } else {
         None
     };
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"UPDATE lead_risk_assessments
            SET started_at = $2, config_version = $3, patient_points = $4, payer_points = $5,
                points = $6, knockout = $7, level = $8, triggers = $9, fingerprint = $10,
@@ -1535,7 +1535,7 @@ async fn evaluate_and_store(
                country_answers_pending = $14, updated_at = now()
            WHERE lead_id = $1
            RETURNING {ASSESSMENT_COLUMNS}"#
-    ))
+    )))
     .bind(lead_id)
     .bind(started_at)
     .bind(config.version)

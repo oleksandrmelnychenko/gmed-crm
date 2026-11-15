@@ -3209,9 +3209,9 @@ async fn merge_orders_folds_groups_flattens_and_is_reversible() {
     let c_main = insert_existing_order(&pool, c2, pm_id, &format!("{tag}-CM")).await;
     let c_sub = insert_existing_order(&pool, c3, pm_id, &format!("{tag}-CS")).await;
     for (id, amount) in [(target, 1000), (b, 300), (c_main, 500), (c_sub, 200)] {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE orders SET total_estimated = {amount} WHERE id = $1"
-        ))
+        )))
         .bind(id)
         .execute(&pool)
         .await

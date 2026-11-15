@@ -408,7 +408,7 @@ async fn send_login_email(
     if let Err(response) = require_sender(&auth, &body) {
         return response;
     }
-    let row = match sqlx::query(&format!(
+    let row = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT u.email, u.name, u.is_active, u.password_hash,
                   l.qualification_status, l.compliance_status, l.created_at,
                   l.converted_patient_id, l.primary_language, l.first_name, l.last_name,
@@ -427,7 +427,7 @@ async fn send_login_email(
                  )
              )"#,
         crate::routes::lead_portal_intake::OWN_LOGIN_CLOSED_SQL
-    ))
+    )))
     .bind(lead_id)
     .bind(body.user_id)
     .fetch_optional(&state.db)

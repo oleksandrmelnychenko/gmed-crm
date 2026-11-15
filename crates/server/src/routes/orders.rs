@@ -701,7 +701,7 @@ async fn list_orders(
     // manager's older orders behind other people's newer ones (QA 2026-10-31).
     // The per-row check below stays the authority. A lead's own orders are few
     // and follow the preparation rule there.
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
                   o.signed_patient, o.signed_agency, o.client_signed_terms, o.client_terms_changed_at,
@@ -818,7 +818,7 @@ async fn list_orders(
              )
            ORDER BY o.created_at DESC, o.id DESC
            LIMIT 200"#,
-    ))
+    )))
     .bind(search_pattern)
     .bind(query.phase)
     .bind(query.status)
@@ -1402,7 +1402,7 @@ async fn load_followup_visits_scoped<'e, E>(
 where
     E: sqlx::PgExecutor<'e>,
 {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT id, date, status, {FOLLOWUP_VISIT_MILESTONE_SQL} AS milestone
            FROM appointments
            WHERE order_id = $1
@@ -1410,7 +1410,7 @@ where
              AND status <> 'cancelled'
              AND (NOT $2 OR portal_released_at IS NOT NULL)
            ORDER BY date, created_at, id"#
-    ))
+    )))
     .bind(order_id)
     .bind(released_only)
     .fetch_all(executor)
@@ -11875,7 +11875,7 @@ async fn deliver_leistung(
                LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
                WHERE ol.id = $1 AND ol.order_id = $2"#
         );
-        match sqlx::query_scalar::<_, bool>(&sql)
+        match sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe::<&str>(&sql))
             .bind(leistung_id)
             .bind(order_id)
             .fetch_optional(&state.db)
@@ -12804,14 +12804,16 @@ fn order_amendment_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
 }
 
 async fn load_order_amendment_json(state: &AppState, amendment_id: Uuid) -> serde_json::Value {
-    sqlx::query(&format!("{ORDER_AMENDMENT_SELECT} WHERE a.id = $1"))
-        .bind(amendment_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .map(|row| order_amendment_json(&row))
-        .unwrap_or(serde_json::Value::Null)
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{ORDER_AMENDMENT_SELECT} WHERE a.id = $1"
+    )))
+    .bind(amendment_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(|row| order_amendment_json(&row))
+    .unwrap_or(serde_json::Value::Null)
 }
 
 /// The order total shown everywhere: gross of the services that are not
@@ -12960,9 +12962,9 @@ async fn list_order_amendments(
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
         return resp;
     }
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         "{ORDER_AMENDMENT_SELECT} WHERE a.order_id = $1 ORDER BY a.created_at DESC"
-    ))
+    )))
     .bind(order_id)
     .fetch_all(&state.db)
     .await
@@ -14166,10 +14168,10 @@ async fn set_order_payer(
             }
         }
     }
-    let previous = match sqlx::query(&format!(
+    let previous = match sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {} FROM orders o WHERE o.id = $1 FOR UPDATE",
         payer::payer_columns("o", "")
-    ))
+    )))
     .bind(order_id)
     .fetch_optional(&mut *transaction)
     .await
@@ -14649,14 +14651,14 @@ async fn can_access_scoped_order(
     if OrderReadScope::for_role(auth.role) != OrderReadScope::InterpreterTeam {
         return Ok(false);
     }
-    sqlx::query_scalar::<_, bool>(&format!(
+    sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
         r#"SELECT EXISTS(
                SELECT 1 FROM orders o
                WHERE o.id = $1
                  AND o.intake_state IS DISTINCT FROM 'draft'
                  AND {INTERPRETER_TEAM_ORDER_SQL}
            )"#,
-    ))
+    )))
     .bind(order_id)
     .fetch_one(&state.db)
     .await
@@ -14722,7 +14724,7 @@ async fn scoped_order_detail(
              )
            ORDER BY ol.created_at, ol.id"#
     );
-    let lines = sqlx::query(&lines_sql)
+    let lines = sqlx::query(sqlx::AssertSqlSafe::<&str>(&lines_sql))
         .bind(order_id)
         .bind(scope.wire_name())
         .fetch_all(&state.db)

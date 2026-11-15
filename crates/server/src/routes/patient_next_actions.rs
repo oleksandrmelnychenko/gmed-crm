@@ -204,7 +204,7 @@ async fn load_document_actions(
     patient_id: Uuid,
     user_id: Uuid,
 ) -> Result<Vec<Value>, axum::response::Response> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT d.id, d.auto_name, d.category, d.art, ds.shared_at
            FROM documents d
            JOIN document_shares ds
@@ -219,7 +219,7 @@ async fn load_document_actions(
            ORDER BY ds.shared_at ASC
            LIMIT 10"#,
         crate::routes::me::PORTAL_CURRENT_DOCUMENT_SQL
-    ))
+    )))
     .bind(patient_id)
     .bind(user_id)
     .fetch_all(&state.db)
@@ -265,7 +265,7 @@ async fn load_invoice_actions(
     patient_id: Uuid,
     viewer: Uuid,
 ) -> Result<Vec<Value>, axum::response::Response> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT i.id, i.invoice_number, i.status, i.due_date, i.total_gross,
                   i.credited_amount, i.paid_amount, i.prepayment_applied_amount,
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient
@@ -287,7 +287,7 @@ async fn load_invoice_actions(
            LIMIT 10"#,
         other_representative =
             crate::routes::invoices::payer::other_representative_payer_sql("i", "$2"),
-    ))
+    )))
     .bind(patient_id)
     .bind(viewer)
     .fetch_all(&state.db)
@@ -356,7 +356,7 @@ async fn load_package_actions(
     state: &AppState,
     patient_id: Uuid,
 ) -> Result<Vec<Value>, axum::response::Response> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT psp.id AS patient_service_package_id,
                   psp.package_id,
                   sp.name AS package_name,
@@ -391,7 +391,7 @@ async fn load_package_actions(
                  )
            ORDER BY psp.assigned_at DESC
            LIMIT 10"#,
-    ))
+    )))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await

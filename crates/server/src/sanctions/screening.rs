@@ -1903,13 +1903,13 @@ async fn screen_owner(
     };
 
     let mut tx = state.db.begin().await?;
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT id, subject_kind, subject_ref, list_logical_id, status,
                   subject_fingerprint, entry_fingerprint
            FROM sanctions_hits
            WHERE {owner_column} = $1
            FOR UPDATE"#
-    ))
+    )))
     .bind(owner_id)
     .fetch_all(&mut *tx)
     .await?;

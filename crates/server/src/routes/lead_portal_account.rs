@@ -703,7 +703,7 @@ pub async fn link_to_patient_in_tx(
     patient_id: Uuid,
     assigned_by: Uuid,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
            SELECT $2, l.portal_user_id, $3
            FROM leads l
@@ -711,13 +711,13 @@ pub async fn link_to_patient_in_tx(
            WHERE l.id = $1 AND NOT {OWN_LOGIN_CLOSED_SQL}
            ON CONFLICT (patient_id, user_id)
            DO UPDATE SET revoked_at = NULL, source = 'manual'"#,
-    ))
+    )))
     .bind(lead_id)
     .bind(patient_id)
     .bind(assigned_by)
     .execute(&mut **tx)
     .await?;
-    let guardian_ids: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let guardian_ids: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
            SELECT DISTINCT $2, a.user_id, $3, 'lead_guardian'
            FROM leads l
@@ -727,7 +727,7 @@ pub async fn link_to_patient_in_tx(
              AND a.kind = 'guardian' AND a.revoked_at IS NULL
            ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, source = 'lead_guardian'
            RETURNING user_id"#,
-    ))
+    )))
     .bind(lead_id)
     .bind(patient_id)
     .bind(assigned_by)
@@ -1148,7 +1148,7 @@ pub(crate) async fn link_own_login_of_age_in_tx(
     patient_id: Uuid,
     assigned_by: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let linked: Option<Uuid> = sqlx::query_scalar(&format!(
+    let linked: Option<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
            SELECT $2, l.portal_user_id, $3
            FROM leads l
@@ -1164,7 +1164,7 @@ pub(crate) async fn link_own_login_of_age_in_tx(
            WHERE patient_assignments.revoked_at IS NOT NULL
               OR patient_assignments.source = 'lead_guardian'
            RETURNING user_id"#,
-    ))
+    )))
     .bind(lead_id)
     .bind(patient_id)
     .bind(assigned_by)
@@ -1432,7 +1432,7 @@ async fn get_lead_portal_account(
     if let Err(response) = auth.require_capability(Capability::LeadsView) {
         return response;
     }
-    let row = match sqlx::query(&format!(
+    let row = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id, u.id AS user_id, u.email, u.is_active, u.password_reset_required,
                   u.created_at,
                   (SELECT max(tf.created_at) FROM token_families tf WHERE tf.user_id = u.id)
@@ -1441,7 +1441,7 @@ async fn get_lead_portal_account(
            FROM leads l
            LEFT JOIN users u ON u.id = l.portal_user_id
            WHERE l.id = $1"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&state.db)
     .await
@@ -1499,7 +1499,7 @@ async fn issue_lead_portal_access(
         Ok(tx) => tx,
         Err(error) => return internal(error, lead_id, "begin"),
     };
-    let lead = match sqlx::query(&format!(
+    let lead = match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.email, l.first_name, l.last_name, l.qualification_status,
                   l.converted_patient_id, l.portal_user_id, l.date_of_birth,
                   u.is_active AS portal_active,
@@ -1508,7 +1508,7 @@ async fn issue_lead_portal_access(
            LEFT JOIN users u ON u.id = l.portal_user_id
            WHERE l.id = $1
            FOR UPDATE OF l"#
-    ))
+    )))
     .bind(lead_id)
     .fetch_optional(&mut *tx)
     .await

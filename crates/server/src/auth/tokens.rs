@@ -85,7 +85,7 @@ async fn evict_sessions_over_limit(
     settings: &TokenSettings,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
     let keep = settings.max_sessions_per_user.max(1) - 1;
-    let evicted: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let evicted: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"WITH ranked AS (
                SELECT tf.id,
                       row_number() OVER (ORDER BY tf.last_activity_at DESC, tf.created_at DESC) AS position
@@ -98,7 +98,7 @@ async fn evict_sessions_over_limit(
            WHERE tf.id = ranked.id AND ranked.position > $3
            RETURNING tf.id"#,
         live_family_condition("$2")
-    ))
+    )))
     .bind(user_id)
     .bind(settings.session_idle_days.max(1))
     .bind(keep)

@@ -1271,7 +1271,7 @@ async fn upcoming_appointments(
         awaits_first_interpreter = crate::access::APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL,
     );
 
-    match sqlx::query(&sql)
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(scope.all)
         .bind(scope.as_interpreter)
         .bind(scope.as_owner)
@@ -5948,7 +5948,9 @@ async fn load_patients_by_country(
            ORDER BY 2 DESC, 1
            LIMIT 10"#,
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -5986,7 +5988,9 @@ async fn load_patients_by_age(state: &AppState, clause: &str) -> Result<Vec<Valu
                     ELSE 4
                 END"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -6005,7 +6009,9 @@ async fn load_patients_by_gender(state: &AppState, clause: &str) -> Result<Value
            WHERE is_active = true {clause}
            GROUP BY 1"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     let mut result = json!({ "male": 0, "female": 0, "diverse": 0 });
     for r in rows {
         let g: String = r.try_get::<String, _>("gender").unwrap_or_default();
@@ -6024,7 +6030,9 @@ async fn load_patients_by_insurance(state: &AppState, clause: &str) -> Result<Va
            WHERE is_active = true {clause}
            GROUP BY 1"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     let mut result =
         json!({ "private": 0, "public": 0, "self_pay": 0, "foreign": 0, "unknown": 0 });
     for r in rows {
@@ -6049,7 +6057,9 @@ async fn load_top_languages(state: &AppState, clause: &str) -> Result<Vec<Value>
             ORDER BY 2 DESC, 1
             LIMIT 8"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -6064,7 +6074,9 @@ async fn load_top_languages(state: &AppState, clause: &str) -> Result<Vec<Value>
 async fn load_patients_count(state: &AppState, clause: &str) -> Result<i64, sqlx::Error> {
     let sql =
         format!(r#"SELECT COUNT(*)::bigint AS c FROM patients WHERE is_active = true {clause}"#);
-    let row = sqlx::query(&sql).fetch_one(&state.db).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_one(&state.db)
+        .await?;
     Ok(row.try_get::<i64, _>("c").unwrap_or(0))
 }
 
@@ -6093,7 +6105,7 @@ async fn load_top_case_reasons(
            ORDER BY 2 DESC
            LIMIT 10"#
     );
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(assigned_to)
         .fetch_all(&state.db)
         .await?;
@@ -6114,7 +6126,9 @@ async fn load_cases_by_status(state: &AppState, clause: &str) -> Result<Value, s
            WHERE 1=1 {clause}
            GROUP BY 1"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     let mut result = json!({ "open": 0, "in_progress": 0, "closed": 0 });
     for r in rows {
         let s: String = r.try_get::<String, _>("status").unwrap_or_default();
@@ -6135,7 +6149,9 @@ async fn load_avg_case_duration(state: &AppState, clause: &str) -> Result<f64, s
            FROM cases
            WHERE status = 'closed' {clause}"#
     );
-    let row = sqlx::query(&sql).fetch_one(&state.db).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_one(&state.db)
+        .await?;
     Ok(row.try_get::<f64, _>("d").unwrap_or(0.0))
 }
 
@@ -6148,7 +6164,9 @@ async fn load_appointments_by_status(state: &AppState, clause: &str) -> Result<V
            WHERE 1=1 {clause}
            GROUP BY 1"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     let mut result = json!({
         "planned": 0,
         "confirmed": 0,
@@ -6181,7 +6199,9 @@ async fn load_appointments_heatmap(
            GROUP BY 1, 2
            ORDER BY 1, 2"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -6216,7 +6236,9 @@ async fn load_orders_by_phase_valued(
                     ELSE 5
                 END"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -6271,7 +6293,9 @@ async fn load_top_providers(state: &AppState, clause: &str) -> Result<Vec<Value>
            ORDER BY appointment_count DESC, patient_count DESC
            LIMIT 10"#
     );
-    let rows = sqlx::query(&sql).fetch_all(&state.db).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .fetch_all(&state.db)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|r| {

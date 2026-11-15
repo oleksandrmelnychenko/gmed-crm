@@ -907,7 +907,7 @@ async fn ensure_new_participant_provider_active_in_tx(
     provider_id: Uuid,
     doctor_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    let refused = sqlx::query_scalar::<_, bool>(&format!(
+    let refused = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
         r#"SELECT NOT EXISTS(
                   SELECT 1 FROM order_service_group_participants existing
                   WHERE existing.service_group_id = $1
@@ -920,7 +920,7 @@ async fn ensure_new_participant_provider_active_in_tx(
                   WHERE p.id = $2 AND NOT {}
               )"#,
         crate::services::assignment_eligibility::PROVIDER_ACCEPTS_NEW_WORK_SQL
-    ))
+    )))
     .bind(service_group_id)
     .bind(provider_id)
     .bind(doctor_id)

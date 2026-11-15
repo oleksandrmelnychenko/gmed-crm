@@ -168,7 +168,7 @@ async fn revoked(pool: &PgPool, patient: Uuid, user: Uuid) -> (bool, Option<Stri
 }
 
 async fn count(pool: &PgPool, sql: &str, id: Uuid) -> i64 {
-    sqlx::query_scalar(sql)
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_one(pool)
         .await

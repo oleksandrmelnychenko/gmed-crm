@@ -624,7 +624,7 @@ async fn list_users(
              )
            ORDER BY is_active DESC, created_at DESC"#
     );
-    match sqlx::query(&list_sql)
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&list_sql))
         .bind(search_pattern)
         .bind(query.role)
         .bind(active_only)
@@ -718,7 +718,7 @@ async fn get_user(
     let detail_sql = format!(
         "SELECT {USER_SELECT_COLUMNS} FROM users WHERE users.id = $1 AND ($2::bool OR users.role <> 'patient')"
     );
-    match sqlx::query(&detail_sql)
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&detail_sql))
         .bind(user_id)
         .bind(can_see_portal_accounts(&auth))
         .fetch_optional(&state.db)
@@ -804,7 +804,7 @@ async fn create_user(
            )
            SELECT {USER_SELECT_COLUMNS} FROM inserted AS users"#
     );
-    match sqlx::query(&insert_sql)
+    match sqlx::query(sqlx::AssertSqlSafe::<&str>(&insert_sql))
         .bind(&body.email)
         .bind(hash)
         .bind(&body.name)

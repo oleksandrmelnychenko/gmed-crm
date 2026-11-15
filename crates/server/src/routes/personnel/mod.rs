@@ -323,9 +323,9 @@ const CATEGORY_COLUMNS: &str = "code, file_label, monthly, is_health, expected_m
      retention_years, retention_from, legal_basis";
 
 pub(crate) async fn load_categories(state: &AppState) -> Result<Vec<Category>, sqlx::Error> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {CATEGORY_COLUMNS} FROM personnel_document_categories ORDER BY sort_order, code"
-    ))
+    )))
     .fetch_all(&state.db)
     .await?;
     Ok(rows.iter().map(Category::from_row).collect())
@@ -335,9 +335,9 @@ pub(crate) async fn load_category(
     state: &AppState,
     code: &str,
 ) -> Result<Option<Category>, sqlx::Error> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {CATEGORY_COLUMNS} FROM personnel_document_categories WHERE code = $1"
-    ))
+    )))
     .bind(code.trim())
     .fetch_optional(&state.db)
     .await?;
@@ -418,17 +418,19 @@ pub(crate) async fn load_employee(
     conn: &mut PgConnection,
     employee_id: Uuid,
 ) -> Result<Option<Employee>, sqlx::Error> {
-    let row = sqlx::query(&format!("{EMPLOYEE_SELECT} WHERE e.id = $1"))
-        .bind(employee_id)
-        .fetch_optional(conn)
-        .await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{EMPLOYEE_SELECT} WHERE e.id = $1"
+    )))
+    .bind(employee_id)
+    .fetch_optional(conn)
+    .await?;
     Ok(row.as_ref().map(Employee::from_row))
 }
 
 pub(crate) async fn load_employees(state: &AppState) -> Result<Vec<Employee>, sqlx::Error> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "{EMPLOYEE_SELECT} ORDER BY lower(e.last_name), lower(e.first_name), e.id"
-    ))
+    )))
     .fetch_all(&state.db)
     .await?;
     Ok(rows.iter().map(Employee::from_row).collect())
@@ -438,10 +440,12 @@ pub(crate) async fn employee_for_user(
     state: &AppState,
     user_id: Uuid,
 ) -> Result<Option<Employee>, sqlx::Error> {
-    let row = sqlx::query(&format!("{EMPLOYEE_SELECT} WHERE e.user_id = $1"))
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{EMPLOYEE_SELECT} WHERE e.user_id = $1"
+    )))
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?;
     Ok(row.as_ref().map(Employee::from_row))
 }
 

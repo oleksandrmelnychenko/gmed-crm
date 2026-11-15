@@ -686,9 +686,9 @@ async fn activity_data_change_kpi_counts_domain_writes_but_not_reads() {
         ("http_request", "http", json!({ "method": "POST" }), false),
     ];
     for (action, entity_type, context, expected) in rows {
-        let counted: bool = sqlx::query_scalar(&format!(
+        let counted: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT {filter} FROM (SELECT $1::text AS action, $2::text AS entity_type, $3::jsonb AS context) AS audit_row"
-        ))
+        )))
         .bind(action)
         .bind(entity_type)
         .bind(context.clone())

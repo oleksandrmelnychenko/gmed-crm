@@ -2680,14 +2680,14 @@ async fn list_interpreters(
         Role::Concierge,
     ])?;
 
-    match sqlx::query(&format!(
+    match sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT u.id, u.name, u.role, ({}) AS assignable
                FROM users u
                WHERE u.is_active = true
                  AND u.role IN ('interpreter', 'teamlead_interpreter')
                ORDER BY u.name"#,
         crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
-    ))
+    )))
     .fetch_all(&state.db)
     .await
     {
@@ -4236,7 +4236,7 @@ pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
     order_id: Uuid,
     cancelled_by: Uuid,
 ) -> Result<Vec<Uuid>, axum::response::Response> {
-    let appointment_ids = sqlx::query_scalar::<_, Uuid>(&format!(
+    let appointment_ids = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
         r#"SELECT a.id
            FROM appointments a
            WHERE a.order_id = $1
@@ -4245,7 +4245,7 @@ pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
              AND NOT {APPROVED_REPORT_BILLING_ACTIVE_SQL}
            ORDER BY a.date, a.id
            FOR UPDATE OF a"#
-    ))
+    )))
     .bind(order_id)
     .bind(berlin_today())
     .fetch_all(&mut **tx)
@@ -4264,14 +4264,16 @@ pub(crate) async fn upcoming_order_appointments_preview(
     connection: &mut sqlx::PgConnection,
     order_id: Uuid,
 ) -> Result<Vec<(Uuid, chrono::NaiveDate, Option<chrono::NaiveTime>)>, sqlx::Error> {
-    sqlx::query_as::<_, (Uuid, chrono::NaiveDate, Option<chrono::NaiveTime>)>(&format!(
-        r#"SELECT a.id, a.date, a.time_start
+    sqlx::query_as::<_, (Uuid, chrono::NaiveDate, Option<chrono::NaiveTime>)>(sqlx::AssertSqlSafe(
+        format!(
+            r#"SELECT a.id, a.date, a.time_start
            FROM appointments a
            WHERE a.order_id = $1
              AND a.status IN ('planned', 'confirmed')
              AND a.date >= $2
              AND NOT {APPROVED_REPORT_BILLING_ACTIVE_SQL}
            ORDER BY a.date, a.time_start NULLS LAST, a.id"#
+        ),
     ))
     .bind(order_id)
     .bind(berlin_today())
@@ -4525,7 +4527,7 @@ async fn defer_appointment_schedule_constraints(
         "SET CONSTRAINTS {} DEFERRED",
         APPOINTMENT_SCHEDULE_CONSTRAINTS.join(", ")
     );
-    sqlx::query(&statement)
+    sqlx::query(sqlx::AssertSqlSafe::<&str>(&statement))
         .execute(&mut **tx)
         .await
         .map_err(|e| {
@@ -9974,7 +9976,7 @@ async fn insert_patient_appointment_notifications(
             title_sql = crate::patient_notice_language::text_sql("$3", "u", "$1::uuid"),
             body_sql = crate::patient_notice_language::text_sql("$4", "u", "$1::uuid"),
         );
-        let rows = sqlx::query(&insert_sql)
+        let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&insert_sql))
             .bind(patient_id)
             .bind(notice.kind())
             .bind(notice_title.to_json())
@@ -10367,7 +10369,7 @@ async fn consume_planned_treatment_organization_line(
     if already_linked {
         return Ok(None);
     }
-    let planned = sqlx::query(&format!(
+    let planned = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
@@ -10384,7 +10386,7 @@ async fn consume_planned_treatment_organization_line(
            LIMIT 1
            FOR UPDATE OF ol SKIP LOCKED"#,
         service = order_line_is_catalog_service_sql("$2", "$5", "$6", "$7"),
-    ))
+    )))
     .bind(order_id)
     .bind(MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY)
     .bind(provider_id)
@@ -10697,7 +10699,7 @@ async fn sync_interpreter_report_billing_candidate(
         load_interpreter_hours_catalog_item(state, candidate.appointment_date).await?;
     // Not billed yet, also when marked delivered by hand: the report's hours
     // replace the line's. Without a catalog entry only the key can match.
-    let open_line = sqlx::query(&format!(
+    let open_line = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
@@ -10710,7 +10712,7 @@ async fn sync_interpreter_report_billing_candidate(
            LIMIT 1
            FOR UPDATE OF ol SKIP LOCKED"#,
         service = order_line_is_catalog_service_sql("$2", "$3", "$4", "$5"),
-    ))
+    )))
     .bind(order_id)
     .bind(INTERPRETER_HOURS_SERVICE_KEY)
     .bind(catalog_item.as_ref().map(|item| item.service_name.clone()))
@@ -10758,7 +10760,7 @@ async fn sync_interpreter_report_billing_candidate(
     // as its source, and only hours beyond it get a new line (QA 2026-10-31,
     // R3-2). A line of an issued invoice keeps its quantity. It matches like an
     // open line: a free-text line billed the hours too (QA 2026-11-01, R3 BUG-1).
-    let invoiced_line = sqlx::query(&format!(
+    let invoiced_line = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
@@ -10771,7 +10773,7 @@ async fn sync_interpreter_report_billing_candidate(
            LIMIT 1
            FOR UPDATE OF ol SKIP LOCKED"#,
         service = order_line_is_catalog_service_sql("$2", "$3", "$4", "$5"),
-    ))
+    )))
     .bind(order_id)
     .bind(INTERPRETER_HOURS_SERVICE_KEY)
     .bind(catalog_item.as_ref().map(|item| item.service_name.clone()))

@@ -1453,7 +1453,7 @@ async fn list_guardian_candidates(
     // blanked below, so its search must not match on them either: a hit
     // would tell whose address or number it is.
     let full_patient_contact = auth.can(Capability::PatientsView);
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
         .bind(&search)
         .bind(crate::app_time::today())
         .bind(query.exclude_lead_id)
@@ -12816,14 +12816,14 @@ async fn purge_lead_documents_in_tx(
     prospect_patient_id: Option<Uuid>,
 ) -> Result<Vec<String>, sqlx::Error> {
     // Newest version first: a version chain is deleted from its tip.
-    let owned: Vec<(Uuid, Option<String>)> = sqlx::query_as(&format!(
+    let owned: Vec<(Uuid, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"SELECT id, storage_key
            FROM documents
            WHERE (lead_id = $1 OR ($2::uuid IS NOT NULL AND patient_id = $2))
              AND NOT {LEAD_DOCUMENT_RETAINED_SQL}
            ORDER BY version_number DESC, created_at DESC
            FOR UPDATE"#
-    ))
+    )))
     .bind(lead_id)
     .bind(prospect_patient_id)
     .fetch_all(&mut **tx)
@@ -12837,14 +12837,14 @@ async fn purge_lead_documents_in_tx(
     let mut documents: Vec<(Uuid, Option<String>)> = if translated.is_empty() {
         Vec::new()
     } else {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             r#"SELECT id, storage_key
                FROM documents
                WHERE id = ANY($1)
                  AND NOT {LEAD_DOCUMENT_RETAINED_SQL}
                ORDER BY version_number DESC, created_at DESC
                FOR UPDATE"#
-        ))
+        )))
         .bind(&translated)
         .fetch_all(&mut **tx)
         .await?
@@ -13119,8 +13119,9 @@ async fn warn_about_stale_archived_leads(
     state: &crate::state::AppState,
     retention_days: i64,
 ) -> Result<(), sqlx::Error> {
-    let due: Vec<(Uuid, Option<Uuid>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(&format!(
-        r#"SELECT l.id, l.created_by,
+    let due: Vec<(Uuid, Option<Uuid>, chrono::DateTime<chrono::Utc>)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            r#"SELECT l.id, l.created_by,
                       GREATEST({ARCHIVED_LEAD_AGE_SQL} + make_interval(days => $1::int),
                                now() + make_interval(days => $3::int))
                FROM leads l
@@ -13133,12 +13134,12 @@ async fn warn_about_stale_archived_leads(
                      WHERE w.lead_id = l.id AND w.warned_at >= {ARCHIVED_LEAD_AGE_SQL}
                  )
                ORDER BY l.id"#
-    ))
-    .bind(retention_days as i32)
-    .bind(ANONYMIZED_FIRST_NAME)
-    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
-    .fetch_all(&state.db)
-    .await?;
+        )))
+        .bind(retention_days as i32)
+        .bind(ANONYMIZED_FIRST_NAME)
+        .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
+        .fetch_all(&state.db)
+        .await?;
     for (lead_id, created_by, delete_at) in due {
         let warned = async {
             let mut tx = state.db.begin().await?;
@@ -13190,12 +13191,12 @@ pub async fn auto_purge_stale_archived(
     if let Err(error) = warn_about_stale_archived_leads(state, retention_days).await {
         tracing::error!(%error, "Archived lead warnings failed");
     }
-    let kept: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let kept: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l
            WHERE {ARCHIVED_LEAD_SUBJECT_SQL}
              AND {ARCHIVED_LEAD_AGE_SQL} < now() - make_interval(days => $1::int)
              AND {UNQUALIFIED_LEAD_INVOICED_SQL}"#
-    ))
+    )))
     .bind(retention_days as i32)
     .bind(ANONYMIZED_FIRST_NAME)
     .fetch_all(&state.db)
@@ -13211,7 +13212,7 @@ pub async fn auto_purge_stale_archived(
     // counts from the latest of the failed-lead resolution and the last
     // status change: a lead archived long ago, reopened and rejected again
     // today starts a new retention window instead of being erased at once.
-    let candidates: Vec<(Uuid, String)> = sqlx::query_as(&format!(
+    let candidates: Vec<(Uuid, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id, l.qualification_status FROM leads l
            WHERE {ARCHIVED_LEAD_SUBJECT_SQL}
              AND {ARCHIVED_LEAD_AGE_SQL} < now() - make_interval(days => $1::int)
@@ -13223,7 +13224,7 @@ pub async fn auto_purge_stale_archived(
                    AND w.warned_at >= {ARCHIVED_LEAD_AGE_SQL}
                    AND w.warned_at <= now() - make_interval(days => $3::int)
              )"#
-    ))
+    )))
     .bind(retention_days as i32)
     .bind(ANONYMIZED_FIRST_NAME)
     .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
@@ -13508,11 +13509,11 @@ async fn leads_outside_unqualified_purge(
     }
     // The subject condition names the anonymisation sentinel `$4`; here it is `$2`.
     let subject = UNQUALIFIED_LEAD_SUBJECT_SQL.replace("$4", "$2");
-    let ids: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let ids: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l
            WHERE l.id = ANY($1)
              AND (NOT COALESCE(({subject}), false) OR {UNQUALIFIED_LEAD_INVOICED_SQL})"#
-    ))
+    )))
     .bind(lead_ids)
     .bind(ANONYMIZED_FIRST_NAME)
     .fetch_all(pool)
@@ -13728,7 +13729,7 @@ pub async fn purge_unqualified_leads(
     // A lead that left the rule (qualified, signed) starts over: a later
     // re-entry is warned anew instead of being deleted on the old warning,
     // as [`UNQUALIFIED_LEAD_DELETION_SQL`] promises (QA 2026-10-30).
-    if let Err(error) = sqlx::query(&format!(
+    if let Err(error) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"UPDATE leads AS l
            SET retention_warning_sent_at = NULL, retention_reminder_sent_at = NULL
            WHERE (l.retention_warning_sent_at IS NOT NULL
@@ -13736,7 +13737,7 @@ pub async fn purge_unqualified_leads(
              AND NOT ({})
              AND ($2::uuid[] IS NULL OR l.id = ANY($2))"#,
         UNQUALIFIED_LEAD_SUBJECT_SQL.replace("$4", "$1"),
-    ))
+    )))
     .bind(ANONYMIZED_FIRST_NAME)
     .bind(only)
     .execute(&state.db)
@@ -13756,13 +13757,13 @@ pub async fn purge_unqualified_leads(
             0
         }
     };
-    let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let candidates: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l
            WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
              AND {UNQUALIFIED_LEAD_DUE_SQL}
              AND ($5::uuid[] IS NULL OR l.id = ANY($5))
            ORDER BY l.created_at, l.id"#
-    ))
+    )))
     .bind(policy.days as i32)
     .bind(policy.effective_at)
     .bind(now)
@@ -13775,7 +13776,7 @@ pub async fn purge_unqualified_leads(
     // An invoice or accounting record keeps a lead from the warning, so the
     // scan above never finds it: past its deadline it still needs a decision
     // (QA 2026-10-30).
-    let kept_past_deadline: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let kept_past_deadline: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads l
            WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
              AND {UNQUALIFIED_LEAD_INVOICED_SQL}
@@ -13783,7 +13784,7 @@ pub async fn purge_unqualified_leads(
              AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
              AND ($5::uuid[] IS NULL OR l.id = ANY($5))
            ORDER BY l.id"#
-    ))
+    )))
     .bind(policy.days as i32)
     .bind(policy.effective_at)
     .bind(now)
@@ -13826,7 +13827,7 @@ async fn purge_unqualified_lead(
     let mut tx = state.db.begin().await?;
     // Lock the lead and decide again: it may have been qualified, signed or
     // deleted since the scan.
-    let lead = sqlx::query(&format!(
+    let lead = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.qualification_status, l.created_by,
                   (SELECT o.created_by FROM orders o
                    WHERE o.source_lead_id = l.id
@@ -13836,7 +13837,7 @@ async fn purge_unqualified_lead(
              AND {UNQUALIFIED_LEAD_SUBJECT_SQL}
              AND {UNQUALIFIED_LEAD_DUE_SQL}
            FOR UPDATE OF l"#
-    ))
+    )))
     .bind(policy.days as i32)
     .bind(policy.effective_at)
     .bind(now)
@@ -13862,9 +13863,9 @@ async fn purge_unqualified_lead(
 
     // An invoice keeps the lead for accounting (§ 257 HGB, § 147 AO): it is
     // never deleted automatically.
-    let invoiced: bool = sqlx::query_scalar(&format!(
+    let invoiced: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT {UNQUALIFIED_LEAD_INVOICED_SQL} FROM leads l WHERE l.id = $1"
-    ))
+    )))
     .bind(lead_id)
     .fetch_one(&mut *tx)
     .await?;
@@ -13874,9 +13875,9 @@ async fn purge_unqualified_lead(
     // A signature request still out: the person can sign it, and the signed PDF
     // would land on a deleted lead. The lead waits for the request's end; a
     // signed DSGVO then takes it out of the rule (QA 2026-10-30).
-    let signature_open: bool = sqlx::query_scalar(&format!(
+    let signature_open: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT {LEAD_SIGNATURE_OPEN_SQL} FROM leads l WHERE l.id = $1"
-    ))
+    )))
     .bind(lead_id)
     .fetch_one(&mut *tx)
     .await?;
@@ -14146,7 +14147,7 @@ async fn warn_about_unqualified_lead_deadlines(
         )
     };
     // The candidates without a change; each is re-checked under its update.
-    let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let candidates: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         r#"SELECT l.id FROM leads AS l
            WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
              AND NOT {UNQUALIFIED_LEAD_INVOICED_SQL}
@@ -14154,7 +14155,7 @@ async fn warn_about_unqualified_lead_deadlines(
              AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
              AND ($5::uuid[] IS NULL OR l.id = ANY($5))
            ORDER BY l.id"#
-    ))
+    )))
     .bind(policy.days as i32)
     .bind(policy.effective_at)
     .bind(now)
@@ -14188,7 +14189,7 @@ async fn warn_about_unqualified_lead(
     due_soon_sql: &str,
 ) -> Result<bool, sqlx::Error> {
     let mut tx = state.db.begin().await?;
-    let Some(row) = sqlx::query(due_soon_sql)
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(due_soon_sql))
         .bind(policy.days as i32)
         .bind(policy.effective_at)
         .bind(now)
@@ -14287,10 +14288,10 @@ async fn remind_leads_before_purge(
     let Some(console_url) = mailer.console_url().map(str::to_string) else {
         return Ok(0);
     };
-    let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let candidates: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT l.id FROM leads l WHERE {} ORDER BY l.id",
         retention_reminder_due_sql("($5::uuid[] IS NULL OR l.id = ANY($5))")
-    ))
+    )))
     .bind(policy.days as i32)
     .bind(policy.effective_at)
     .bind(now)
@@ -14332,7 +14333,7 @@ async fn remind_lead_before_purge(
 
     let mut tx = state.db.begin().await?;
     // Locked and decided again: the lead may have been signed or qualified.
-    let Some(lead) = sqlx::query(&format!(
+    let Some(lead) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {UNQUALIFIED_LEAD_DELETION_SQL} AS delete_at, l.primary_language,
                   l.first_name, l.last_name, l.email AS lead_email, l.portal_user_id,
                   u.email AS login_email, u.is_active AS login_active,
@@ -14343,7 +14344,7 @@ async fn remind_lead_before_purge(
            FOR UPDATE OF l"#,
         closed = crate::routes::lead_portal_intake::OWN_LOGIN_CLOSED_SQL,
         due = retention_reminder_due_sql("l.id = $5"),
-    ))
+    )))
     .bind(policy.days as i32)
     .bind(policy.effective_at)
     .bind(now)
