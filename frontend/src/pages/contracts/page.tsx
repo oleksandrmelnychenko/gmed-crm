@@ -2954,7 +2954,6 @@ function useContractsPageContent() {
                         }
                         placeholder={t.patients_notes}
                       />
-                      <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
                     </Field>
                   </div>
                   <div className="mt-5">
@@ -3309,7 +3308,6 @@ function useContractsPageContent() {
                               setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))
                             }
                           />
-                          <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
                         </Field>
                       </div>
                       <div className="flex items-center justify-between gap-3 pt-1">

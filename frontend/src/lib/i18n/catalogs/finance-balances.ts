@@ -84,7 +84,6 @@ export interface FinanceBalancesTranslations {
   finance_settlement_basis: string;
   /** Quote notes: printed on the cost estimate and copied into its invoices. */
   finance_quote_printed_notes: string;
-  finance_printed_notes_hint: string;
   /** Staff-only note of a quote or an invoice: never printed or shown to the patient/payer. */
   finance_internal_note: string;
   finance_internal_note_hint: string;
@@ -186,8 +185,6 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_settlement_basis:
     "Итог = выставлено (за вычетом кредит-нот) + не выставлено − оплачено (включая авансы). Так же считается сальдо в карточке пациента.",
   finance_quote_printed_notes: "Примечание для клиента (печатается в предложении и счетах)",
-  finance_printed_notes_hint:
-    "Этот текст видит клиент: он печатается в документе и переносится в счета. Внутренние заметки — в поле «Внутренняя заметка».",
   finance_internal_note: "Внутренняя заметка (не печатается)",
   finance_internal_note_hint:
     "Только для сотрудников: не печатается, не переносится в счета, не показывается пациенту и плательщику. Можно менять и после выпуска счёта; каждое изменение записывается в журнал.",
@@ -291,8 +288,6 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_settlement_basis:
     "Saldo = berechnet (abzüglich Rechnungskorrekturen) + nicht berechnet − bezahlt (inklusive Anzahlungen). Genauso wird der Saldo in der Patientenakte berechnet.",
   finance_quote_printed_notes: "Hinweis für den Kunden (wird auf Angebot und Rechnungen gedruckt)",
-  finance_printed_notes_hint:
-    "Diesen Text sieht der Kunde: Er wird auf das Dokument gedruckt und in die Rechnungen übernommen. Interne Notizen gehören in das Feld „Interne Notiz“.",
   finance_internal_note: "Interne Notiz (wird nicht gedruckt)",
   finance_internal_note_hint:
     "Nur für Mitarbeitende: wird nicht gedruckt, nicht in Rechnungen übernommen und weder dem Patienten noch dem Zahler angezeigt. Auch nach Ausstellung der Rechnung änderbar; jede Änderung wird protokolliert.",

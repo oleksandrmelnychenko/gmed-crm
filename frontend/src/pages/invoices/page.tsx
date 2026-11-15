@@ -225,7 +225,6 @@ import {
   invoiceStatusFormProblem,
   isInvoiceReleased,
   canEditInvoiceDueDate,
-  DEFAULT_INVOICE_PAYMENT_TERM_DAYS,
   invoiceRecipientAddressLines,
   payerFormToPayload,
   knownPayerRole,
@@ -3137,7 +3136,7 @@ function useStaffInvoicesPageContent() {
         >
           <AdminSheetScaffold
             icon={ReceiptText}
-            title={detail ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} / ${detail.patient_name}` : t.invoices_title}
+            title={detail ? `${detail.invoice_number?.trim() || (lang === "de" ? "Rechnung" : "Счёт")} / ${detail.patient_name}` : t.invoices_title}
             description={text.detailSheetDescription}
           >
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
@@ -3172,7 +3171,7 @@ function useStaffInvoicesPageContent() {
                         </h3>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
                           {[
-                            invoiceDisplayNumber(detail, t.revenue_invoices_draft_number),
+                            detail.invoice_number?.trim(),
                             detail.order_number,
                             detail.quote_number,
                           ]
@@ -5317,10 +5316,7 @@ function useStaffInvoicesPageContent() {
                 </Field>
                 {detail?.status === "draft" && statusForm.status === "sent" ? (
                   <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground lg:col-span-2">
-                    {t.revenue_invoices_release_hint.replace(
-                      "{days}",
-                      String(DEFAULT_INVOICE_PAYMENT_TERM_DAYS),
-                    )}
+                    {t.revenue_invoices_release_hint}
                   </p>
                 ) : null}
                 {statusFormProblem ? (
@@ -5360,9 +5356,9 @@ function useStaffInvoicesPageContent() {
                     }
                     disabled={!access.canManage || statusNotesLocked}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    {statusNotesLocked ? t.revenue_invoices_notes_locked : t.finance_printed_notes_hint}
-                  </p>
+                  {statusNotesLocked ? (
+                    <p className="text-xs text-muted-foreground">{t.revenue_invoices_notes_locked}</p>
+                  ) : null}
                 </Field>
               </div>
               <div className="flex justify-end">
