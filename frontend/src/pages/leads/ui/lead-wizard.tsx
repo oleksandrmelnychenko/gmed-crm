@@ -9627,8 +9627,6 @@ ${serviceCommentLines.join("\n")}`
                   {sessionPrefill?.notice ? (
                     <p className="text-foreground">
                       {sessionPrefill.notice}
-                      {" "}
-                      {tx("Проверьте и при необходимости исправьте.", "Bitte prüfen und bei Bedarf korrigieren.")}
                     </p>
                   ) : null}
                   {showSourcePepHint ? (

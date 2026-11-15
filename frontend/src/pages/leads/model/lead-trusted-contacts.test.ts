@@ -394,17 +394,17 @@ describe("the login warning of the contact editor (DEV QA V-A6)", () => {
   it("names the patient when the server does, and only the kind otherwise", () => {
     expect(contactEmailLoginWarning(null, ru)).toBeNull();
     expect(contactEmailLoginWarning(patientOwner, ru)).toBe(
-      "Этот адрес — логин другого пациента (P-2026-0007, Olga Beispiel). Проверьте, тот ли это человек.",
+      "Этот адрес — логин другого пациента (P-2026-0007, Olga Beispiel).",
     );
     expect(contactEmailLoginWarning(patientOwner, de)).toBe(
-      "Diese Adresse ist der Login einer anderen Person (P-2026-0007, Olga Beispiel). Bitte prüfen.",
+      "Diese Adresse ist der Login einer anderen Person (P-2026-0007, Olga Beispiel).",
     );
     expect(contactEmailLoginWarning({ ...patientOwner, patient_id: null, patient_number: null, display_name: null }, ru))
-      .toBe("Этот адрес — логин другого пациента. Проверьте, тот ли это человек.");
+      .toBe("Этот адрес — логин другого пациента.");
     expect(contactEmailLoginWarning({ ...patientOwner, kind: "staff", patient_number: null, display_name: null }, de))
-      .toBe("Diese Adresse ist der Login eines GMED-Mitarbeiters. Bitte prüfen.");
+      .toBe("Diese Adresse ist der Login eines GMED-Mitarbeiters.");
     expect(contactEmailLoginWarning({ ...patientOwner, kind: "lead", patient_number: null, display_name: "Anna Muster" }, ru))
-      .toBe("Этот адрес — логин другого человека (Anna Muster). Проверьте, тот ли это человек.");
+      .toBe("Этот адрес — логин другого человека (Anna Muster).");
   });
 
   it("waits 400 ms after the last change and clears the warning at once", async () => {

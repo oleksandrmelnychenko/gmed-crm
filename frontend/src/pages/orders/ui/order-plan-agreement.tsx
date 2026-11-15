@@ -241,8 +241,8 @@ export function OrderPlanAgreement({
           >
             {statusStale
               ? tx(
-                  `После статуса «${statusLabel}» в план добавлены приёмы. Проверьте, нужно ли снова согласовать план с пациентом.`,
-                  `Nach dem Status „${statusLabel}“ kamen Termine zum Plan hinzu. Prüfen Sie, ob der Plan erneut abgestimmt werden muss.`,
+                  `После статуса «${statusLabel}» в план добавлены приёмы.`,
+                  `Nach dem Status „${statusLabel}“ kamen Termine zum Plan hinzu.`,
                 )
               : null}
             {statusStale && pdfStale ? " " : null}

@@ -1521,8 +1521,7 @@ export const de = {
     "Bitte zuerst den Ausgangstext eintragen.",
   documents_machine_translation_replace_confirm:
     "Das Übersetzungsfeld enthält bereits Text. Durch den maschinellen Entwurf ersetzen?",
-  documents_machine_translation_inserted:
-    "Maschineller Entwurf eingefügt. Begriffe, Verneinungen, Dosierungen und Daten am Original prüfen und den Workspace speichern.",
+  documents_machine_translation_inserted: "Maschineller Entwurf eingefügt.",
   documents_machine_translation_failed:
     "Der maschinelle Entwurf konnte nicht erstellt werden.",
   documents_save_workspace: "Workspace speichern",
@@ -1533,8 +1532,6 @@ export const de = {
   documents_translated_text: "Übersetzter Text",
   documents_translated_text_placeholder: "Finaler übersetzter Text…",
   documents_interpreter_review: "Dolmetscher-Review",
-  documents_interpreter_review_hint:
-    "Das hochgeladene Dolmetscher-Dokument prüfen, vollständig klassifizieren und in den aktiven internen Status überführen.",
   documents_mark_medical_data: "Als medizinische Daten markieren",
   documents_save_metadata: "Metadaten speichern",
   documents_patient_portal: "Patientenportal",

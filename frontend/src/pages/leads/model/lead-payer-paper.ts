@@ -184,8 +184,8 @@ export function payerPaperDocuments(allDocuments: readonly DocumentItem[], payer
 /** The papers count for the gate as they are; staff decide (owner decision 2026-11-01). */
 export function payerPapersPredateText(tx: Tx): string {
   return tx(
-    "Эти бумаги оформлены до смены плательщика. Проверьте их или запросите у нового плательщика его собственные",
-    "Diese Unterlagen stammen aus der Zeit vor dem Zahlerwechsel. Prüfen Sie sie oder fordern Sie vom neuen Zahler eigene an",
+    "Эти бумаги оформлены до смены плательщика",
+    "Diese Unterlagen stammen aus der Zeit vor dem Zahlerwechsel",
   );
 }
 

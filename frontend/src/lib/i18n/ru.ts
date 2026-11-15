@@ -1516,8 +1516,7 @@ export const ru = {
     "Сначала заполните исходный текст.",
   documents_machine_translation_replace_confirm:
     "Поле перевода уже содержит текст. Заменить его машинным черновиком?",
-  documents_machine_translation_inserted:
-    "Машинный черновик подставлен. Проверьте термины, отрицания, дозировки и даты по оригиналу и сохраните рабочую область.",
+  documents_machine_translation_inserted: "Машинный черновик подставлен.",
   documents_machine_translation_failed: "Не удалось получить машинный черновик.",
   documents_save_workspace: "Сохранить рабочую область",
   documents_translation_note_placeholder:
@@ -1528,8 +1527,6 @@ export const ru = {
   documents_translated_text: "Переведённый текст",
   documents_translated_text_placeholder: "Финальный переведённый текст…",
   documents_interpreter_review: "Проверка переводчика",
-  documents_interpreter_review_hint:
-    "Проверьте загруженный переводчиком документ, завершите классификацию и переведите его в активный внутренний статус.",
   documents_mark_medical_data: "Пометить как медицинские данные",
   documents_save_metadata: "Сохранить метаданные",
   documents_patient_portal: "Портал пациента",

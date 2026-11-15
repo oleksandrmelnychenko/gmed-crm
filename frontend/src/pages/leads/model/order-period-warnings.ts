@@ -18,8 +18,8 @@ export function orderPeriodWarnings(
   if (dateTo && dateTo < today) {
     warnings.push({
       key: "past",
-      ru: `Период заказа уже прошёл (${formatIntakeDate(dateFrom)} – ${formatIntakeDate(dateTo)}). Проверьте даты, если заказ не оформляется задним числом.`,
-      de: `Der Auftragszeitraum liegt in der Vergangenheit (${formatIntakeDate(dateFrom)} – ${formatIntakeDate(dateTo)}). Bitte Daten prüfen, sofern der Auftrag nicht nachträglich erfasst wird.`,
+      ru: `Период заказа уже прошёл (${formatIntakeDate(dateFrom)} – ${formatIntakeDate(dateTo)}).`,
+      de: `Der Auftragszeitraum liegt in der Vergangenheit (${formatIntakeDate(dateFrom)} – ${formatIntakeDate(dateTo)}).`,
     });
   } else if (dateFrom && dateFrom < today) {
     warnings.push({

@@ -1430,7 +1430,6 @@ export interface Translations
   documents_translated_text: string;
   documents_translated_text_placeholder: string;
   documents_interpreter_review: string;
-  documents_interpreter_review_hint: string;
   documents_mark_medical_data: string;
   documents_save_metadata: string;
   documents_patient_portal: string;

@@ -7837,9 +7837,6 @@ function StaffDocumentsPage({
                       <Banner tone="error">{saveError}</Banner>
                     ) : null}
                     <form onSubmit={handleSave} className="space-y-4">
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                        {t.documents_interpreter_review_hint}
-                      </div>
                       {detail.classification_suggestion ? (
                         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                           {text.suggestedClassification}:{" "}

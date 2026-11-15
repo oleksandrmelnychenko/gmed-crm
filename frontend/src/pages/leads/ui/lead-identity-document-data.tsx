@@ -557,12 +557,12 @@ export function LeadIdentityDocumentDataForm({
         ) : typedByStaff ? (
           <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-typed-by-staff`}>
             <UserRound aria-hidden="true" />
-            {tx("Внесено сотрудником в анкете клиента: сверьте со сканом", "Von Mitarbeitenden im Formular des Kunden erfasst: mit dem Scan abgleichen")}
+            {tx("Внесено сотрудником в анкете клиента", "Von Mitarbeitenden im Formular des Kunden erfasst")}
           </StatusChip>
         ) : typedByClient ? (
           <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-typed-by-client`}>
             <UserRound aria-hidden="true" />
-            {tx("Внесено клиентом в кабинете: сверьте со сканом", "Vom Kunden im Kabinett eingetragen: mit dem Scan abgleichen")}
+            {tx("Внесено клиентом в кабинете", "Vom Kunden im Kabinett eingetragen")}
           </StatusChip>
         ) : null}
         <div className="flex min-h-8 items-center gap-2" aria-live="polite">

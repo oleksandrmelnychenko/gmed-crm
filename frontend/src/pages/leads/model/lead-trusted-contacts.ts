@@ -469,21 +469,21 @@ export function contactEmailLoginWarning(
   if (!owner) return null;
   if (owner.kind === "staff") {
     return tx(
-      "Этот адрес — логин сотрудника GMED. Проверьте адрес.",
-      "Diese Adresse ist der Login eines GMED-Mitarbeiters. Bitte prüfen.",
+      "Этот адрес — логин сотрудника GMED.",
+      "Diese Adresse ist der Login eines GMED-Mitarbeiters.",
     );
   }
   const who = [owner.patient_number, owner.display_name].filter(Boolean).join(", ");
   const suffix = who ? ` (${who})` : "";
   if (owner.kind === "patient") {
     return tx(
-      `Этот адрес — логин другого пациента${suffix}. Проверьте, тот ли это человек.`,
-      `Diese Adresse ist der Login einer anderen Person${suffix}. Bitte prüfen.`,
+      `Этот адрес — логин другого пациента${suffix}.`,
+      `Diese Adresse ist der Login einer anderen Person${suffix}.`,
     );
   }
   return tx(
-    `Этот адрес — логин другого человека${suffix}. Проверьте, тот ли это человек.`,
-    `Diese Adresse ist der Login einer anderen Person${suffix}. Bitte prüfen.`,
+    `Этот адрес — логин другого человека${suffix}.`,
+    `Diese Adresse ist der Login einer anderen Person${suffix}.`,
   );
 }
 

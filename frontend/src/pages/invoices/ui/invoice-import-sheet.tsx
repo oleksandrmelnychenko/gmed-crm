@@ -235,16 +235,16 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
   const recognitionMessage = preview?.warnings.includes("no_readable_text")
     ? tx("Не удалось прочитать текст документа. Заполните поля по оригиналу.", "Der Dokumenttext konnte nicht gelesen werden. Angaben aus dem Original eintragen.")
     : !preview?.extraction_complete
-    ? tx("Не весь документ удалось прочитать. Проверьте данные по оригиналу.", "Das Dokument konnte nicht vollständig gelesen werden. Angaben mit dem Original abgleichen.")
+    ? tx("Не весь документ удалось прочитать.", "Das Dokument konnte nicht vollständig gelesen werden.")
     : preview.warnings.includes("low_ocr_confidence")
-      ? tx("Часть текста распознана с низкой уверенностью. Проверьте данные по оригиналу.", "Ein Teil des Textes wurde unsicher erkannt. Angaben mit dem Original abgleichen.")
-      : tx("Распознавание завершено. Сверьте реквизиты с оригиналом перед сохранением.", "Erkennung abgeschlossen. Angaben vor dem Speichern mit dem Original abgleichen.");
+      ? tx("Часть текста распознана с низкой уверенностью.", "Ein Teil des Textes wurde unsicher erkannt.")
+      : tx("Распознавание завершено.", "Erkennung abgeschlossen.");
   const documentKindMessage = preview?.document_kind && preview.document_kind !== "invoice"
     ? ({
-        receipt: tx("Распознан чек или кассовый документ. Проверьте реквизиты перед сохранением как расход.", "Beleg oder Kassendokument erkannt. Angaben vor dem Speichern als Ausgabe prüfen."),
-        cost_estimate: tx("Распознана предварительная смета, а не финальный инвойс. Проверьте, нужно ли сохранять её как расход.", "Kostenvoranschlag statt Schlussrechnung erkannt. Prüfen, ob er als Ausgabe gespeichert werden soll."),
-        fee_agreement: tx("Распознано соглашение о гонораре, а не финальный инвойс. Проверьте документ вручную.", "Honorarvereinbarung statt Schlussrechnung erkannt. Dokument manuell prüfen."),
-        booking_confirmation: tx("Распознано подтверждение бронирования, а не финальный инвойс. Проверьте документ вручную.", "Buchungsbestätigung statt Schlussrechnung erkannt. Dokument manuell prüfen."),
+        receipt: tx("Распознан чек или кассовый документ.", "Beleg oder Kassendokument erkannt."),
+        cost_estimate: tx("Распознана предварительная смета, а не финальный инвойс.", "Kostenvoranschlag statt Schlussrechnung erkannt."),
+        fee_agreement: tx("Распознано соглашение о гонораре, а не финальный инвойс.", "Honorarvereinbarung statt Schlussrechnung erkannt."),
+        booking_confirmation: tx("Распознано подтверждение бронирования, а не финальный инвойс.", "Buchungsbestätigung statt Schlussrechnung erkannt."),
       } as const)[preview.document_kind]
     : null;
 
@@ -340,9 +340,9 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                   ? tx("Reverse Charge: суммы и НДС прочитаны из XML. Налоговый режим для бухгалтерского учёта требует проверки.", "Reverse Charge: Beträge und Umsatzsteuer wurden aus XML gelesen. Die steuerliche Behandlung in der Buchhaltung ist zu prüfen.")
                   : preview.warnings.includes("invoice_vat_explicitly_not_charged")
                   ? tx("Reverse Charge: в самом счёте НДС не начислен. Суммы подставлены по документу; налоговый режим для бухгалтерского учёта требует проверки.", "Reverse Charge: Die Rechnung weist keine Umsatzsteuer aus. Beträge wurden aus dem Dokument übernommen; die steuerliche Behandlung in der Buchhaltung ist zu prüfen.")
-                  : tx("В документе указан Reverse Charge. Проверьте нетто и НДС вручную; налоговый режим автоматически не определяется.", "Das Dokument nennt Reverse Charge. Netto und Umsatzsteuer manuell prüfen; die steuerliche Behandlung wird nicht automatisch bestimmt.")}</Banner> : null}
-                {preview?.warnings.includes("conflicting_tax_statement") ? <Banner tone="warning" withIcon>{tx("Текст о НДС противоречит суммам в документе. Проверьте налоговые суммы вручную.", "Der Steuerhinweis widerspricht den Beträgen im Dokument. Steuerbeträge manuell prüfen.")}</Banner> : null}
-                {preview?.warnings.includes("amount_net_derived_from_totals") ? <p className="text-xs text-muted-foreground">{tx("Сумма без НДС рассчитана как итог минус указанный НДС. Сверьте её с оригиналом.", "Netto wurde aus Brutto abzüglich der ausgewiesenen Umsatzsteuer berechnet. Mit dem Original abgleichen.")}</p> : null}
+                  : tx("В документе указан Reverse Charge; налоговый режим автоматически не определяется.", "Das Dokument nennt Reverse Charge; die steuerliche Behandlung wird nicht automatisch bestimmt.")}</Banner> : null}
+                {preview?.warnings.includes("conflicting_tax_statement") ? <Banner tone="warning" withIcon>{tx("Текст о НДС противоречит суммам в документе.", "Der Steuerhinweis widerspricht den Beträgen im Dokument.")}</Banner> : null}
+                {preview?.warnings.includes("amount_net_derived_from_totals") ? <p className="text-xs text-muted-foreground">{tx("Сумма без НДС рассчитана как итог минус указанный НДС.", "Netto wurde aus Brutto abzüglich der ausgewiesenen Umsatzsteuer berechnet.")}</p> : null}
                 <fieldset disabled={parsing || saving} className="grid gap-3 sm:grid-cols-2">
                   {(Object.keys(labels) as (keyof InvoiceImportFields)[]).filter(key => !key.startsWith("amount_") && key !== "currency").map((key) => <Field key={key} label={labels[key]}>
                     {key === "supplier_name" ? <InvoiceSupplierField
@@ -355,7 +355,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                     {preview?.field_sources?.[key] && importFieldIsRecognized(key, fields[key], preview) ? <p className="text-xs leading-4 text-muted-foreground" title={preview.field_sources[key].text}>
                       {preview.field_sources[key].method === "document_without_vat"
                         ? tx("По фразе в счёте: «без НДС».", "Laut Rechnung: ohne Umsatzsteuer.")
-                        : tx(`Рассчитано от даты счёта: +${preview.field_sources[key].days} дней. Проверьте срок.`, `Ab Rechnungsdatum berechnet: +${preview.field_sources[key].days} Tage. Frist prüfen.`)}
+                        : tx(`Рассчитано от даты счёта: +${preview.field_sources[key].days} дней.`, `Ab Rechnungsdatum berechnet: +${preview.field_sources[key].days} Tage.`)}
                     </p> : null}
                   </Field>)}
                 </fieldset>
@@ -370,11 +370,11 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 {preview.payment.prepaid != null ? <p>{tx("Предоплата по XML", "Vorauszahlung laut XML")}: {formatRecognizedMoney(preview.payment.prepaid, preview.fields.currency)}</p> : null}
                 {preview.payment.rounding != null ? <p>{tx("Округление", "Rundung")}: {formatRecognizedMoney(preview.payment.rounding, preview.fields.currency)}</p> : null}
                 {preview.warnings.includes("payable_differs_from_total") ? <p>{tx("К оплате и итог инвойса различаются. В инвойс переносится полная сумма; передоплата из XML не создаёт платёж автоматически.", "Zahlbetrag und Rechnungsbrutto unterscheiden sich. Übernommen wird der volle Rechnungsbetrag; eine XML-Vorauszahlung erzeugt nicht automatisch eine Zahlung.")}</p> : null}
-                {preview.payment.method === "direct_debit" ? <p>{tx("Автоматическое списание", "Lastschrift")}{preview.payment.collection_date ? ` · ${preview.payment.collection_date.split("-").reverse().join(".")}` : ""}. {tx("Дата списания показана отдельно от срока оплаты.", "Das Abbuchungsdatum wird getrennt von der Fälligkeit angezeigt.")}</p> : null}
+                {preview.payment.method === "direct_debit" ? <p>{tx("Автоматическое списание", "Lastschrift")}{preview.payment.collection_date ? ` · ${preview.payment.collection_date.split("-").reverse().join(".")}` : ""}</p> : null}
               </div> : null}
               {preview?.line_items?.length ? <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm"><h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={ListOrdered}>{tx("Позиции в документе", "Positionen im Dokument")}</SectionHeading> <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-xs font-medium tabular-nums">{preview.line_items.length}</span></h3>
-                {preview.warnings.includes("line_items_total_mismatch") ? <Banner tone="warning" withIcon>{tx("Сумма распознанных позиций не совпадает с итогом. Проверьте, все ли позиции прочитаны.", "Die Summe der erkannten Positionen stimmt nicht mit dem Gesamtbetrag überein. Prüfen, ob alle Positionen erfasst wurden.")}</Banner> : null}
-                {preview.warnings.includes("line_item_amount_recovered_from_subtotal") ? <Banner tone="warning" withIcon>{tx("В одной позиции OCR потерял десятичный разделитель. Сумма восстановлена только по точному совпадению с напечатанным подытогом; сверьте позицию с оригиналом.", "Bei einer Position hat die OCR das Dezimaltrennzeichen verloren. Der Betrag wurde nur anhand der exakten Übereinstimmung mit der gedruckten Zwischensumme rekonstruiert; bitte mit dem Original abgleichen.")}</Banner> : null}
+                {preview.warnings.includes("line_items_total_mismatch") ? <Banner tone="warning" withIcon>{tx("Сумма распознанных позиций не совпадает с итогом.", "Die Summe der erkannten Positionen stimmt nicht mit dem Gesamtbetrag überein.")}</Banner> : null}
+                {preview.warnings.includes("line_item_amount_recovered_from_subtotal") ? <Banner tone="warning" withIcon>{tx("В одной позиции OCR потерял десятичный разделитель. Сумма восстановлена только по точному совпадению с напечатанным подытогом.", "Bei einer Position hat die OCR das Dezimaltrennzeichen verloren. Der Betrag wurde nur anhand der exakten Übereinstimmung mit der gedruckten Zwischensumme rekonstruiert.")}</Banner> : null}
                 <div className="divide-y rounded-lg border text-xs">{preview.line_items.map((line, index) => <div key={index} className="space-y-1.5 p-3">
                   <div className="flex justify-between gap-3"><span>{String(line.name ?? line.description ?? "")}</span><span className="shrink-0 font-mono">{formatRecognizedMoney(line.price_subtotal ?? line.amount, preview.fields.currency)}</span></div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">

@@ -143,7 +143,7 @@ export function LeadPayerPackagePanel({
     setNotice("");
     try {
       await controller.prepare();
-      setNotice(tx("Документы подготовлены — проверьте их перед отправкой", "Unterlagen erstellt – bitte vor dem Senden prüfen"));
+      setNotice(tx("Документы подготовлены", "Unterlagen erstellt"));
     } catch (cause) {
       setError(message(cause));
     } finally {

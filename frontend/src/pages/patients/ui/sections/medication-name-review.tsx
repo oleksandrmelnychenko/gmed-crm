@@ -51,7 +51,7 @@ export function MedicationNameReview({ names, confirmation, onConfirm, onChoose,
   const hasSuggestions = review.handelsname.similar.length > 0 || review.wirkstoff.similar.length > 0;
   return <div className="md:col-span-2 min-w-0 space-y-3 rounded-lg border border-amber-300/60 bg-amber-50/40 p-3 dark:bg-amber-950/15">
     <p className="text-xs font-medium">{hasSuggestions
-      ? tx("Есть похожие названия. Проверьте написание перед добавлением.", "Ähnliche Namen gefunden. Bitte vor dem Hinzufügen die Schreibweise prüfen.")
+      ? tx("Есть похожие названия.", "Ähnliche Namen gefunden.")
       : tx("Новая пара названий для справочника", "Neue Namenskombination für das Verzeichnis")}</p>
     {(["handelsname", "wirkstoff"] as const).map(field => review[field].similar.length ? <div key={field} className="min-w-0 space-y-1">
       <p className="text-[11px] text-muted-foreground">{field === "handelsname" ? tx("Похожие торговые названия", "Ähnliche Handelsnamen") : tx("Похожие ACT-значения", "Ähnliche ACT-Bedeutungen")}</p>

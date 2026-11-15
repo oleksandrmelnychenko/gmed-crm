@@ -119,7 +119,7 @@ function Rows<Field extends string>({
   const id = useId();
   const scanLabel = tx("На скане", "Im Scan");
   const currentLabel = tx("сейчас в форме", "im Formular");
-  const unverified = tx("Не подтверждено проверкой — сверьте со сканом", "Nicht durch eine Prüfung bestätigt – bitte mit dem Scan vergleichen");
+  const unverified = tx("Не подтверждено проверкой", "Nicht durch eine Prüfung bestätigt");
   const columns = "grid-cols-[1rem_minmax(0,1fr)_minmax(0,1fr)] @min-[30rem]:grid-cols-[1rem_minmax(0,1.05fr)_minmax(0,1fr)_minmax(0,1fr)]";
   return (
     <div className="@container min-w-0 rounded-lg border border-border">
@@ -400,7 +400,7 @@ export function LeadIdentityRecognition({
         {state.kind === "running"
           ? `${tx("Читаем машиночитаемую зону файла", "Die maschinenlesbare Zone wird gelesen, Datei")} «${stateFile}»…`
           : state.kind === "applied"
-            ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}». ${documentFields ? tx("Проверьте поля.", "Bitte prüfen.") : tx("Проверьте поля; «Кем выдан» и дату выдачи сверьте со сканом.", "Bitte prüfen; Behörde und Ausstellungsdatum mit dem Scan vergleichen.")}`
+            ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}».`
             : null}
       </p>
       {state.kind === "error" ? (
@@ -440,8 +440,8 @@ export function LeadIdentityRecognition({
           {result.status === "unverified" ? (
             <p role="alert" className="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" data-testid={`${testId}-unverified`}>
               {tx(
-                `Ошибка чтения${failedChecks.length ? `: ${failedChecks.join(", ")}` : ""}. Сверьте значения со сканом перед подстановкой или заполните форму вручную.`,
-                `Lesefehler${failedChecks.length ? `: ${failedChecks.join(", ")}` : ""}. Bitte die Werte vor der Übernahme mit dem Scan vergleichen oder das Formular manuell ausfüllen.`,
+                `Ошибка чтения${failedChecks.length ? `: ${failedChecks.join(", ")}` : ""}.`,
+                `Lesefehler${failedChecks.length ? `: ${failedChecks.join(", ")}` : ""}.`,
               )}
             </p>
           ) : null}
@@ -454,8 +454,8 @@ export function LeadIdentityRecognition({
               <p className="text-xs leading-5 text-muted-foreground">
                 {documentRows.some((row) => row.field === "authority") && documentRows.some((row) => row.field === "issuedOn")
                   ? tx(
-                    "«Кем выдан» и дата выдачи прочитаны из текста документа, а не из машиночитаемой зоны — сверьте их со сканом.",
-                    "Ausstellende Behörde und Ausstellungsdatum stammen aus dem gedruckten Text, nicht aus der maschinenlesbaren Zone – bitte mit dem Scan vergleichen.",
+                    "«Кем выдан» и дата выдачи прочитаны из текста документа, а не из машиночитаемой зоны.",
+                    "Ausstellende Behörde und Ausstellungsdatum stammen aus dem gedruckten Text, nicht aus der maschinenlesbaren Zone.",
                   )
                   : tx(
                     "«Кем выдан» и дата выдачи читаются из текста документа; что не прочиталось — внесите со скана.",
@@ -484,8 +484,8 @@ export function LeadIdentityRecognition({
                 {holderDiffers ? (
                   <p role="alert" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-holder-differs`}>
                     {onApplyHolder
-                      ? tx("Данные человека в форме отличаются от документа. Проверьте, тот ли это документ; отметьте, что взять из документа.", "Die Personendaten im Formular weichen vom Dokument ab. Bitte prüfen, ob es das richtige Dokument ist; ankreuzen, was übernommen werden soll.")
-                      : tx("Данные человека в форме отличаются от документа. Проверьте, тот ли это документ, и при необходимости исправьте данные человека.", "Die Personendaten im Formular weichen vom Dokument ab. Bitte prüfen, ob es das richtige Dokument ist, und die Personendaten ggf. korrigieren.")}
+                      ? tx("Данные человека в форме отличаются от документа.", "Die Personendaten im Formular weichen vom Dokument ab.")
+                      : tx("Данные человека в форме отличаются от документа.", "Die Personendaten im Formular weichen vom Dokument ab. Bitte prüfen, ob es das richtige Dokument ist, und die Personendaten ggf. korrigieren.")}
                   </p>
                 ) : null}
               </section>

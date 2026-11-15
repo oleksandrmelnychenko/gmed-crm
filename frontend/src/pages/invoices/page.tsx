@@ -3575,8 +3575,8 @@ function useStaffInvoicesPageContent() {
                             && paymentForm.receivedOn < detail.issued_at.slice(0, 10) ? (
                               <p className="max-w-xl text-xs text-amber-700" data-testid="payment-date-before-invoice">
                                 {lang === "de"
-                                  ? "Das Zahlungsdatum liegt vor dem Rechnungsdatum. Bitte prüfen."
-                                  : "Дата оплаты раньше даты счёта. Проверьте её."}
+                                  ? "Das Zahlungsdatum liegt vor dem Rechnungsdatum."
+                                  : "Дата оплаты раньше даты счёта."}
                               </p>
                             ) : null}
                           <Button

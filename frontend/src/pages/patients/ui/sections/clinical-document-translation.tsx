@@ -21,8 +21,8 @@ export function ClinicalDocumentTranslationPanel({ translation, pageNumber, text
           <h4 className="text-sm font-semibold"><SectionHeading icon={Languages}>{tx("Английский → немецкий", "Englisch → Deutsch")}</SectionHeading></h4>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {ready ? tx(
-              "Машинный черновик. Проверьте медицинские термины, отрицания, дозировки и даты по оригиналу перед переносом в карту.",
-              "Maschineller Entwurf. Medizinische Begriffe, Verneinungen, Dosierungen und Daten vor der Übernahme anhand des Originals prüfen.",
+              "Машинный черновик.",
+              "Maschineller Entwurf.",
             ) : translation.status === "too_large" ? tx(
               "Документ слишком большой для автоматического перевода. Распознанный оригинал доступен для ручной проверки.",
               "Das Dokument ist für die automatische Übersetzung zu groß. Das erkannte Original steht zur manuellen Prüfung bereit.",
@@ -39,15 +39,15 @@ export function ClinicalDocumentTranslationPanel({ translation, pageNumber, text
       </div>
       {translation.warnings.includes("translation_numbers_changed") ? (
         <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-          {tx("В переводе изменились числа или их формат. Обязательно сверьте значения с оригиналом. Такие фрагменты нельзя перенести кнопкой перевода.", "Zahlen oder Zahlenformate wurden verändert. Werte unbedingt mit dem Original abgleichen. Solche Abschnitte können nicht per Übersetzungsschaltfläche übernommen werden.")}
+          {tx("В переводе изменились числа или их формат. Такие фрагменты нельзя перенести кнопкой перевода.", "Zahlen oder Zahlenformate wurden verändert. Solche Abschnitte können nicht per Übersetzungsschaltfläche übernommen werden.")}
         </p>
       ) : null}
       {translation.warnings.includes("translation_candidate_too_long") ? (
-        <p className="text-xs text-amber-900">{tx("Некоторые переведённые записи слишком длинные для переноса. Проверьте и сократите текст вручную.", "Einige übersetzte Einträge sind für die Übernahme zu lang. Text manuell prüfen und kürzen.")}</p>
+        <p className="text-xs text-amber-900">{tx("Некоторые переведённые записи слишком длинные для переноса.", "Einige übersetzte Einträge sind für die Übernahme zu lang.")}</p>
       ) : null}
       {translation.warnings.includes("translation_terms_changed") ? (
         <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-          {tx("В переводе могли быть пропущены медицинские уточнения. Сверьте текст с оригиналом. Такие фрагменты нельзя перенести кнопкой перевода.", "Medizinische Präzisierungen könnten in der Übersetzung fehlen. Text mit dem Original abgleichen. Solche Abschnitte können nicht per Übersetzungsschaltfläche übernommen werden.")}
+          {tx("В переводе могли быть пропущены медицинские уточнения. Такие фрагменты нельзя перенести кнопкой перевода.", "Medizinische Präzisierungen könnten in der Übersetzung fehlen. Solche Abschnitte können nicht per Übersetzungsschaltfläche übernommen werden.")}
         </p>
       ) : null}
       {ready && expanded ? (

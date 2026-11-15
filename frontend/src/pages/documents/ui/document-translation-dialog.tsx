@@ -190,8 +190,8 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
       }
       setNotice(
         tx(
-          "Машинный черновик готов. Проверьте термины, отрицания, дозировки и даты по оригиналу перед сохранением.",
-          "Maschineller Entwurf erstellt. Begriffe, Verneinungen, Dosierungen und Daten vor dem Speichern am Original prüfen.",
+          "Машинный черновик готов.",
+          "Maschineller Entwurf erstellt.",
         ),
       );
     } catch (nextError) {
