@@ -29,6 +29,18 @@ const EXACT: Record<string, Pair> = {
     "Die Anteile müssen zusammen den Betrag der Anzahlung ergeben.",
     "Сумма долей должна равняться сумме аванса.",
   ],
+  "the split must add up to the payment amount": [
+    "Die Anteile ergeben nicht den Zahlungsbetrag.",
+    "Сумма долей не равна сумме платежа.",
+  ],
+  "a split part exceeds what its vat category has open": [
+    "Ein Anteil ist größer als der offene Betrag seiner Kategorie.",
+    "Доля больше открытого остатка категории.",
+  ],
+  "a split payment cannot exceed the open amount": [
+    "Eine aufgeteilte Zahlung darf den offenen Betrag nicht übersteigen.",
+    "Распределённый платёж не может быть больше остатка.",
+  ],
   "a share exceeds what its vat group has left to bill": [
     "Ein Anteil ist größer als der offene Betrag seiner Gruppe.",
     "Доля больше открытого остатка своей группы.",
@@ -433,8 +445,29 @@ const CODES: Record<string, Pair> = {
     "Кредит-нота превышает сумму, которую можно скорректировать по счёту.",
   ],
   credit_note_below_applied_advance: [
-    "Diese Anzahlung ist in eine Schlussrechnung eingerechnet. Zuerst dort die angerechnete Vorauszahlung freigeben oder die Schlussrechnung per Gutschrift korrigieren.",
-    "Этот аванс зачтён в финальный счёт. Сначала снимите зачёт в финальном счёте или скорректируйте финальный счёт кредит-нотой.",
+    "Diese Anzahlung ist in eine Schlussrechnung eingerechnet. Zuerst die Schlussrechnung stornieren oder per Gutschrift korrigieren.",
+    "Этот аванс зачтён в финальный счёт. Сначала сторнируйте финальный счёт или скорректируйте его кредит-нотой.",
+  ],
+  // Money QA 2026-11-15.
+  prepayment_locked_by_issued_final: [
+    "Die Vorauszahlung ist in der ausgestellten Schlussrechnung angerechnet. Zuerst die Schlussrechnung stornieren.",
+    "Предоплата зачтена в выставленном финальном счёте. Сначала сторнируйте финальный счёт.",
+  ],
+  prepayment_exceeds_vat_category: [
+    "Der Betrag übersteigt, was die Rechnung in den USt.-Kategorien der Anzahlung enthält.",
+    "Сумма больше, чем счёт содержит в категориях НДС этого аванса.",
+  ],
+  advance_prepayment_already_billed: [
+    "Die erforderliche Vorauszahlung ist bereits vollständig in Rechnung gestellt.",
+    "Требуемая предоплата уже полностью выставлена.",
+  ],
+  advance_share_over_open_group: [
+    "Ein Anteil ist größer als der offene Betrag seiner Gruppe.",
+    "Доля больше открытого остатка своей группы.",
+  ],
+  advance_split_frozen: [
+    "Die Anzahlung ist bereits in einer Schlussrechnung angerechnet; die Aufteilung ist fest.",
+    "Аванс уже зачтён в финальный счёт; распределение изменить нельзя.",
   ],
   advance_not_settled_by_final_invoice: [
     "Noch keine ausgestellte Schlussrechnung rechnet diese Anzahlung ab.",

@@ -54,9 +54,22 @@ export const INVOICE_FILTER_STATUSES: InvoiceDisplayStatus[] = [
 
 /** Status shown to users (server `display_status`, else the stored status). */
 export function invoiceDisplayStatus(
-  invoice: Pick<InvoiceItem, "status" | "display_status">,
+  invoice: Pick<InvoiceItem, "status" | "display_status">
+    & Partial<Pick<InvoiceItem, "amount_to_pay" | "prepayment_applied_amount" | "advance_credit_available">>,
 ): string {
-  return invoice.display_status || invoice.status;
+  const status = invoice.display_status || invoice.status;
+  // A settlement invoice the order's advances cover in full reads paid, not
+  // part paid (money QA 2026-11-15, D-03).
+  if (
+    ["partially_paid", "sent", "overdue"].includes(status)
+    && invoice.amount_to_pay !== undefined && invoice.amount_to_pay !== null
+    && toCents(Number(invoice.amount_to_pay)) <= 0
+    && (toCents(Number(invoice.prepayment_applied_amount ?? 0)) > 0
+      || toCents(Number(invoice.advance_credit_available ?? 0)) > 0)
+  ) {
+    return "paid";
+  }
+  return status;
 }
 
 /** The active dunning block of an invoice (list or detail payload). */
@@ -402,7 +415,11 @@ export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: Invo
     return invoiceType === "interim"
       && quote.line_items.some((line) => Number(line.remaining_quantity ?? 0) > 0);
   }
-  if (invoiceType === "advance" && quote.active_invoice_types?.includes("advance")) return false;
+  // Beside issued prepayment advances a raised prepayment is billed as the
+  // difference (money QA 2026-11-15, S2-2).
+  if (invoiceType === "advance" && quote.active_invoice_types?.includes("advance")) {
+    return supplementaryAdvancePossible(quote);
+  }
   return quote.line_items.some((line) => invoiceLineQuantityAvailable(line, "final") > 0);
 }
 
@@ -465,21 +482,36 @@ export function calculateInvoiceSelectionTotals(
   );
 }
 
-/** The order's required prepayment offered for an advance invoice, if configured. */
+/**
+ * The prepayment an advance invoice still has to bill: the order's required
+ * prepayment less what its advances already bill (money QA 2026-11-15,
+ * S1-1/S2-2), if anything is left.
+ */
 export function quoteRequiredPrepayment(quote: QuoteOption | null | undefined): number | null {
   const amount = Number(quote?.order_prepayment_amount ?? "");
-  return Number.isFinite(amount) && amount > 0 ? roundCents(amount) : null;
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const billed = Number(quote?.order_advances_billed ?? 0);
+  const open = roundCents(amount - (Number.isFinite(billed) ? Math.max(0, billed) : 0));
+  return open > 0 ? open : null;
+}
+
+/** A further prepayment advance beside the issued ones on this quote. */
+export function supplementaryAdvancePossible(quote: QuoteOption | null | undefined) {
+  return Boolean(quote) && quote?.supplementary_advance_blocked === false
+    && quoteRequiredPrepayment(quote) != null;
 }
 
 /**
  * What the advance invoice bills: the required prepayment when the order has
  * one (and the form did not switch to positions), otherwise the positions.
+ * Beside an issued advance only the prepayment difference.
  */
 export function effectiveAdvanceBasis(
   form: Pick<CreateForm, "invoiceType" | "advanceBasis">,
   quote: QuoteOption | null | undefined,
 ): AdvanceBasis | null {
   if (form.invoiceType !== "advance") return null;
+  if (quote?.active_invoice_types?.includes("advance")) return "prepayment";
   return form.advanceBasis === "prepayment" && quoteRequiredPrepayment(quote) != null
     && !prepaymentExceedsUnbilledQuote(quote)
     ? "prepayment"
@@ -806,6 +838,18 @@ export function formatCurrency(value: unknown, _locale = "de-DE", currency = "EU
  * Whether credited advances alone settled the invoice: no cash on the invoice
  * itself and nothing left to pay. A partly credited invoice is not "covered".
  */
+/**
+ * An advance deducted on an issued final invoice is part of that document:
+ * only the Storno of the final releases it (money QA 2026-11-15, S1-2).
+ */
+export function prepaymentLockedByFinal(
+  invoice: Pick<InvoiceItem, "invoice_type" | "status" | "released_at">,
+) {
+  return invoice.invoice_type === "final"
+    && invoice.status !== "cancelled"
+    && isInvoiceReleased(invoice);
+}
+
 export function isCoveredByPrepaymentOnly(
   invoice: Pick<InvoiceItem, "paid_amount" | "prepayment_applied_amount" | "balance_due">,
 ) {

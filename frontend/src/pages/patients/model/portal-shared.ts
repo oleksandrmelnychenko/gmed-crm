@@ -370,12 +370,14 @@ export function portalInvoicePaidByRepresentative(
  * invoice is never the patient's to prove (owner 2026-11-12 #7, QA F-x6).
  */
 export function portalInvoiceNeedsPaymentProof(
-  invoice: Pick<PortalInvoiceItem, "status" | "last_payment_proof_at" | "third_party_payer">,
+  invoice: Pick<PortalInvoiceItem, "status" | "last_payment_proof_at" | "third_party_payer">
+    & Partial<Pick<PortalInvoiceItem, "amount_to_pay" | "balance_due">>,
 ): boolean {
   return (
     !["paid", "cancelled"].includes(invoice.status) &&
     !invoice.last_payment_proof_at &&
-    !portalInvoiceIsThirdParty(invoice)
+    !portalInvoiceIsThirdParty(invoice) &&
+    !portalInvoiceNothingToPay(invoice)
   );
 }
 
@@ -388,6 +390,33 @@ export function portalInvoiceNeedsNoPaymentProof(
 ): boolean {
   return ["paid", "cancelled", "credited"].includes(invoice.display_status ?? invoice.status)
     || ["paid", "cancelled"].includes(invoice.status);
+}
+
+/**
+ * The status shown: a settlement invoice the advances cover in full reads
+ * paid, not part paid (money QA 2026-11-15, D-03).
+ */
+export function portalInvoiceShownStatus(
+  invoice: { status: string; display_status?: string; amount_to_pay?: unknown; balance_due?: unknown },
+): string {
+  const status = invoice.display_status ?? invoice.status;
+  return ["partially_paid", "sent", "overdue"].includes(status) && portalInvoiceNothingToPay(invoice)
+    ? "paid"
+    : status;
+}
+
+/**
+ * Nothing left to pay (settled by advances or credit): no payment receipt is
+ * asked for (money QA 2026-11-15). Unknown amounts count as open.
+ */
+export function portalInvoiceNothingToPay(
+  invoice: { status: string; amount_to_pay?: unknown; balance_due?: unknown },
+): boolean {
+  if (invoice.status === "draft") return false;
+  const raw = invoice.amount_to_pay ?? invoice.balance_due;
+  if (raw === undefined || raw === null || raw === "") return false;
+  const due = Number(raw);
+  return Number.isFinite(due) && Math.round(due * 100) <= 0;
 }
 
 /**

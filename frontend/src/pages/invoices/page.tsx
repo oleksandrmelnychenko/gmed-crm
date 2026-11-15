@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { hasFormChanges } from "@/lib/form-changes";
-import { moneyInputMessage, moneyInputProblem, moneyInputText, parseMoneyInput } from "@/lib/money";
+import { moneyInputMessage, moneyInputProblem, moneyInputText, parseMoneyInput, roundCents } from "@/lib/money";
 import { MoneyInput } from "@/components/ui/money-input";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -107,6 +107,13 @@ import { TerminationSettlementQueue } from "./termination-settlement/queue";
 import { ConciergeBillingQueue, useConciergeBillingQueueCount } from "./concierge-billing/queue";
 import { canReadConciergeBillingQueue, conciergeQueueBadge } from "./concierge-billing/model";
 import { PaymentEditForm } from "./ui/payment-edit-form";
+import { PaymentCategorySplit } from "./ui/payment-category-split";
+import {
+  paymentSplitOffered,
+  paymentSplitPayload,
+  paymentSplitProblem,
+  type PaymentSplitValues,
+} from "./model/payment-split";
 import { CreditNoteForm, CreditNoteLinesSummary } from "./ui/credit-note-form";
 import {
   creditedSupplierCostGross,
@@ -236,6 +243,7 @@ import {
   payerRelationOptionLabel,
   invoicesPermissions,
   isCoveredByPrepaymentOnly,
+  prepaymentLockedByFinal,
   nextDunningLevel,
   dunningLetterFileName,
 } from "./model/invoice-model";
@@ -869,6 +877,7 @@ function useStaffInvoicesPageContent() {
         ?? trimmedName;
     }
     if (key?.trim()) return formatUnknownValue(key, t);
+    if (source === "quote") return lang === "de" ? "Angebot" : "Предложение";
     if (source?.trim()) return vatSourceLabel(source);
     return text.vatSource;
   };
@@ -1120,6 +1129,8 @@ function useStaffInvoicesPageContent() {
     newPaymentDraft(undefined),
   );
   const paymentForm = paymentDraft.draft;
+  // VAT split of a part payment on an advance set by hand (owner 2026-11-15); null = pro rata.
+  const [paymentSplit, setPaymentSplit] = useState<PaymentSplitValues | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const paymentInFlight = useRef(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -1282,6 +1293,7 @@ function useStaffInvoicesPageContent() {
   useEffect(() => {
     // A prefill, not an edit: the open balance received today is the baseline.
     resetPaymentForm(newPaymentDraft(detail?.balance_due));
+    setPaymentSplit(null);
     setPaymentError(null);
     setReversingPaymentId("");
     setReversalNote("");
@@ -2138,6 +2150,15 @@ function useStaffInvoicesPageContent() {
     }
   }
 
+  const paymentSplitShown = Boolean(
+    detail?.invoice_type === "advance"
+      && detail.advance_categories
+      && !detail.advance_categories.split_frozen
+      && paymentSplitOffered(detail.advance_categories.categories, parseMoneyInput(paymentForm.amountGross)),
+  );
+  const paymentSplitInvalid = paymentSplitShown && paymentSplit !== null
+    && paymentSplitProblem(detail?.advance_categories?.categories, parseMoneyInput(paymentForm.amountGross), paymentSplit, lang) !== null;
+
   async function handleRecordPayment() {
     if (!detail) return;
     // Never a click that does nothing (QA 2026-11-15, A-8): what holds the
@@ -2149,7 +2170,7 @@ function useStaffInvoicesPageContent() {
       setPaymentError(moneyInputMessage(amountProblem, lang));
       return;
     }
-    if (paymentDateRefused) return;
+    if (paymentDateRefused || paymentSplitInvalid) return;
     // A second click before the busy state re-renders the button does nothing;
     // the server also replays a repeated request id instead of booking twice.
     if (paymentInFlight.current) return;
@@ -2168,7 +2189,11 @@ function useStaffInvoicesPageContent() {
         // The notice above the button showed the excess before this click.
         accept_overpayment: overpaymentConfirmed(overpaymentAcceptedFor, paymentForm.amountGross)
           && paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0,
+        ...(paymentSplitShown && paymentSplit
+          ? { category_split: paymentSplitPayload(detail.advance_categories?.categories, paymentSplit) }
+          : {}),
       });
+      setPaymentSplit(null);
       // The booked payment leaves an empty form (amount, today, bank transfer,
       // no overpayment confirmation), so a second click cannot book it again
       // (QA 2026-11-11, N2). The reload prefills a remaining balance.
@@ -3412,11 +3437,30 @@ function useStaffInvoicesPageContent() {
                             : formatMoney(detail.paid_amount, detail?.currency)
                         }
                       />
-                      <SummaryLine
-                        label={text.prepaymentApplied}
-                        value={formatMoney(detail.prepayment_applied_amount ?? 0, detail?.currency)}
-                      />
-                      <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due, detail?.currency)} />
+                      {/* A final draft shows the advance its release deducts (money QA 2026-11-15, S3-3). */}
+                      {detail.status === "draft" && Number(detail.expected_prepayment_gross ?? 0) > 0 ? (
+                        <>
+                          <SummaryLine
+                            label={lang === "de" ? "Anzurechnende Vorauszahlung" : "Предоплата к зачёту"}
+                            value={formatMoney(detail.expected_prepayment_gross, detail?.currency)}
+                          />
+                          <SummaryLine
+                            label={text.balanceDue}
+                            value={formatMoney(
+                              Math.max(0, roundCents(Number(detail.balance_due ?? 0) - Number(detail.expected_prepayment_gross ?? 0))),
+                              detail?.currency,
+                            )}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <SummaryLine
+                            label={text.prepaymentApplied}
+                            value={formatMoney(detail.prepayment_applied_amount ?? 0, detail?.currency)}
+                          />
+                          <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due, detail?.currency)} />
+                        </>
+                      )}
                       {Number(detail.advance_credit_available ?? 0) > 0 ? (
                         <>
                           <SummaryLine
@@ -3523,6 +3567,16 @@ function useStaffInvoicesPageContent() {
                             className={shellInputClassName}
                           />
                         </Field>
+                        {paymentSplitShown && detail.advance_categories ? (
+                          <PaymentCategorySplit
+                            lang={lang}
+                            categories={detail.advance_categories.categories}
+                            amount={parseMoneyInput(paymentForm.amountGross)}
+                            value={paymentSplit}
+                            disabled={paymentBusy}
+                            onChange={setPaymentSplit}
+                          />
+                        ) : null}
                         <Field label={text.paymentMethod}>
                           <NativeComboboxSelect
                             value={paymentForm.paymentMethod}
@@ -3639,6 +3693,7 @@ function useStaffInvoicesPageContent() {
                             disabled={
                               paymentBusy ||
                               paymentDateRefused ||
+                              paymentSplitInvalid ||
                               !(parseMoneyInput(paymentForm.amountGross) > 0) ||
                               !paymentForm.receivedOn ||
                               // An overpayment is booked only when confirmed for this amount (R4-6).
@@ -3792,6 +3847,12 @@ function useStaffInvoicesPageContent() {
                                   cancelLabel={t.common_cancel}
                                   onCancel={() => setEditingPaymentId("")}
                                   onDirtyChange={setPaymentCorrectionDirty}
+                                  splitCategories={
+                                    detail.invoice_type === "advance" && detail.advance_categories && !detail.advance_categories.split_frozen
+                                      // The server checks the open amounts after reversing this receipt.
+                                      ? detail.advance_categories.categories.map((category) => ({ ...category, open_gross: category.gross }))
+                                      : null
+                                  }
                                   onSubmit={(payload) => void handleCorrectPayment(payment.id, payload)}
                                 />
                               ) : null}
@@ -4235,7 +4296,8 @@ function useStaffInvoicesPageContent() {
                               <span className="font-mono font-semibold tabular-nums text-foreground">
                                 {formatMoney(allocation.amount_gross, detail?.currency)}
                               </span>
-                              {access.canManage ? (
+                              {/* An advance deducted on an issued final invoice goes only with its Storno (money QA 2026-11-15, S1-2). */}
+                              {access.canManage && !prepaymentLockedByFinal(detail) ? (
                                 <Button
                                   type="button"
                                   variant="ghost"

@@ -10,6 +10,7 @@ import type {
   InvoiceRefundHistoryResponse,
   OrderOption,
   PatientOption,
+  PrepaymentAdvancePreview,
   QuoteOption,
 } from "../model/types";
 import type { DraftEditorPayload } from "../model/draft-editor";
@@ -92,6 +93,15 @@ export function fetchAccountingLedger(year: string, currency = "EUR") {
   return apiFetch<AccountingLedgerPayload>(
     `/invoices/accounting-ledger?year=${encodeURIComponent(year)}&currency=${encodeURIComponent(currency)}`,
   );
+}
+
+/**
+ * The prepayment advance the server would create from the quote, built by
+ * the same code as the invoice (money QA 2026-11-15): the dialog shows this
+ * split instead of computing its own.
+ */
+export function fetchPrepaymentAdvancePreview(quoteId: string) {
+  return apiFetch<PrepaymentAdvancePreview>(`/quotes/${quoteId}/advance-preview`);
 }
 
 export function createInvoice(quoteId: string, payload: JsonPayload) {

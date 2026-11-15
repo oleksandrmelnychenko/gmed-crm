@@ -9,7 +9,7 @@ import { inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { hasFormChanges } from "@/lib/form-changes";
 import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount, moneyInputText } from "@/lib/money";
+import { formatMoneyAmount, moneyInputText, parseMoneyInput } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
@@ -19,7 +19,9 @@ import {
   paymentCorrectionProblem,
   type PaymentCorrectionForm,
 } from "../model/payment-correction";
-import type { InvoicePaymentTransaction } from "../model/types";
+import { paymentSplitOffered, paymentSplitPayload, paymentSplitProblem, type PaymentSplitValues } from "../model/payment-split";
+import type { AdvanceCategory, InvoicePaymentTransaction } from "../model/types";
+import { PaymentCategorySplit } from "./payment-category-split";
 import { GuardedDateInput } from "./guarded-date-input";
 
 type PaymentEditFormProps = {
@@ -37,7 +39,9 @@ type PaymentEditFormProps = {
   onCancel: () => void;
   /** Reports whether the correction differs from the recorded payment. */
   onDirtyChange?: (dirty: boolean) => void;
-  onSubmit: (payload: ReturnType<typeof buildPaymentCorrectionPayload>) => void;
+  /** Advance: its VAT categories, so the corrected receipt can be split by hand (owner 2026-11-15). */
+  splitCategories?: AdvanceCategory[] | null;
+  onSubmit: (payload: ReturnType<typeof buildPaymentCorrectionPayload> & { category_split?: ReturnType<typeof paymentSplitPayload> }) => void;
 };
 
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
@@ -59,6 +63,7 @@ export function PaymentEditForm({
   cancelLabel,
   onCancel,
   onDirtyChange,
+  splitCategories,
   onSubmit,
 }: PaymentEditFormProps) {
   const de = lang === "de";
@@ -75,7 +80,14 @@ export function PaymentEditForm({
   }));
   const [form, setForm] = useState<PaymentCorrectionForm>(initialForm);
   const [dateRefused, setDateRefused] = useState(false);
-  const problem = paymentCorrectionProblem(form, payment);
+  const [split, setSplit] = useState<PaymentSplitValues | null>(null);
+  const amount = parseMoneyInput(form.amountGross);
+  const splitShown = Boolean(splitCategories && paymentSplitOffered(splitCategories, amount));
+  const splitActive = splitShown && split !== null;
+  const splitInvalid = splitActive && paymentSplitProblem(splitCategories ?? [], amount, split ?? {}, lang) !== null;
+  const formProblem = paymentCorrectionProblem(form, payment);
+  // Changing only the VAT split is a correction too.
+  const problem = formProblem === "unchanged" && splitActive && form.reason.trim() ? null : formProblem;
   const overpayment = paymentCorrectionOverpayment(form, maxAmount);
   const set = (patch: Partial<PaymentCorrectionForm>) => {
     const next = { ...form, ...patch };
@@ -93,6 +105,16 @@ export function PaymentEditForm({
             className={inputClass}
           />
         </Field>
+        {splitShown && splitCategories ? (
+          <PaymentCategorySplit
+            lang={lang}
+            categories={splitCategories}
+            amount={amount}
+            value={split}
+            disabled={busy}
+            onChange={setSplit}
+          />
+        ) : null}
         <Field label={de ? "Zahlungsart" : "Способ оплаты"}>
           <NativeComboboxSelect
             value={form.paymentMethod}
@@ -157,8 +179,13 @@ export function PaymentEditForm({
         </Button>
         <Button
           type="button"
-          disabled={busy || problem !== null || dateRefused}
-          onClick={() => onSubmit(buildPaymentCorrectionPayload(form, maxAmount))}
+          disabled={busy || problem !== null || dateRefused || splitInvalid}
+          onClick={() =>
+            onSubmit({
+              ...buildPaymentCorrectionPayload(form, maxAmount),
+              ...(splitActive && split ? { category_split: paymentSplitPayload(splitCategories ?? [], split) } : {}),
+            })
+          }
         >
           {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
           {de ? "Korrektur speichern" : "Сохранить исправление"}

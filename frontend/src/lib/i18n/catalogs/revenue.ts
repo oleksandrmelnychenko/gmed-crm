@@ -1279,7 +1279,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoice_status_paid: "Оплачен",
   revenue_invoice_status_overdue: "Просрочен",
   revenue_invoice_status_cancelled: "Отменён",
-  revenue_invoice_status_credited: "Сторнирован",
+  revenue_invoice_status_credited: "Закрыт кредит-нотой",
   revenue_invoices_storno_title: "Документ сторно",
   revenue_invoices_storno_download: "Сторно (PDF)",
   revenue_invoices_status_reason: "Причина",

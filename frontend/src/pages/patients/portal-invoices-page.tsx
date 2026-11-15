@@ -59,6 +59,8 @@ import {
   portalInvoiceIsThirdParty,
   portalInvoiceNeedsNoPaymentProof,
   portalInvoiceNeedsPaymentProof,
+  portalInvoiceNothingToPay,
+  portalInvoiceShownStatus,
   portalInvoicePaidByRepresentative,
   portalThirdPartyPayerLabel,
   portalOwnOpenBalances,
@@ -132,7 +134,7 @@ function portalInvoiceNetTotal(invoice: { total_gross?: unknown; credited_amount
 function portalAccountStateLabel(state: string, lang: string) {
   const labels: Record<string, [string, string]> = {
     paid: ["Bezahlt", "Оплачено"],
-    credited: ["Storniert", "Сторнирован"],
+    credited: ["Gutgeschrieben", "Закрыт кредит-нотой"],
     partially_paid: ["Teilweise bezahlt", "Частично оплачено"],
     unpaid: ["Nicht bezahlt", "Не оплачено"],
     amount_hidden: ["Betrag nicht freigegeben", "Сумма не открыта для просмотра"],
@@ -861,7 +863,7 @@ function usePatientInvoicesPageContent() {
                         ) : null}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground"><PortalDateChip timestamp={invoice.issued_at} /></td>
-                      <td className="px-4 py-3"><StatusBadge status={invoice.display_status ?? invoice.status}>{portalStatusLabel(invoice.display_status ?? invoice.status)}</StatusBadge></td>
+                      <td className="px-4 py-3"><StatusBadge status={portalInvoiceShownStatus(invoice)}>{portalStatusLabel(portalInvoiceShownStatus(invoice))}</StatusBadge></td>
                       <td className="px-4 py-3"><StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>{invoiceTypeLabel(invoice.invoice_type)}</StatusBadge></td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">
                         {amountsVisible ? formatPortalCurrency(portalInvoiceNetTotal(invoice), invoice.currency) : t.portal_invoices_hidden}
@@ -900,8 +902,8 @@ function usePatientInvoicesPageContent() {
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <StatusBadge status={invoice.display_status ?? invoice.status}>
-                        {portalStatusLabel(invoice.display_status ?? invoice.status)}
+                      <StatusBadge status={portalInvoiceShownStatus(invoice)}>
+                        {portalStatusLabel(portalInvoiceShownStatus(invoice))}
                       </StatusBadge>
                       <StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>
                         {invoiceTypeLabel(invoice.invoice_type)}
@@ -993,8 +995,8 @@ function usePatientInvoicesPageContent() {
                         <Download className="size-4" />
                         {t.portal_invoices_download_pdf}
                       </Button>
-                      <StatusBadge status={detail.display_status ?? detail.status}>
-                        {portalStatusLabel(detail.display_status ?? detail.status)}
+                      <StatusBadge status={portalInvoiceShownStatus(detail)}>
+                        {portalStatusLabel(portalInvoiceShownStatus(detail))}
                       </StatusBadge>
                       {detail.status === "cancelled" && detail.has_storno_document !== false && invoicePdfVisible(detail) ? (
                         <Button
@@ -1301,10 +1303,12 @@ function usePatientInvoicesPageContent() {
                           ? lang === "de"
                             ? "Diese Rechnung zahlt der Zahler; von Ihnen ist kein Zahlungsnachweis nötig."
                             : "Этот счёт оплачивает плательщик; подтверждение оплаты от вас не нужно."
+                          : portalInvoiceNothingToPay(detail)
+                          ? null
                           : t.portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were}
                       </p>
                     </div>
-                    {detailIsThirdParty ? null : (
+                    {detailIsThirdParty || portalInvoiceNothingToPay(detail) ? null : (
                       <Button
                         type="button"
                         className={tokens.control.primaryButton}

@@ -1,5 +1,5 @@
 import { SectionHeading } from "@/components/ui/section-heading";
-import { useEffect, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { FilePlus2, ReceiptText, NotebookPen, Banknote, BookMarked, ListOrdered, Calculator, AlertCircle, FileText, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,13 +30,15 @@ import {
   isOverageOnlyInvoice,
   isQuoteAvailableForInvoice,
   isQuoteClosedForInvoicing,
-  prepaymentAdvanceSplit,
+
   prepaymentExceedsUnbilledQuote,
   quoteRequiredPrepayment,
 } from "../model/invoice-model";
 import { roundCents } from "@/lib/money";
 import { partlyCreditedHint } from "../model/billing-release";
-import type { CreateForm, InvoiceType, QuoteOption } from "../model/types";
+import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
+import { localizeInvoiceError } from "../model/invoice-errors";
+import type { CreateForm, InvoiceType, PrepaymentAdvancePreview, QuoteOption } from "../model/types";
 
 type Props = {
   open: boolean;
@@ -84,15 +86,49 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const advanceBasis = effectiveAdvanceBasis(form, selectedQuote);
   const prepaymentBasis = advanceBasis === "prepayment";
   const prepaymentBlocked = prepaymentExceedsUnbilledQuote(selectedQuote);
-  const prepaymentSplit = prepaymentBasis && requiredPrepayment != null
-    ? prepaymentAdvanceSplit(lines, requiredPrepayment)
+  // The split comes from the server, built by the code that creates the
+  // advance (money QA 2026-11-15, S2-1): what is shown is what is created.
+  const prepaymentMode = prepaymentBasis && requiredPrepayment != null;
+  const previewQuoteId = prepaymentMode ? selectedQuote?.id ?? "" : "";
+  const [preview, setPreview] = useState<{ quoteId: string; data?: PrepaymentAdvancePreview; error?: string } | null>(null);
+  useEffect(() => {
+    if (!open || !previewQuoteId) return;
+    let cancelled = false;
+    setPreview({ quoteId: previewQuoteId });
+    fetchPrepaymentAdvancePreview(previewQuoteId)
+      .then((data) => { if (!cancelled) setPreview({ quoteId: previewQuoteId, data }); })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setPreview({
+            quoteId: previewQuoteId,
+            error: localizeInvoiceError(error, lang, de ? "Vorschau nicht verfügbar." : "Предпросмотр недоступен."),
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [open, previewQuoteId, requiredPrepayment, lang, de]);
+  const currentPreview = preview && preview.quoteId === previewQuoteId ? preview : null;
+  const prepaymentSplit = prepaymentMode && currentPreview?.data
+    ? {
+        lines: currentPreview.data.lines.map((line) => ({
+          isCostPassthrough: line.is_cost_passthrough,
+          vatRate: Number(line.vat_rate),
+          net: Number(line.net),
+          vat: Number(line.vat),
+          gross: Number(line.gross),
+        })),
+        net: Number(currentPreview.data.total_net),
+        vat: Number(currentPreview.data.total_vat),
+        gross: Number(currentPreview.data.total_gross),
+      }
     : null;
+  const previewError = prepaymentMode ? currentPreview?.error ?? null : null;
   const selectionTotals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
-  const packageOverage = prepaymentSplit
+  const packageOverage = prepaymentMode
     ? { net: 0, vat: 0, gross: 0 }
     : invoiceSelectionPackageOverage(selectedQuote, lines, form);
-  const totals = prepaymentSplit
-    ? { ...selectionTotals, net: prepaymentSplit.net, vat: prepaymentSplit.vat, gross: prepaymentSplit.gross }
+  const totals = prepaymentMode
+    ? { ...selectionTotals, net: prepaymentSplit?.net ?? 0, vat: prepaymentSplit?.vat ?? 0, gross: prepaymentSplit?.gross ?? 0 }
     : {
         ...selectionTotals,
         net: roundCents(selectionTotals.net + packageOverage.net),
@@ -103,22 +139,22 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const overageOnly = isOverageOnlyInvoice(selectedQuote, form);
   const interimLimit = overageOnly ? null : interimLimitBesideOpenAdvance(selectedQuote, lines, form);
   const overOpenAdvance = interimLimit != null && selectionTotals.gross > interimLimit.maxGross;
-  const valid = prepaymentSplit
-    ? quoteAvailable && prepaymentSplit.gross > 0
+  const valid = prepaymentMode
+    ? quoteAvailable && Boolean(prepaymentSplit && prepaymentSplit.gross > 0)
     : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form)) && totals.gross > 0 && !overOpenAdvance;
-  const footerMessage = error || optionsError || (selectedQuote && !valid
+  const footerMessage = error || optionsError || previewError || (selectedQuote && !valid && !(prepaymentMode && !prepaymentSplit)
     ? overOpenAdvance
       ? (de
           ? `Die offene Vorauszahlungsrechnung fordert bereits ${money(interimLimit.openAdvance)} für dieses Angebot. Diese Zwischenrechnung darf höchstens ${money(interimLimit.maxGross)} betragen.`
           : `Неоплаченный счёт на предоплату уже требует ${money(interimLimit.openAdvance)} по этому предложению. Этот промежуточный счёт — не больше ${money(interimLimit.maxGross)}.`)
       : (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.")
     : null);
-  const footerError = Boolean(error || optionsError);
+  const footerError = Boolean(error || optionsError || previewError);
   const final = form.invoiceType === "final";
   const servicesOutsideQuote = selectedQuote?.services_outside_quote ?? [];
   // Transit lines billed while receipts of the order are already re-billed:
   // the same cost may be billed twice (owner 2026-11-12, C-2). Warning only.
-  const selectedTransitLines = prepaymentSplit
+  const selectedTransitLines = prepaymentMode
     ? []
     : form.selectedLineIndexes.map((index) => lines[index]).filter((line) => line?.is_cost_passthrough);
   const transitRebilledReceipts = useOrderRebilledReceipts({
@@ -246,7 +282,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       ["positions", de ? "Ausgewählte Angebotspositionen" : "Выбранные позиции предложения"],
                     ] as const).map(([basis, label]) => (
                       <label key={basis} className="flex items-center gap-2 text-sm text-foreground">
-                        <input type="radio" name="advance-basis" value={basis} checked={advanceBasis === basis} disabled={formBusy || (basis === "prepayment" && prepaymentBlocked)}
+                        <input type="radio" name="advance-basis" value={basis} checked={advanceBasis === basis} disabled={formBusy || (basis === "prepayment" && prepaymentBlocked) || (basis === "positions" && Boolean(selectedQuote.active_invoice_types?.includes("advance")))}
                           onChange={() => onFormChange((current) => ({ ...current, advanceBasis: basis }))} />
                         {label}
                       </label>
@@ -261,13 +297,18 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   </fieldset>
                 ) : null}
 
-                {prepaymentSplit ? (
+                {prepaymentMode ? (
                   <section aria-label={de ? "Anzahlung" : "Предоплата"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card" data-testid="invoice-prepayment-advance">
                     <div className="border-b border-border px-3 py-2.5">
                       <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={Banknote}>{de ? "Anzahlung" : "Предоплата"}</SectionHeading></h3>
                     </div>
+                    {!prepaymentSplit && !previewError ? (
+                      <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground" role="status">
+                        <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                      </div>
+                    ) : null}
                     <div className="divide-y divide-border">
-                      {prepaymentSplit.lines.map((line) => (
+                      {(prepaymentSplit?.lines ?? []).map((line) => (
                         <div key={`${line.isCostPassthrough}-${line.vatRate}`} className="flex flex-wrap items-baseline justify-between gap-3 p-3 text-sm">
                           <span>
                             {line.isCostPassthrough
@@ -282,7 +323,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   </section>
                 ) : null}
 
-                {prepaymentSplit ? null : (
+                {prepaymentMode ? null : (
                 <section aria-label={de ? "Rechnungspositionen" : "Позиции счёта"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
                     <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={ListOrdered}>{de ? "Rechnungspositionen" : "Позиции счёта"}</SectionHeading>
@@ -409,7 +450,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t.invoices_vat}</dt><dd>{money(totals.vat)}</dd></div>
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
-                  {selectedQuote && !prepaymentSplit && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
+                  {selectedQuote && !prepaymentMode && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>
             </div>

@@ -10,8 +10,8 @@ export type InvoiceStatus =
   | "cancelled";
 
 /**
- * Status shown to users: the stored status, or `credited` (RU "Сторнирован",
- * DE "Storniert") for an issued invoice fully covered by credit notes.
+ * Status shown to users: the stored status, or `credited` (RU "Закрыт кредит-нотой",
+ * DE "Gutgeschrieben") for an issued invoice fully covered by credit notes.
  */
 export type InvoiceDisplayStatus = InvoiceStatus | "credited";
 
@@ -466,6 +466,29 @@ export type InvoiceItem = {
   payment_proofs?: InvoicePaymentProof[];
   /** Re-billed supplier costs this invoice bills (unbilled by a credit note below them). */
   supplier_cost_allocated_gross?: unknown;
+  /** Issued advances: VAT categories with paid/open, and whether a payment split can still be set. */
+  advance_categories?: { split_frozen: boolean; categories: AdvanceCategory[] } | null;
+  /** Final-invoice drafts: the advance money the release will deduct. */
+  expected_prepayment_gross?: string | null;
+};
+
+/** `GET /quotes/{id}/advance-preview`: the advance creation would make. */
+export type PrepaymentAdvancePreview = {
+  quote_id: string;
+  billed_advances_gross: string;
+  total_net: string;
+  total_vat: string;
+  total_gross: string;
+  lines: { is_cost_passthrough: boolean; vat_rate: string; net: string; vat: string; gross: string }[];
+};
+
+/** One VAT category of an issued advance with what is paid and open in it. */
+export type AdvanceCategory = {
+  kind: "taxed" | "zero_rated" | "passthrough";
+  vat_rate: string;
+  gross: string;
+  paid_gross: string;
+  open_gross: string;
 };
 
 export type InvoiceListResponse = {
@@ -585,6 +608,10 @@ export type QuoteOption = {
   /** The order's required prepayment: the default amount of an advance invoice. */
   order_prepayment_amount?: string | null;
   order_prepayment_required?: boolean;
+  /** What the order's active advances already bill. */
+  order_advances_billed?: string;
+  /** A raised prepayment cannot be billed on this quote as a further advance. */
+  supplementary_advance_blocked?: boolean;
   total_gross: unknown;
   line_items: InvoiceLineItem[];
 };
