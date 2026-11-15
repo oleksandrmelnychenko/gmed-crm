@@ -101,6 +101,17 @@ pub(super) fn own_services_first(amount: Decimal, groups: &[AdvanceGroup]) -> Ve
     shares
 }
 
+/// The editor's default split: own services first, but no group above what
+/// it has open (C-S3-3); a rest that fits nowhere stays unassigned, so the
+/// editor shows the shares do not add up instead of proposing an over-share.
+pub(super) fn capped_default_split(amount: Decimal, groups: &[AdvanceGroup]) -> Vec<Decimal> {
+    own_services_first(amount, groups)
+        .into_iter()
+        .zip(groups)
+        .map(|(share, group)| share.min(group.open_gross.max(Decimal::ZERO)))
+        .collect()
+}
+
 fn distribute(shares: &mut [Decimal], groups: &[AdvanceGroup], passthrough: bool, amount: Decimal) {
     let indices = groups
         .iter()
@@ -146,6 +157,10 @@ pub(super) fn manual_split(
             group.is_cost_passthrough == *is_cost_passthrough
                 && group.vat_rate.normalize() == vat_rate
         }) else {
+            // A group no longer open is shown with its old share; zero is fine.
+            if gross.is_zero() {
+                continue;
+            }
             return Err("The split names a VAT group the quote does not have open");
         };
         if named[index] {
@@ -538,8 +553,28 @@ pub(super) async fn get_invoice_draft_editor(
             }
         } else {
             match load_prepayment_advance_groups(&state, &ctx).await {
-                Ok((groups, _)) => {
+                Ok((mut groups, _)) => {
                     let current = advance_line_shares(&draft.line_items);
+                    // A share of a group no longer open is shown too (open 0),
+                    // so the shown shares add up to the amount (C-S3-3).
+                    for ((passthrough, rate), gross) in &current {
+                        if *gross > Decimal::ZERO
+                            && !groups.iter().any(|group| {
+                                group_key(group.is_cost_passthrough, group.vat_rate)
+                                    == (*passthrough, *rate)
+                            })
+                        {
+                            groups.push(AdvanceGroup {
+                                is_cost_passthrough: *passthrough,
+                                vat_rate: *rate,
+                                open_gross: Decimal::ZERO,
+                            });
+                        }
+                    }
+                    groups.sort_by(|left, right| {
+                        (left.is_cost_passthrough, left.vat_rate)
+                            .cmp(&(right.is_cost_passthrough, right.vat_rate))
+                    });
                     let manual = draft
                         .line_items
                         .as_array()
@@ -551,7 +586,7 @@ pub(super) async fn get_invoice_draft_editor(
                     advance = json!({
                         "amount_gross": decimal_to_string(draft.total_gross),
                         "allocation": if manual { "manual" } else { "own_services_first" },
-                        "default_split": own_services_first(draft.total_gross, &groups)
+                        "default_split": capped_default_split(draft.total_gross, &groups)
                             .into_iter()
                             .map(decimal_to_string)
                             .collect::<Vec<_>>(),
@@ -817,6 +852,45 @@ pub(super) async fn update_invoice_draft(
                 return response;
             }
         }
+        if *kind == "advance_split" {
+            // With the quote locked, each share is checked again against
+            // what its group has open now (money QA 2026-11-15, C-S3-2).
+            let quote_id = locked.quote_id.unwrap_or_default();
+            if let Err(error) = sqlx::query("SELECT 1 FROM quotes WHERE id = $1 FOR UPDATE")
+                .bind(quote_id)
+                .execute(&mut *transaction)
+                .await
+            {
+                tracing::error!(%error, %invoice_id, "lock the quote of the advance draft");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+            }
+            let ctx = match editing_context(&state, invoice_id, quote_id).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
+            let groups = match load_prepayment_advance_groups(&state, &ctx).await {
+                Ok((groups, _)) => groups,
+                Err(response) => return response,
+            };
+            let shares = advance_line_shares(&snapshot.line_items);
+            let over = shares.iter().any(|((passthrough, rate), gross)| {
+                let open: Decimal = groups
+                    .iter()
+                    .filter(|group| {
+                        group_key(group.is_cost_passthrough, group.vat_rate)
+                            == group_key(*passthrough, *rate)
+                    })
+                    .map(|group| group.open_gross)
+                    .sum();
+                *gross > open
+            });
+            if over {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "A share exceeds what its VAT group has left to bill",
+                );
+            }
+        }
         if let Err(error) = sqlx::query(
             r#"UPDATE invoices
                SET line_items = $2, total_net = $3, total_vat = $4, total_gross = $5,
@@ -992,7 +1066,11 @@ pub(super) async fn discard_invoice_draft(
     // Quote quantities, concierge services and supplier invoices count only
     // for invoices that are not cancelled: the status frees them. Package
     // overages carry the invoice id and are unlinked.
+    // A draft holds no advance allocation (the database refuses them on
+    // drafts); should an old one exist, it goes with the draft and frees
+    // the advance money (C-S3-7).
     for statement in [
+        "DELETE FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
         "UPDATE invoices SET status = 'cancelled', updated_at = now() WHERE id = $1 AND status = 'draft' AND released_at IS NULL",
         "UPDATE service_package_consumptions SET invoice_id = NULL WHERE invoice_id = $1",
     ] {

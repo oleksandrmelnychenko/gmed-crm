@@ -476,13 +476,16 @@ pub(super) async fn make_room_for_credit_tx(
 
     let excess_prepayment = context.prepayment_applied_amount - remaining.max(Decimal::ZERO);
     if excess_prepayment > Decimal::ZERO {
-        sqlx::query("SELECT set_config('gmed.accounting_actor_id', $1, true)")
-            .bind(actor_id.to_string())
-            .execute(&mut **transaction)
-            .await
-            .map_err(|error| failed(error, "release actor"))?;
+        sqlx::query(
+            "SELECT set_config('gmed.accounting_actor_id', $1, true),
+                    set_config('gmed.prepayment_release_context', 'correction', true)",
+        )
+        .bind(actor_id.to_string())
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| failed(error, "release actor"))?;
         let allocations = sqlx::query(
-            r#"SELECT id, advance_invoice_id, amount_gross
+            r#"SELECT id, advance_invoice_id, amount_gross, vat_rows
                FROM invoice_prepayment_allocations
                WHERE target_invoice_id = $1
                ORDER BY created_at DESC, id DESC
@@ -514,11 +517,22 @@ pub(super) async fn make_room_for_credit_tx(
                 .map_err(|error| failed(error, "release prepayment allocation"))?;
             let keep = amount - take;
             if keep > Decimal::ZERO {
+                // The kept part keeps the VAT categories of the released one.
+                let kept_rows = allocation
+                    .try_get::<Option<Value>, _>("vat_rows")
+                    .unwrap_or_default()
+                    .and_then(|value| super::advance_rows::rows_from_json(&value))
+                    .map(|rows| {
+                        super::advance_rows::rows_to_json(&super::document::deducted_advance_rows(
+                            &rows, keep,
+                        ))
+                    });
                 let request_id = Uuid::new_v4();
                 let new_id = sqlx::query_scalar::<_, Uuid>(
                     r#"INSERT INTO invoice_prepayment_allocations (
-                            request_id, advance_invoice_id, target_invoice_id, amount_gross, created_by
-                       ) VALUES ($1, $2, $3, $4, $5)
+                            request_id, advance_invoice_id, target_invoice_id, amount_gross, created_by,
+                            vat_rows
+                       ) VALUES ($1, $2, $3, $4, $5, $6)
                        RETURNING id"#,
                 )
                 .bind(request_id)
@@ -526,6 +540,7 @@ pub(super) async fn make_room_for_credit_tx(
                 .bind(invoice_id)
                 .bind(keep)
                 .bind(actor_id)
+                .bind(kept_rows)
                 .fetch_one(&mut **transaction)
                 .await
                 .map_err(|error| failed(error, "re-apply prepayment"))?;

@@ -32,6 +32,7 @@ use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub(crate) mod advance_application;
+mod advance_rows;
 pub(crate) mod advance_settlement;
 mod concierge_lines;
 mod credit_note_pdf;
@@ -239,6 +240,10 @@ pub fn router() -> Router<AppState> {
             post(create_invoice_from_quote),
         )
         .route(
+            "/quotes/{quote_id}/advance-preview",
+            get(preview_prepayment_advance),
+        )
+        .route(
             "/patients/{patient_id}/billing-workspace",
             get(get_patient_billing_workspace),
         )
@@ -413,6 +418,119 @@ struct CreateInvoicePaymentRequest {
     accept_overpayment: Option<bool>,
     /// Remitter, when not the invoice recipient.
     payer_name: Option<String>,
+    /// How a part payment of an advance is split over its VAT categories,
+    /// set by hand (owner 2026-11-15); absent = pro rata.
+    category_split: Option<Vec<PaymentCategorySplitPart>>,
+}
+
+/// One part of a payment split: a VAT category of the advance
+/// (`taxed` with its rate, `zero_rated`, `passthrough`) and its gross.
+#[derive(Deserialize)]
+struct PaymentCategorySplitPart {
+    kind: String,
+    vat_rate: Option<MoneyInput>,
+    amount_gross: MoneyInput,
+}
+
+/// Parses a requested payment split; `Err` names the first invalid part.
+fn parse_payment_category_split(
+    parts: &[PaymentCategorySplitPart],
+) -> Result<Vec<(advance_rows::Category, Decimal)>, &'static str> {
+    parts
+        .iter()
+        .map(|part| {
+            let rate = match &part.vat_rate {
+                Some(value) => value.parse_decimal().ok_or("Invalid split VAT rate")?,
+                None => Decimal::ZERO,
+            };
+            let key = match part.kind.as_str() {
+                "taxed" if rate > Decimal::ZERO => advance_rows::category_for(false, rate),
+                "zero_rated" => advance_rows::category_for(false, Decimal::ZERO),
+                "passthrough" => advance_rows::category_for(true, Decimal::ZERO),
+                _ => return Err("Invalid split VAT category"),
+            };
+            let gross = part
+                .amount_gross
+                .parse_decimal()
+                .ok_or("Invalid split amount")?;
+            Ok((key, gross))
+        })
+        .collect()
+}
+
+/// Validates a requested split of a payment on an advance inside the
+/// payment transaction: only an advance, only before its money is deducted
+/// on a settlement invoice, never with an overpayment.
+async fn checked_payment_category_split(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+    invoice_type: &str,
+    amount_gross: Decimal,
+    overpayment_gross: Decimal,
+    parts: &[PaymentCategorySplitPart],
+) -> Result<Vec<document::VatBreakdownRow>, axum::response::Response> {
+    if invoice_type != "advance" {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only a payment on an advance invoice takes a VAT split",
+        ));
+    }
+    if overpayment_gross > Decimal::ZERO {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A split payment cannot exceed the open amount",
+        ));
+    }
+    let parts = parse_payment_category_split(parts)
+        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %invoice_id, "validate payment VAT split");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        )
+    };
+    let deducted: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM invoice_prepayment_allocations WHERE advance_invoice_id = $1)",
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(failed)?;
+    if deducted {
+        return Err(coded_err(
+            StatusCode::CONFLICT,
+            "advance_split_frozen",
+            "The advance is already deducted on a final invoice; its split is fixed",
+            json!({}),
+        ));
+    }
+    let (rows, paid) = advance_rows::advance_paid(&mut **transaction, invoice_id)
+        .await
+        .map_err(failed)?;
+    advance_rows::validate_payment_split(&rows, &paid, amount_gross, &parts)
+        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))
+}
+
+async fn store_payment_category_split(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+    payment_id: Uuid,
+    rows: &[document::VatBreakdownRow],
+    actor_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO invoice_payment_category_splits (
+                payment_transaction_id, invoice_id, rows, created_by
+           ) VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(payment_id)
+    .bind(invoice_id)
+    .bind(advance_rows::rows_to_json(rows))
+    .bind(actor_id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -428,6 +546,8 @@ struct CorrectInvoicePaymentRequest {
     /// Remitter of the corrected receipt; absent keeps the original one, an
     /// empty value clears it.
     payer_name: Option<String>,
+    /// VAT split of the corrected receipt on an advance; absent = pro rata.
+    category_split: Option<Vec<PaymentCategorySplitPart>>,
 }
 
 /// 409 for a receipt above the open balance that billing did not confirm as
@@ -988,7 +1108,9 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 /// advances available for crediting, the supporting documents list, the
 /// contract link, the credit-note form data, credit transfers (internal
 /// notes, other invoices) and the patient's relatives offered as payers.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 14] = [
+const STAFF_ONLY_INVOICE_KEYS: [&str; 16] = [
+    "advance_categories",
+    "expected_prepayment_gross",
     "dunning_block",
     "visibility_note",
     "internal_note",
@@ -1577,12 +1699,24 @@ async fn invoice_cash_lines(
     } else {
         CreditedAdvanceSplit::default()
     };
-    let targets = invoice_cash_targets(
-        context,
-        &credit_notes::load_active_credits(transaction, context.invoice_id).await?,
-        credited,
-        retained_gross,
-    );
+    // An advance with a payment split set by hand books what each VAT
+    // category received (owner 2026-11-15); otherwise pro rata as before.
+    let manual_splits =
+        advance_rows::manual_payment_splits(transaction, context.invoice_id).await?;
+    let targets = if manual_splits.is_empty() {
+        invoice_cash_targets(
+            context,
+            &credit_notes::load_active_credits(transaction, context.invoice_id).await?,
+            credited,
+            retained_gross,
+        )
+    } else {
+        advance_rows::advance_cash_targets(
+            &advance_rows::advance_rows(transaction, context.invoice_id).await?,
+            &manual_splits,
+            retained_gross,
+        )
+    };
     Ok(targets
         .into_iter()
         .map(|(category, target_gross, target_vat)| {
@@ -3621,8 +3755,22 @@ fn vat_source_explanation(
         "legacy" => {
             format!("VAT is a legacy snapshot on this service line at {rate_label}.")
         }
+        "quote" => format!("VAT comes from the quote at {rate_label}."),
         _ => format!("VAT source is not classified; invoice uses {rate_label}."),
     }
+}
+
+/// The VAT source of a line without an order service behind it: an advance
+/// line or a line copied from the quote takes the quote's VAT (money QA
+/// 2026-11-15, S3-2); only other lines are a legacy snapshot.
+fn fallback_vat_source(line: &serde_json::Map<String, Value>) -> &'static str {
+    let from_quote = line.contains_key("quote_id")
+        || line.contains_key("quote_line_index")
+        || line
+            .get("source")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source.starts_with("advance"));
+    if from_quote { "quote" } else { "legacy" }
 }
 
 async fn enrich_invoice_line_items(
@@ -3643,12 +3791,13 @@ async fn enrich_invoice_line_items(
                         .get("vat_rate")
                         .and_then(Value::as_str)
                         .map(ToOwned::to_owned);
+                    let fallback = fallback_vat_source(map);
                     map.entry("vat_source".to_string())
-                        .or_insert_with(|| serde_json::json!("legacy"));
+                        .or_insert_with(|| serde_json::json!(fallback));
                     map.entry("vat_source_explanation".to_string())
                         .or_insert_with(|| {
                             serde_json::json!(vat_source_explanation(
-                                "legacy",
+                                fallback,
                                 None,
                                 None,
                                 vat_rate.as_deref(),
@@ -3726,17 +3875,38 @@ async fn enrich_invoice_line_items(
                     for (key, value) in meta {
                         map.insert(key.clone(), value.clone());
                     }
+                    // A service without a classified source, billed from the
+                    // quote: the line's VAT is the quote's.
+                    if map.get("vat_source").and_then(Value::as_str) == Some("legacy")
+                        && fallback_vat_source(map) == "quote"
+                    {
+                        let vat_rate = map
+                            .get("vat_rate")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned);
+                        map.insert("vat_source".to_string(), json!("quote"));
+                        map.insert(
+                            "vat_source_explanation".to_string(),
+                            json!(vat_source_explanation(
+                                "quote",
+                                None,
+                                None,
+                                vat_rate.as_deref()
+                            )),
+                        );
+                    }
                 } else {
                     let vat_rate = map
                         .get("vat_rate")
                         .and_then(Value::as_str)
                         .map(ToOwned::to_owned);
+                    let fallback = fallback_vat_source(map);
                     map.entry("vat_source".to_string())
-                        .or_insert_with(|| serde_json::json!("legacy"));
+                        .or_insert_with(|| serde_json::json!(fallback));
                     map.entry("vat_source_explanation".to_string())
                         .or_insert_with(|| {
                             serde_json::json!(vat_source_explanation(
-                                "legacy",
+                                fallback,
                                 None,
                                 None,
                                 vat_rate.as_deref(),
@@ -4471,6 +4641,147 @@ async fn build_selected_invoice_snapshot(
 /// decision 2026-11-14, see `drafts::own_services_first`). Staff can set the
 /// split by hand on the draft. A single-rate quote gets a single line.
 /// Advances consume no quote quantities.
+/// Error code of an advance draft whose VAT share exceeds its group's open
+/// gross at the release.
+const ADVANCE_SHARE_OVER_OPEN: &str = "advance_share_over_open_group";
+
+/// Whether a prepayment advance draft asks more in a VAT group than the
+/// group has open (quote less interim invoices and the order's other
+/// advances), with the quote row locked so a parallel draft change waits.
+async fn advance_shares_exceed_open_groups(
+    state: &AppState,
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %invoice_id, "check advance shares at release");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update invoice",
+        )
+    };
+    let Some(row) = sqlx::query("SELECT quote_id, line_items FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(failed)?
+    else {
+        return Ok(false);
+    };
+    let Some(quote_id) = row.try_get::<Option<Uuid>, _>("quote_id").map_err(failed)? else {
+        return Ok(false);
+    };
+    let lines = row.try_get::<Value, _>("line_items").map_err(failed)?;
+    let shares = lines
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter(|line| line.get("source").and_then(Value::as_str) == Some("advance_prepayment"))
+        .map(|line| {
+            let passthrough = line
+                .get("is_cost_passthrough")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let rate = invoice_json_decimal(line, "vat_rate").unwrap_or(Decimal::ZERO);
+            let gross = invoice_json_decimal(line, "line_gross").unwrap_or(Decimal::ZERO);
+            (advance_rows::category_for(passthrough, rate), gross)
+        })
+        .collect::<Vec<_>>();
+    if shares.is_empty() {
+        return Ok(false);
+    }
+    sqlx::query("SELECT 1 FROM quotes WHERE id = $1 FOR UPDATE")
+        .bind(quote_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(failed)?;
+    let Some(mut ctx) = load_quote_invoice_context(state, quote_id).await? else {
+        return Ok(false);
+    };
+    ctx.editing_invoice_id = Some(invoice_id);
+    let groups = match load_prepayment_advance_groups(state, &ctx).await {
+        Ok((groups, _)) => groups,
+        Err(_) => return Ok(true),
+    };
+    Ok(shares.iter().any(|(key, gross)| {
+        let open: Decimal = groups
+            .iter()
+            .filter(|group| {
+                advance_rows::category_for(group.is_cost_passthrough, group.vat_rate) == *key
+            })
+            .map(|group| group.open_gross)
+            .sum();
+        *gross > open
+    }))
+}
+
+/// Error code of an advance refused because the order's prepayment is billed
+/// in full by its advances already.
+const ADVANCE_ALREADY_BILLED: &str = "advance_prepayment_already_billed";
+
+/// What the order's active advances bill (after their credit notes),
+/// `except` a draft being rebuilt.
+async fn order_advances_billed(
+    state: &AppState,
+    order_id: Uuid,
+    except: Option<Uuid>,
+) -> Result<Decimal, axum::response::Response> {
+    sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(total_gross - credited_amount), 0)
+           FROM invoices
+           WHERE order_id = $1
+             AND invoice_type = 'advance'
+             AND status <> 'cancelled'
+             AND ($2::uuid IS NULL OR id <> $2)"#,
+    )
+    .bind(order_id)
+    .bind(except)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %order_id, "load billed order advances");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the required prepayment",
+        )
+    })
+}
+
+/// What the order's other active advances still hold per VAT category
+/// (their rows after credit notes, less what they already deducted on
+/// settlement invoices): a further advance covers the rest (own services
+/// first) and never bills own services twice (money QA 2026-11-15, S1-1).
+async fn order_advances_pending_rows(
+    state: &AppState,
+    order_id: Uuid,
+    except: Option<Uuid>,
+) -> Result<Vec<document::VatBreakdownRow>, sqlx::Error> {
+    let mut conn = state.db.acquire().await?;
+    let advance_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM invoices
+           WHERE order_id = $1
+             AND invoice_type = 'advance'
+             AND status <> 'cancelled'
+             AND ($2::uuid IS NULL OR id <> $2)
+           ORDER BY created_at, id"#,
+    )
+    .bind(order_id)
+    .bind(except)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut pending = Vec::new();
+    for advance_id in advance_ids {
+        let rows = advance_rows::advance_rows(&mut conn, advance_id).await?;
+        let mut deducted = Vec::new();
+        for allocation in advance_rows::allocation_rows(&mut conn, advance_id, true).await? {
+            advance_rows::add_rows(&mut deducted, &allocation.rows);
+        }
+        advance_rows::add_rows(&mut pending, &advance_rows::subtract_rows(&rows, &deducted));
+    }
+    Ok(pending)
+}
+
 async fn build_prepayment_advance_snapshot(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
@@ -4491,7 +4802,22 @@ async fn build_prepayment_advance_snapshot(
 
     let (groups, part_billed) = load_prepayment_advance_groups(state, ctx).await?;
     let quote_gross: Decimal = groups.iter().map(|group| group.open_gross).sum();
-    let amount = required.unwrap_or(quote_gross).round_cents();
+    // Advances already billed for the order count (money QA 2026-11-15,
+    // S1-1/S2-2): a raised prepayment is billed as the difference only, on
+    // this quote or on a new one.
+    let billed = order_advances_billed(state, ctx.order_id, ctx.editing_invoice_id).await?;
+    let amount = match required {
+        Some(required) => (required - billed).round_cents(),
+        None => quote_gross.round_cents(),
+    };
+    if amount <= Decimal::ZERO && billed > Decimal::ZERO {
+        return Err(coded_err(
+            StatusCode::CONFLICT,
+            ADVANCE_ALREADY_BILLED,
+            "The required prepayment is already billed",
+            json!({ "billed_gross": decimal_to_string(billed) }),
+        ));
+    }
     if amount <= Decimal::ZERO {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -4586,16 +4912,33 @@ async fn load_prepayment_advance_groups(
             "Quote has no invoiceable line items",
         ));
     }
+    // What the order's other advances still hold per category is no longer
+    // open for a further advance (money QA 2026-11-15, S1-1).
+    let pending = order_advances_pending_rows(state, ctx.order_id, ctx.editing_invoice_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, quote_id = %ctx.quote_id, "load pending order advances");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the required prepayment",
+            )
+        })?;
     // BTreeMap order: `false` (own services) before `true` (pass-through).
     let groups: Vec<drafts::AdvanceGroup> = groups
         .into_iter()
-        .map(
-            |((is_cost_passthrough, vat_rate), open_gross)| drafts::AdvanceGroup {
+        .map(|((is_cost_passthrough, vat_rate), open_gross)| {
+            let key = advance_rows::category_for(is_cost_passthrough, vat_rate);
+            let held: Decimal = pending
+                .iter()
+                .filter(|row| advance_rows::category_of(row) == key)
+                .map(|row| row.gross)
+                .sum();
+            drafts::AdvanceGroup {
                 is_cost_passthrough,
                 vat_rate,
-                open_gross,
-            },
-        )
+                open_gross: (open_gross - held).max(Decimal::ZERO),
+            }
+        })
         .collect();
     Ok((groups, part_billed))
 }
@@ -4932,6 +5275,26 @@ const ADVANCE_BLOCKED_BY_QUOTE_INVOICE_SQL: &str = "SELECT EXISTS(
                AND (total_gross <= 0 OR credited_amount < total_gross)))
 )";
 
+/// What keeps a further prepayment advance off the quote: an active final
+/// invoice, an advance draft not released yet, or an advance billing quote
+/// positions (it would overlap).
+const SUPPLEMENTARY_ADVANCE_BLOCKED_SQL: &str = "SELECT EXISTS(
+    SELECT 1
+    FROM invoices
+    WHERE quote_id = $1
+      AND status <> 'cancelled'
+      AND ((invoice_type = 'final'
+            AND (total_gross <= 0 OR credited_amount < total_gross))
+           OR (invoice_type = 'advance'
+               AND (released_at IS NULL
+                    OR jsonb_typeof(line_items) <> 'array'
+                    OR jsonb_array_length(line_items) = 0
+                    OR EXISTS (
+                        SELECT 1 FROM jsonb_array_elements(line_items) AS line
+                        WHERE line ->> 'source' IS DISTINCT FROM 'advance_prepayment'
+                    ))))
+)";
+
 fn interim_over_open_advance() -> axum::response::Response {
     coded_err(
         StatusCode::CONFLICT,
@@ -4968,6 +5331,7 @@ async fn validate_invoice_creation_for_quote(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
     invoice_type: &str,
+    prepayment_basis: bool,
 ) -> Result<(), axum::response::Response> {
     if let Some(message) = closed_quote_invoice_message(&ctx.quote_status) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
@@ -4975,8 +5339,15 @@ async fn validate_invoice_creation_for_quote(
 
     let duplicate_exists: bool = if invoice_type == "advance" {
         // Beside a final invoice an advance bills the same amount a second
-        // time: its quantity consumes nothing (QA 2026-11-01, X1 N1).
-        let blocked: bool = sqlx::query_scalar(ADVANCE_BLOCKED_BY_QUOTE_INVOICE_SQL)
+        // time: its quantity consumes nothing (QA 2026-11-01, X1 N1). A
+        // raised prepayment is billed beside issued prepayment advances as
+        // the difference (money QA 2026-11-15, S2-2); the amount rule is in
+        // `build_prepayment_advance_snapshot`.
+        let blocked: bool = sqlx::query_scalar(if prepayment_basis {
+            SUPPLEMENTARY_ADVANCE_BLOCKED_SQL
+        } else {
+            ADVANCE_BLOCKED_BY_QUOTE_INVOICE_SQL
+        })
             .bind(ctx.quote_id)
             .fetch_one(&state.db)
             .await
@@ -5073,6 +5444,120 @@ fn invoice_snapshot_has_package_overage(snapshot: &InvoiceCreationSnapshot) -> b
         .into_iter()
         .flatten()
         .any(|item| item.get("source").and_then(Value::as_str) == Some("service_package_overage"))
+}
+
+/// Staff figures of the invoice detail (money QA 2026-11-15):
+///
+/// * for an issued advance, its VAT categories with what is paid and open
+///   in each, and whether a payment split can still be set (the payment
+///   dialog's «Распределить вручную»);
+/// * for a final-invoice draft, the advance money its release would deduct,
+///   planned per VAT category as the release does.
+async fn advance_detail_figures(
+    state: &AppState,
+    invoice_id: Uuid,
+    row: &sqlx::postgres::PgRow,
+) -> Result<(Value, Option<Decimal>), axum::response::Response> {
+    let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %invoice_id, "load advance figures");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    if invoice_type == "advance" && !matches!(status.as_str(), "draft" | "cancelled") {
+        let (rows, paid) = advance_rows::advance_paid(&mut conn, invoice_id)
+            .await
+            .map_err(failed)?;
+        let frozen: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM invoice_prepayment_allocations WHERE advance_invoice_id = $1)",
+        )
+        .bind(invoice_id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(failed)?;
+        let categories = rows
+            .iter()
+            .map(|row| {
+                let key = advance_rows::category_of(row);
+                let paid_gross: Decimal = paid
+                    .iter()
+                    .filter(|item| advance_rows::category_of(item) == key)
+                    .map(|item| item.gross)
+                    .sum();
+                json!({
+                    "kind": advance_rows::kind_key(key.0),
+                    "vat_rate": decimal_to_string(key.1),
+                    "gross": decimal_to_string(row.gross),
+                    "paid_gross": decimal_to_string(paid_gross),
+                    "open_gross": decimal_to_string((row.gross - paid_gross).max(Decimal::ZERO)),
+                })
+            })
+            .collect::<Vec<_>>();
+        return Ok((
+            json!({ "split_frozen": frozen, "categories": categories }),
+            None,
+        ));
+    }
+    if invoice_type == "final" && status == "draft" {
+        let order_id = row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default();
+        let Some(order_id) = order_id else {
+            return Ok((Value::Null, None));
+        };
+        let sql = format!(
+            r#"SELECT advance.id
+               FROM invoices final_invoice
+               JOIN invoices advance
+                 ON advance.order_id = final_invoice.order_id
+                AND advance.patient_id = final_invoice.patient_id
+                AND advance.invoice_type = 'advance'
+                AND advance.status NOT IN ('draft', 'cancelled')
+                AND advance.paid_amount > 0
+                AND invoice_recipient_identity(advance.recipient_snapshot)
+                    IS NOT DISTINCT FROM invoice_recipient_identity(
+                        COALESCE(final_invoice.recipient_snapshot, invoice_recipient_resolve(
+                            final_invoice.patient_id, final_invoice.payer_patient_id,
+                            final_invoice.payer_patient_relation_id,
+                            final_invoice.payer_contact_name, final_invoice.payer_contact_email,
+                            final_invoice.payer_address_street, final_invoice.payer_address_zip,
+                            final_invoice.payer_address_city, final_invoice.payer_address_country)))
+                AND {covers}
+               WHERE final_invoice.id = $1 AND advance.order_id = $2
+               ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#,
+            covers = advance_settlement::FINAL_QUOTE_COVERS_ADVANCE,
+        );
+        let advance_ids = sqlx::query_scalar::<_, Uuid>(&sql)
+            .bind(invoice_id)
+            .bind(order_id)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(failed)?;
+        let Some(mut target_open) = advance_rows::target_open_rows(&mut conn, invoice_id)
+            .await
+            .map_err(failed)?
+        else {
+            return Ok((Value::Null, None));
+        };
+        let mut left: Decimal = target_open.iter().map(|row| row.gross).sum();
+        let mut expected = Decimal::ZERO;
+        for advance_id in advance_ids {
+            if left <= Decimal::ZERO {
+                break;
+            }
+            let available = advance_rows::advance_available_rows(&mut conn, advance_id)
+                .await
+                .map_err(failed)?;
+            let plan = advance_rows::plan_allocation_rows(&available, &target_open, left);
+            let taken: Decimal = plan.iter().map(|row| row.gross).sum();
+            target_open = advance_rows::subtract_rows(&target_open, &plan);
+            left -= taken;
+            expected += taken;
+        }
+        return Ok((Value::Null, Some(expected)));
+    }
+    Ok((Value::Null, None))
 }
 
 async fn load_invoice_detail(
@@ -5643,7 +6128,12 @@ async fn load_invoice_detail(
     })
     .collect::<Vec<_>>();
 
+    let (advance_categories, expected_prepayment) =
+        advance_detail_figures(state, invoice_id, &row).await?;
+
     let mut detail = serde_json::json!({
+        "advance_categories": advance_categories,
+        "expected_prepayment_gross": expected_prepayment.map(decimal_to_string),
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
@@ -7943,7 +8433,7 @@ async fn create_patient_billing_invoice(
             Err(response) => return response,
         };
         if let Err(response) =
-            validate_invoice_creation_for_quote(&state, context, &invoice_type).await
+            validate_invoice_creation_for_quote(&state, context, &invoice_type, false).await
         {
             return response;
         }
@@ -8463,6 +8953,64 @@ async fn create_patient_billing_invoice(
     }
 }
 
+/// The prepayment advance «Создать счёт» would create from this quote, built
+/// by the same code (money QA 2026-11-15, S2-1): the dialog shows exactly
+/// this split. Refusals are the ones creation would answer.
+async fn preview_prepayment_advance(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(quote_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_create_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(ctx) = (match load_quote_invoice_context(&state, quote_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    }) else {
+        return err(StatusCode::NOT_FOUND, "Quote not found");
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, ctx.patient_id).await {
+        return resp;
+    }
+    if let Some(message) = closed_quote_invoice_message(&ctx.quote_status) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
+    let snapshot = match build_prepayment_advance_snapshot(&state, &ctx).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = validate_invoice_creation_for_quote(&state, &ctx, "advance", true).await {
+        return resp;
+    }
+    let billed = match order_advances_billed(&state, ctx.order_id, None).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    Json(json!({
+        "quote_id": ctx.quote_id,
+        "billed_advances_gross": decimal_to_string(billed),
+        "total_net": decimal_to_string(snapshot.total_net),
+        "total_vat": decimal_to_string(snapshot.total_vat),
+        "total_gross": decimal_to_string(snapshot.total_gross),
+        "lines": snapshot
+            .line_items
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|line| json!({
+                "is_cost_passthrough": line.get("is_cost_passthrough").and_then(Value::as_bool).unwrap_or(false),
+                "vat_rate": line.get("vat_rate").cloned().unwrap_or(json!("0")),
+                "net": line.get("line_net").cloned().unwrap_or(json!("0")),
+                "vat": line.get("line_vat").cloned().unwrap_or(json!("0")),
+                "gross": line.get("line_gross").cloned().unwrap_or(json!("0")),
+            }))
+            .collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
 async fn create_invoice_from_quote(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8538,7 +9086,9 @@ async fn create_invoice_from_quote(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    if let Err(resp) = validate_invoice_creation_for_quote(&state, &ctx, &invoice_type).await {
+    if let Err(resp) =
+        validate_invoice_creation_for_quote(&state, &ctx, &invoice_type, prepayment_basis).await
+    {
         return resp;
     }
 
@@ -9057,6 +9607,17 @@ async fn apply_invoice_prepayment(
         }
     };
 
+    if let Some(order_id) = target
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default()
+        && let Err(e) = advance_rows::lock_order_advances(&mut transaction, order_id).await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "lock order advances for prepayment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply prepayment",
+        );
+    }
     let locked_invoices = match sqlx::query_as::<_, (Uuid, String)>(
         r#"SELECT id, status
            FROM invoices
@@ -9225,10 +9786,48 @@ async fn apply_invoice_prepayment(
         );
     }
 
-    let result = sqlx::query(
+    // Per VAT category: the amount must fit what the advance holds and what
+    // this invoice bills in each category (money QA 2026-11-15, S1-1).
+    let plan = match advance_rows::plan_allocation_detail(
+        &mut transaction,
+        body.advance_invoice_id,
+        invoice_id,
+        amount_gross,
+    )
+    .await
+    {
+        Ok(plan) => plan,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "plan prepayment allocation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply prepayment",
+            );
+        }
+    };
+    if let Some(plan) = plan.as_ref() {
+        let fits: Decimal = plan.rows.iter().map(|row| row.gross).sum();
+        if amount_gross > plan.available_gross || amount_gross > plan.target_open_gross {
+            return err(
+                StatusCode::CONFLICT,
+                "Prepayment exceeds the available advance or invoice balance",
+            );
+        }
+        if fits < amount_gross {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "prepayment_exceeds_vat_category",
+                "Prepayment exceeds what the invoice bills in the advance's VAT categories",
+                json!({ "max_amount_gross": decimal_to_string(fits) }),
+            );
+        }
+    }
+    let rows = plan.map(|plan| plan.rows);
+    let result = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_prepayment_allocations (
-                request_id, advance_invoice_id, target_invoice_id, amount_gross, created_by
-           ) VALUES ($1, $2, $3, $4, $5)
+                request_id, advance_invoice_id, target_invoice_id, amount_gross, created_by,
+                vat_rows
+           ) VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING id"#,
     )
     .bind(body.request_id)
@@ -9236,11 +9835,12 @@ async fn apply_invoice_prepayment(
     .bind(invoice_id)
     .bind(amount_gross)
     .bind(auth.user_id)
+    .bind(rows.as_deref().map(advance_rows::rows_to_json))
     .fetch_one(&mut *transaction)
     .await;
 
     let allocation_id = match result {
-        Ok(row) => row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        Ok(id) => id,
         Err(sqlx::Error::Database(db_error))
             if matches!(
                 db_error.code().as_deref(),
@@ -9388,6 +9988,16 @@ async fn apply_invoice_prepayment(
     }
 }
 
+/// 409 for an advance deducted on an issued final invoice.
+fn prepayment_locked_by_final() -> axum::response::Response {
+    coded_err(
+        StatusCode::CONFLICT,
+        "prepayment_locked_by_issued_final",
+        "The advance is deducted on an issued final invoice; cancel the final invoice first",
+        json!({}),
+    )
+}
+
 async fn release_invoice_prepayment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -9399,7 +10009,10 @@ async fn release_invoice_prepayment(
 
     let allocation = match sqlx::query(
         r#"SELECT allocation.advance_invoice_id, allocation.amount_gross,
-                  target.patient_id
+                  target.patient_id,
+                  target.invoice_type = 'final'
+                      AND target.released_at IS NOT NULL
+                      AND target.status <> 'cancelled' AS locked_by_final
            FROM invoice_prepayment_allocations allocation
            JOIN invoices target ON target.id = allocation.target_invoice_id
            WHERE allocation.id = $1
@@ -9425,6 +10038,16 @@ async fn release_invoice_prepayment(
         .unwrap_or_default();
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
+    }
+    // The advance deducted on an issued final invoice is part of that
+    // document (GoBD, § 14 Abs. 5 UStG): only its Storno releases it
+    // (money QA 2026-11-15, S1-2). The database refuses it as well.
+    if allocation
+        .try_get::<Option<bool>, _>("locked_by_final")
+        .unwrap_or_default()
+        .unwrap_or(false)
+    {
+        return prepayment_locked_by_final();
     }
     let advance_invoice_id = allocation
         .try_get::<Uuid, _>("advance_invoice_id")
@@ -9466,6 +10089,9 @@ async fn release_invoice_prepayment(
     match deleted {
         Ok(result) if result.rows_affected() == 1 => {}
         Ok(_) => return err(StatusCode::NOT_FOUND, "Prepayment allocation not found"),
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
+            return prepayment_locked_by_final();
+        }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, allocation_id = %allocation_id, "delete prepayment allocation");
             return err(
@@ -10074,14 +10700,14 @@ async fn create_invoice_payment(
             return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment date");
         }
     };
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT patient_id FROM invoices WHERE id = $1",
+    let (patient_id, order_id) = match sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+        "SELECT patient_id, order_id FROM invoices WHERE id = $1",
     )
     .bind(invoice_id)
     .fetch_optional(&state.db)
     .await
     {
-        Ok(Some(patient_id)) => patient_id,
+        Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payment context");
@@ -10105,9 +10731,20 @@ async fn create_invoice_payment(
             );
         }
     };
+    // The order's advance lock before the invoice row: the release of a
+    // final invoice takes them in the same order (C-S2-2).
+    if let Some(order_id) = order_id
+        && let Err(e) = advance_rows::lock_order_advances(&mut transaction, order_id).await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "lock order advances for payment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        );
+    }
     let row = match sqlx::query(
         r#"SELECT invoice.id, invoice.order_id, invoice.patient_id,
-                  invoice.invoice_number, invoice.status,
+                  invoice.invoice_number, invoice.status, invoice.invoice_type,
                   invoice.total_vat, invoice.total_gross, invoice.credited_amount,
                   invoice.prepayment_applied_amount, invoice.line_items,
                   invoice.currency
@@ -10283,6 +10920,22 @@ async fn create_invoice_payment(
     if overpayment_gross > Decimal::ZERO && !body.accept_overpayment.unwrap_or(false) {
         return payment_exceeds_balance(balance_due, overpayment_gross);
     }
+    let category_split = match body.category_split.as_deref() {
+        Some(parts) => match checked_payment_category_split(
+            &mut transaction,
+            invoice_id,
+            &row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+            amount_gross,
+            overpayment_gross,
+            parts,
+        )
+        .await
+        {
+            Ok(rows) => Some(rows),
+            Err(response) => return response,
+        },
+        None => None,
+    };
 
     // Who remitted the money when it was not the recipient (e.g. a grandparent
     // paying the parents' invoice); informational, not a recipient change.
@@ -10330,6 +10983,22 @@ async fn create_invoice_payment(
             );
         }
     };
+    if let Some(rows) = category_split.as_deref()
+        && let Err(e) = store_payment_category_split(
+            &mut transaction,
+            invoice_id,
+            payment_id,
+            rows,
+            auth.user_id,
+        )
+        .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "store payment VAT split");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        );
+    }
     if let Err(e) = insert_invoice_payment_accounting_entries(
         &mut transaction,
         &context,
@@ -10388,6 +11057,7 @@ async fn create_invoice_payment(
             "payer_name": payer_name,
             "received_on": received_on.to_string(),
             "patient_id": patient_id,
+            "category_split": category_split.as_deref().map(advance_rows::rows_to_json),
         }),
     )
     .await
@@ -10910,7 +11580,7 @@ async fn correct_invoice_payment(
                   payment.payer_name,
                   invoice.order_id, invoice.invoice_number, invoice.status,
                   invoice.total_vat, invoice.total_gross, invoice.credited_amount,
-                  invoice.prepayment_applied_amount, invoice.line_items, invoice.currency,
+                  invoice.prepayment_applied_amount, invoice.line_items, invoice.currency, invoice.invoice_type,
                   EXISTS (
                       SELECT 1 FROM invoice_payment_transactions reversal
                       WHERE reversal.reverses_transaction_id = payment.id
@@ -11048,6 +11718,7 @@ async fn correct_invoice_payment(
         && original_received_on == received_on
         && original_note == note
         && original_payer_name == payer_name
+        && body.category_split.is_none()
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -11208,6 +11879,52 @@ async fn correct_invoice_payment(
         tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert correction reversal accounting entries");
         return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
     }
+    // The VAT split of the corrected receipt (owner 2026-11-15), checked
+    // after the original is reversed so its split no longer counts. A split
+    // payment of an advance already deducted on a final invoice stays as is.
+    let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
+    let category_split = match body.category_split.as_deref() {
+        Some(parts) => match checked_payment_category_split(
+            &mut transaction,
+            invoice_id,
+            &invoice_type,
+            amount_gross,
+            corrected_overpayment,
+            parts,
+        )
+        .await
+        {
+            Ok(rows) => Some(rows),
+            Err(response) => return response,
+        },
+        None => {
+            let frozen = sqlx::query_scalar::<_, bool>(
+                r#"SELECT EXISTS (SELECT 1 FROM invoice_payment_category_splits
+                                  WHERE payment_transaction_id = $1)
+                      AND EXISTS (SELECT 1 FROM invoice_prepayment_allocations
+                                  WHERE advance_invoice_id = $2)"#,
+            )
+            .bind(payment_id)
+            .bind(invoice_id)
+            .fetch_one(&mut *transaction)
+            .await;
+            match frozen {
+                Ok(false) => None,
+                Ok(true) => {
+                    return coded_err(
+                        StatusCode::CONFLICT,
+                        "advance_split_frozen",
+                        "The advance is already deducted on a final invoice; its split is fixed",
+                        json!({}),
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, invoice_id = %invoice_id, "check frozen payment split");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+                }
+            }
+        }
+    };
     let corrected_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_payment_transactions (
                 invoice_id, transaction_type, request_id, corrects_transaction_id,
@@ -11238,6 +11955,19 @@ async fn correct_invoice_payment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
+    if let Some(rows) = category_split.as_deref()
+        && let Err(e) = store_payment_category_split(
+            &mut transaction,
+            invoice_id,
+            corrected_id,
+            rows,
+            auth.user_id,
+        )
+        .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %corrected_id, "store corrected payment VAT split");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
     if let Err(e) = insert_invoice_payment_accounting_entries(
         &mut transaction,
         &context,
@@ -11292,6 +12022,7 @@ async fn correct_invoice_payment(
                 "payment_method": payment_method,
                 "payment_reference": payment_reference,
                 "received_on": received_on.to_string(),
+                "category_split": category_split.as_deref().map(advance_rows::rows_to_json),
             },
             "patient_id": patient_id,
         }),
@@ -14598,7 +15329,7 @@ async fn update_invoice_status(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice status");
     }
     let current = match sqlx::query(
-        r#"SELECT invoice.patient_id, invoice.invoice_type, invoice.status,
+        r#"SELECT invoice.patient_id, invoice.invoice_type, invoice.status, invoice.order_id,
                   invoice.released_at IS NOT NULL AS released,
                   COALESCE((
                       SELECT SUM(
@@ -14710,6 +15441,20 @@ async fn update_invoice_status(
             );
         }
     };
+    // The order's advance lock before the invoice row, as the payment of an
+    // advance takes it (C-S2-2): the release of a final invoice and that
+    // payment never miss each other's money and never deadlock.
+    if let Some(order_id) = current
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default()
+        && let Err(e) = advance_rows::lock_order_advances(&mut transaction, order_id).await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "lock order advances for status");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update invoice",
+        );
+    }
 
     let locked_invoice = match sqlx::query(
         r#"SELECT invoice.status, invoice.invoice_type, invoice.due_date, invoice.notes,
@@ -14797,8 +15542,17 @@ async fn update_invoice_status(
     }
     let settles_through_payment = requested_paid_amount.is_some()
         || matches!(requested_status.as_str(), "paid" | "partially_paid");
+    // The Storno of an issued final invoice releases the advances deducted
+    // on it (they cannot be released alone, money QA 2026-11-15 S1-2); a
+    // final settled by advances alone may therefore be cancelled from
+    // `paid`. Cash and credit notes still have to be reversed first.
+    let storno_releases_advances = requested_status == "cancelled"
+        && locked_invoice_type == "final"
+        && locked_released
+        && locked_prepayment_amount > Decimal::ZERO;
     if !settles_through_payment
         && !is_valid_invoice_status_transition(&locked_status, &requested_status)
+        && !(storno_releases_advances && locked_status == "paid")
     {
         return err(
             StatusCode::CONFLICT,
@@ -14914,7 +15668,7 @@ async fn update_invoice_status(
     }
     if requested_status == "cancelled"
         && (requested_paid_amount.unwrap_or(locked_paid_amount) > Decimal::ZERO
-            || locked_prepayment_amount > Decimal::ZERO
+            || (locked_prepayment_amount > Decimal::ZERO && !storno_releases_advances)
             || locked_credited_amount > Decimal::ZERO)
     {
         return err(
@@ -15117,10 +15871,13 @@ async fn update_invoice_status(
     }
 
     if requested_status == "cancelled"
-        && let Err(error) = sqlx::query("SELECT set_config('gmed.accounting_actor_id', $1, true)")
-            .bind(auth.user_id.to_string())
-            .execute(&mut *transaction)
-            .await
+        && let Err(error) = sqlx::query(
+            "SELECT set_config('gmed.accounting_actor_id', $1, true),
+                    set_config('gmed.prepayment_release_context', 'storno', true)",
+        )
+        .bind(auth.user_id.to_string())
+        .execute(&mut *transaction)
+        .await
     {
         tracing::error!(%error, "set cancelled invoice allocation release actor");
         return err(
@@ -15166,6 +15923,21 @@ async fn update_invoice_status(
                         "Failed to update invoice",
                     );
                 }
+            }
+            // Each VAT share of a prepayment advance (also a manual split)
+            // within what its group has open now, beside interim invoices
+            // and the order's other advances (money QA 2026-11-15, C-S3-2).
+            match advance_shares_exceed_open_groups(&state, &mut transaction, invoice_id).await {
+                Ok(false) => {}
+                Ok(true) => {
+                    return coded_err(
+                        StatusCode::CONFLICT,
+                        ADVANCE_SHARE_OVER_OPEN,
+                        "A share exceeds what its VAT group has left to bill",
+                        json!({}),
+                    );
+                }
+                Err(response) => return response,
             }
             // The same for an interim invoice made after the draft.
             match release::advance_exceeds_unbilled_quote(&mut transaction, invoice_id).await {

@@ -718,45 +718,40 @@ pub(super) async fn load_deducted_advances(
     conn: &mut PgConnection,
     invoice_id: Uuid,
 ) -> Result<Vec<DeductedAdvance>, sqlx::Error> {
+    // Per category as stored on each allocation (money QA 2026-11-15);
+    // allocations made before take the former pro rata share
+    // (`advance_rows::allocation_rows`).
+    let allocations = super::advance_rows::allocation_rows(conn, invoice_id, false).await?;
+    let mut per_advance = std::collections::BTreeMap::<Uuid, Vec<VatBreakdownRow>>::new();
+    for allocation in &allocations {
+        super::advance_rows::add_rows(
+            per_advance
+                .entry(allocation.advance_invoice_id)
+                .or_default(),
+            &allocation.rows,
+        );
+    }
+    let advance_ids = per_advance.keys().copied().collect::<Vec<_>>();
     let rows = sqlx::query(
-        r#"SELECT SUM(allocation.amount_gross) AS amount_gross,
-                  advance.id AS advance_invoice_id, advance.invoice_number,
-                  advance.issued_at, advance.line_items,
-                  advance.total_net, advance.total_vat, advance.total_gross
-           FROM invoice_prepayment_allocations allocation
-           JOIN invoices advance ON advance.id = allocation.advance_invoice_id
-           WHERE allocation.target_invoice_id = $1
-           GROUP BY advance.id
+        r#"SELECT advance.id, advance.invoice_number, advance.issued_at
+           FROM invoices advance
+           WHERE advance.id = ANY($1)
            ORDER BY advance.issued_at, advance.id"#,
     )
-    .bind(invoice_id)
+    .bind(&advance_ids)
     .fetch_all(&mut *conn)
     .await?;
     let mut advances = Vec::with_capacity(rows.len());
     for row in rows {
-        let mut line_items = row.try_get::<Value, _>("line_items")?;
-        if !credit_notes::line_snapshot_carries_total(
-            &line_items,
-            row.try_get::<Decimal, _>("total_gross")?,
-        ) {
-            // Early advance invoices carry no lines, seeded ones lines
-            // without amounts: their totals are one group, the rate implied
-            // by their VAT and net.
-            line_items = json!([{
-                "line_net": row.try_get::<Decimal, _>("total_net")?.to_string(),
-                "line_vat": row.try_get::<Decimal, _>("total_vat")?.to_string(),
-                "line_gross": row.try_get::<Decimal, _>("total_gross")?.to_string(),
-            }]);
-        }
-        let credits =
-            credit_notes::load_active_credits(conn, row.try_get("advance_invoice_id")?).await?;
-        let amount_gross = row.try_get::<Decimal, _>("amount_gross")?;
+        let advance_id = row.try_get::<Uuid, _>("id")?;
+        let mut deducted = finish_vat_rows(per_advance.remove(&advance_id).unwrap_or_default());
+        deducted.retain(|item| !item.gross.is_zero() || !item.vat.is_zero());
         advances.push(DeductedAdvance {
             invoice_number: row
                 .try_get::<Option<String>, _>("invoice_number")?
                 .unwrap_or_default(),
             issue_date: super::invoice_document_date(row.try_get::<DateTime<Utc>, _>("issued_at")?),
-            rows: deducted_advance_rows(&advance_vat_rows(&line_items, &credits), amount_gross),
+            rows: deducted,
         });
     }
     Ok(advances)

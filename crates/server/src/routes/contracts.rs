@@ -4469,6 +4469,33 @@ async fn list_quotes(
                   open_overage.net AS open_package_overage_net,
                   open_overage.gross AS open_package_overage_gross,
                   quote_open_advance_rest(q.id) AS open_advance_rest,
+                  -- Advances already billed for the order, and whether a
+                  -- raised prepayment can be billed on this quote as the
+                  -- difference (money QA 2026-11-15, S2-2).
+                  COALESCE((
+                      SELECT SUM(advance.total_gross - advance.credited_amount)
+                      FROM invoices advance
+                      WHERE advance.order_id = q.order_id
+                        AND advance.invoice_type = 'advance'
+                        AND advance.status <> 'cancelled'
+                  ), 0) AS order_advances_billed,
+                  EXISTS (
+                      SELECT 1 FROM invoices invoice
+                      WHERE invoice.quote_id = q.id
+                        AND invoice.status <> 'cancelled'
+                        AND ((invoice.invoice_type = 'final'
+                              AND (invoice.total_gross <= 0
+                                   OR invoice.credited_amount < invoice.total_gross))
+                             OR (invoice.invoice_type = 'advance'
+                                 AND (invoice.released_at IS NULL
+                                      OR jsonb_typeof(invoice.line_items) <> 'array'
+                                      OR jsonb_array_length(invoice.line_items) = 0
+                                      OR EXISTS (
+                                          SELECT 1
+                                          FROM jsonb_array_elements(invoice.line_items) AS line
+                                          WHERE line ->> 'source' IS DISTINCT FROM 'advance_prepayment'
+                                      ))))
+                  ) AS supplementary_advance_blocked,
                   q.created_at, q.updated_at,
                   q.superseded_by_quote_id, q.superseded_at,
                   successor.quote_number AS superseded_by_quote_number,
@@ -4595,6 +4622,8 @@ async fn list_quotes(
                     // What released advances still ask for: an interim invoice
                     // leaves this much of the quote (QA 2026-11-01, Z1 N1).
                     "open_advance_rest": decimal_to_string(row.try_get::<Decimal, _>("open_advance_rest").unwrap_or(Decimal::ZERO)),
+                    "order_advances_billed": decimal_to_string(row.try_get::<Decimal, _>("order_advances_billed").unwrap_or(Decimal::ZERO)),
+                    "supplementary_advance_blocked": row.try_get::<bool, _>("supplementary_advance_blocked").unwrap_or(true),
                     // The order's required prepayment: the default amount of
                     // an advance invoice from this quote.
                     "order_prepayment_required": row.try_get::<bool, _>("prepayment_required").unwrap_or(false),

@@ -31,6 +31,7 @@ pub(crate) struct AppliedAdvance {
     pub patient_id: Uuid,
 }
 
+#[cfg(test)]
 /// Amounts to take from each advance (oldest first) to cover `open` of the
 /// target invoice: `(advance index, amount)` pairs.
 pub(crate) fn plan_advance_application(
@@ -61,6 +62,17 @@ pub(crate) async fn apply_available_advances_tx(
     target_invoice_id: Uuid,
     actor_id: Uuid,
 ) -> Result<Vec<AppliedAdvance>, sqlx::Error> {
+    // The order's advance lock first, then the invoice rows (C-S2-2): the
+    // callers took it already; taking it again is a no-op.
+    let order_id =
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT order_id FROM invoices WHERE id = $1")
+            .bind(target_invoice_id)
+            .fetch_optional(&mut **transaction)
+            .await?
+            .flatten();
+    if let Some(order_id) = order_id {
+        super::advance_rows::lock_order_advances(&mut **transaction, order_id).await?;
+    }
     let Some(target) = sqlx::query(
         r#"SELECT order_id, patient_id, invoice_type, status, total_gross, credited_amount,
                   paid_amount, prepayment_applied_amount
@@ -125,43 +137,46 @@ pub(crate) async fn apply_available_advances_tx(
         .bind(target_invoice_id)
         .fetch_all(&mut **transaction)
         .await?;
-    let available = advances
-        .iter()
-        .map(|row| row.try_get::<Decimal, _>("available_amount"))
-        .collect::<Result<Vec<_>, _>>()?;
-
     let mut applied = Vec::new();
-    for (index, amount) in plan_advance_application(open, &available) {
-        let advance = &advances[index];
+    let mut left = open;
+    for advance in &advances {
+        if left <= Decimal::ZERO {
+            break;
+        }
+        let available = advance.try_get::<Decimal, _>("available_amount")?;
+        let max = available.min(left);
+        if max <= Decimal::ZERO {
+            continue;
+        }
         let advance_invoice_id = advance.try_get::<Uuid, _>("id")?;
+        // Per VAT category: never more than the final invoice bills in a
+        // category (money QA 2026-11-15, S1-1); the rest stays advance
+        // credit for the credit-note / refund path.
+        let rows = super::advance_rows::plan_allocation(
+            &mut **transaction,
+            advance_invoice_id,
+            target_invoice_id,
+            max,
+        )
+        .await?;
+        let amount = rows
+            .as_ref()
+            .map_or(max, |rows| rows.iter().map(|row| row.gross).sum());
+        if amount <= Decimal::ZERO {
+            continue;
+        }
         let request_id = Uuid::new_v4();
-        let allocation_id = sqlx::query_scalar::<_, Uuid>(
-            r#"INSERT INTO invoice_prepayment_allocations (
-                    request_id, advance_invoice_id, target_invoice_id, amount_gross, created_by
-               ) VALUES ($1, $2, $3, $4, $5)
-               RETURNING id"#,
+        let allocation_id = super::advance_rows::insert_allocation(
+            &mut **transaction,
+            request_id,
+            advance_invoice_id,
+            target_invoice_id,
+            amount,
+            rows.as_deref(),
+            actor_id,
         )
-        .bind(request_id)
-        .bind(advance_invoice_id)
-        .bind(target_invoice_id)
-        .bind(amount)
-        .bind(actor_id)
-        .fetch_one(&mut **transaction)
         .await?;
-        sqlx::query(
-            r#"INSERT INTO invoice_prepayment_allocation_requests (
-                    target_invoice_id, request_id, advance_invoice_id, amount_gross,
-                    allocation_id, created_by
-               ) VALUES ($1, $2, $3, $4, $5, $6)"#,
-        )
-        .bind(target_invoice_id)
-        .bind(request_id)
-        .bind(advance_invoice_id)
-        .bind(amount)
-        .bind(allocation_id)
-        .bind(actor_id)
-        .execute(&mut **transaction)
-        .await?;
+        left -= amount;
         applied.push(AppliedAdvance {
             allocation_id,
             request_id,
