@@ -63,6 +63,39 @@ pub fn line_amounts(quantity: Decimal, unit_price_net: Decimal, vat_rate: Decima
     }
 }
 
+/// Amounts of one part of a line billed in parts (e.g. 2,5 h and 0,5 h of a
+/// 3 h quote line). The part that completes the line's quantity takes exactly
+/// what the line total has left after the parts billed before; any other part
+/// is rounded on its own but never takes more than that rest. So the parts of
+/// a line never add up to more than the line, and all of them add up to it
+/// exactly (QA 2026-11-15, A-1).
+pub fn line_part_amounts(
+    part_quantity: Decimal,
+    billed_quantity: Decimal,
+    line_quantity: Decimal,
+    unit_price_net: Decimal,
+    vat_rate: Decimal,
+    line: LineAmounts,
+    billed: LineAmounts,
+) -> LineAmounts {
+    let rest_net = (line.net - billed.net).max(Decimal::ZERO);
+    let rest_gross = (line.gross - billed.gross).max(rest_net);
+    let rest = LineAmounts {
+        net: rest_net,
+        vat: rest_gross - rest_net,
+        gross: rest_gross,
+    };
+    if billed_quantity + part_quantity >= line_quantity {
+        return rest;
+    }
+    let own = line_amounts(part_quantity, unit_price_net, vat_rate);
+    if own.net <= rest.net && own.gross <= rest.gross {
+        own
+    } else {
+        rest
+    }
+}
+
 /// Net unit price (in cents) of a single-unit line whose gross should be
 /// `gross` at `vat_rate` percent, e.g. an agreed gross amount that is billed
 /// as one line. Prefers a net whose [`line_amounts`] gross is exactly `gross`;
@@ -282,6 +315,102 @@ mod tests {
                 gross: dec("508.73"),
             }
         );
+    }
+
+    fn part(
+        part: &str,
+        billed_quantity: &str,
+        line: LineAmounts,
+        billed: LineAmounts,
+    ) -> LineAmounts {
+        line_part_amounts(
+            dec(part),
+            dec(billed_quantity),
+            dec("3"),
+            dec("33.33"),
+            dec("19"),
+            line,
+            billed,
+        )
+    }
+
+    fn zero() -> LineAmounts {
+        LineAmounts {
+            net: Decimal::ZERO,
+            vat: Decimal::ZERO,
+            gross: Decimal::ZERO,
+        }
+    }
+
+    fn plus(a: LineAmounts, b: LineAmounts) -> LineAmounts {
+        LineAmounts {
+            net: a.net + b.net,
+            vat: a.vat + b.vat,
+            gross: a.gross + b.gross,
+        }
+    }
+
+    #[test]
+    fn the_part_completing_a_line_bills_exactly_its_rest() {
+        // QA 2026-11-15 A-1: 3 x 33,33 EUR = 99,99 net / 118,99 gross; 2,5 h
+        // and 0,5 h were 83,33 + 16,67 = 100,00 net.
+        let line = line_amounts(dec("3"), dec("33.33"), dec("19"));
+        assert_eq!((line.net, line.gross), (dec("99.99"), dec("118.99")));
+        let first = part("2.5", "0", line, zero());
+        assert_eq!((first.net, first.gross), (dec("83.33"), dec("99.16")));
+        let last = part("0.5", "2.5", line, first);
+        assert_eq!(
+            (last.net, last.vat, last.gross),
+            (dec("16.66"), dec("3.17"), dec("19.83"))
+        );
+        assert_eq!(plus(first, last), line);
+    }
+
+    #[test]
+    fn any_split_of_a_line_adds_up_to_the_line() {
+        let line = line_amounts(dec("3"), dec("33.33"), dec("19"));
+        for split in [
+            vec!["1", "1.5", "0.5"],
+            vec!["0.5", "2.5"],
+            vec!["0.01", "0.01", "2.98"],
+            vec!["1.5", "1.5"],
+            vec!["0.25", "0.25", "0.25", "2.25"],
+        ] {
+            let mut billed = zero();
+            let mut billed_quantity = Decimal::ZERO;
+            for quantity in split {
+                let amounts = part(quantity, &billed_quantity.to_string(), line, billed);
+                billed = plus(billed, amounts);
+                billed_quantity += dec(quantity);
+                assert!(billed.net <= line.net && billed.gross <= line.gross);
+                assert!(amounts.vat >= Decimal::ZERO);
+            }
+            assert_eq!(billed, line);
+        }
+    }
+
+    #[test]
+    fn small_parts_never_exceed_the_line_total() {
+        // 7 x 0,05 EUR: each 0,01-unit part rounds to 0,00 or more, never past
+        // what the 0,35 line has left.
+        let line = line_amounts(dec("7"), dec("0.05"), dec("19"));
+        let mut billed = zero();
+        let mut billed_quantity = Decimal::ZERO;
+        for _ in 0..7 {
+            let amounts = line_part_amounts(
+                dec("1"),
+                billed_quantity,
+                dec("7"),
+                dec("0.05"),
+                dec("19"),
+                line,
+                billed,
+            );
+            billed = plus(billed, amounts);
+            billed_quantity += Decimal::ONE;
+            assert!(billed.net <= line.net && billed.gross <= line.gross);
+        }
+        assert_eq!(billed, line);
     }
 
     #[test]

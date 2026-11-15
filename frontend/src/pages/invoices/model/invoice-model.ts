@@ -5,7 +5,7 @@ import {
   formatAppDate,
   formatAppDateTime,
 } from "@/lib/app-time-zone";
-import { formatMoneyAmount, moneyLineAmounts, roundCents, toCents } from "@/lib/money";
+import { formatMoneyAmount, moneyLineAmounts, moneyLinePartAmounts, roundCents, toCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 import { payerRelationshipKindLabel, type PayerRelationshipKind } from "@/pages/leads/model/lead-payer";
 
@@ -114,6 +114,21 @@ export const DEFAULT_INVOICE_PAYMENT_TERM_DAYS = 14;
 export function isInvoiceReleased(invoice: Pick<InvoiceItem, "released_at" | "status">) {
   if (invoice.released_at !== undefined) return Boolean(invoice.released_at);
   return invoice.status !== "draft";
+}
+
+/**
+ * Whether an issued invoice can still be cancelled by Storno: the server
+ * refuses it once payments, applied prepayments or credit notes are booked
+ * on it; then a full credit note corrects it (QA 2026-11-15, A-2).
+ */
+export function canStornoInvoice(
+  invoice: Pick<InvoiceItem, "released_at" | "status" | "paid_amount" | "credited_amount" | "prepayment_applied_amount">,
+) {
+  if (!isInvoiceReleased(invoice) || !canPickInvoiceStatus(invoice.status, "cancelled")) return false;
+  if (invoice.status === "cancelled") return false;
+  return [invoice.paid_amount, invoice.credited_amount, invoice.prepayment_applied_amount].every(
+    (value) => !(Number(value ?? 0) > 0),
+  );
 }
 
 /** The invoice number, or the draft label for an invoice not released yet. */
@@ -413,12 +428,24 @@ export function calculateInvoiceSelectionTotals(
       ) {
         return totals;
       }
-      // Same per-line rounding as the server invoice (half away from zero).
+      // Same per-line rounding as the server invoice (half away from zero);
+      // the part completing the line bills its exact rest (QA 2026-11-15, A-1).
+      const billedKnown = line.invoiced_net !== undefined && line.invoiced_gross !== undefined;
       const {
         net: lineNet,
         vat: lineVat,
         gross: lineGross,
-      } = moneyLineAmounts(quantity, unitPrice, vatRate);
+      } = moneyLinePartAmounts({
+        quantity,
+        unitPriceNet: unitPrice,
+        vatRatePercent: vatRate,
+        lineQuantity: Number(line.quantity),
+        billedQuantity: Number(line.invoiced_quantity ?? 0),
+        lineNet: billedKnown ? Number(line.line_net) : Number.NaN,
+        lineGross: billedKnown ? Number(line.line_gross) : Number.NaN,
+        billedNet: Number(line.invoiced_net ?? 0),
+        billedGross: Number(line.invoiced_gross ?? 0),
+      });
       return {
         net: roundCents(totals.net + lineNet),
         vat: roundCents(totals.vat + lineVat),

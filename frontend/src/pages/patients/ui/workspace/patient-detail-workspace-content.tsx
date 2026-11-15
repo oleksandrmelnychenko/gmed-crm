@@ -20,7 +20,7 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 
-import { resolvePatientBalancePresentation, staffCreditSideLabel } from "../../model/account-balance";
+import { resolvePatientBalancePresentation, staffBalanceWithoutUnappliedAdvance, staffCreditSideLabel } from "../../model/account-balance";
 import { StaffLink } from "@/components/staff-link";
 import type { PatientNavigationItem } from "../../model/patient-navigation";
 import {
@@ -638,7 +638,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     accountStatement && accountStatement.patient_id === id
       ? Number(accountStatement.summary.available_prepayment ?? 0)
       : 0;
-  const balance = resolvePatientBalancePresentation(accountStatement && accountStatement.patient_id === id ? accountStatement.summary : null);
+  const balanceSummary = accountStatement && accountStatement.patient_id === id ? accountStatement.summary : null;
+  const balance = staffBalanceWithoutUnappliedAdvance(resolvePatientBalancePresentation(balanceSummary), balanceSummary);
   const balanceSideLabel =
     balance?.side === "debit"
       ? lang === "de" ? "Offener Betrag" : "Долг"

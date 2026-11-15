@@ -57,6 +57,7 @@ import {
   downloadPortalDunningLetter,
   openPortalInvoicePdf,
   portalInvoiceIsThirdParty,
+  portalInvoiceNeedsNoPaymentProof,
   portalInvoiceNeedsPaymentProof,
   portalInvoicePaidByRepresentative,
   portalThirdPartyPayerLabel,
@@ -486,6 +487,8 @@ function usePatientInvoicesPageContent() {
   const paymentProofText = (invoice: PortalInvoiceItem) =>
     invoice.last_payment_proof_at
       ? <PortalDateChip title={t.portal_invoices_uploaded} timestamp={invoice.last_payment_proof_at} />
+      : portalInvoiceNeedsNoPaymentProof(invoice)
+        ? "—"
       : portalInvoicePaidByRepresentative(invoice)
         ? representativeProofText(invoice.third_party_payer_name)
         : portalInvoiceIsThirdParty(invoice)
@@ -1319,7 +1322,7 @@ function usePatientInvoicesPageContent() {
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_uploaded_proofs} value={String(detail.payment_proof_count ?? 0)} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_latest_upload}
-                      value={detail.last_payment_proof_at ? <PortalDateChip timestamp={detail.last_payment_proof_at} /> : t.portal_invoices_not_uploaded}
+                      value={detail.last_payment_proof_at ? <PortalDateChip timestamp={detail.last_payment_proof_at} /> : portalInvoiceNeedsNoPaymentProof(detail) ? "—" : t.portal_invoices_not_uploaded}
                     />
                   </div>
                 </section>

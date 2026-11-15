@@ -24,6 +24,8 @@ describe("invoice dunning preflight", () => {
   it("names a credit on another invoice without netting it (owner decision 2026-11-12)", () => {
     expect(dunningCreditNotice("30.00", "30,00 €", "de")).toContain("Guthaben 30,00 € verfügbar – die Buchhaltung verrechnet es");
     expect(dunningCreditNotice("30.00", "30,00 €", "ru")).toContain("кредит 30,00 €");
+    expect(dunningCreditNotice("30.00", "30,00 €", "ru")).toContain("«Зачесть переплату»");
+    expect(dunningCreditNotice("30.00", "30,00 €", "ru")).not.toContain("Guthaben");
     expect(dunningCreditNotice("0", "0,00 €", "de")).toBeNull();
     expect(dunningCreditNotice(undefined, "", "de")).toBeNull();
     // The reminder still demands the invoice's own amount.

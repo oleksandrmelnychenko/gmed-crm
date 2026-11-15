@@ -94,6 +94,18 @@ export function paymentOverpayment(receipt: unknown, balanceDue: unknown): numbe
   return toCents(excess) > 0 ? excess : 0;
 }
 
+/**
+ * Whether the overpayment confirmation still covers the typed amount: the
+ * same amount in cents, however it is written («1.000,00», «1000,00»), so a
+ * rewritten amount does not leave the button dead (QA 2026-11-15, A-8).
+ */
+export function overpaymentConfirmed(acceptedFor: string | null, typed: string): boolean {
+  if (acceptedFor === null) return false;
+  const accepted = amount(acceptedFor);
+  const current = amount(typed);
+  return Number.isFinite(accepted) && Number.isFinite(current) && toCents(accepted) === toCents(current);
+}
+
 /** Proposed transfer: the credit, at most what the target still asks for. */
 export function creditTransferDefaultAmount(credit: unknown, targetBalance: unknown): string {
   const available = Math.min(amount(credit), amount(targetBalance));

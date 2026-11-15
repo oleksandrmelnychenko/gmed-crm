@@ -38,11 +38,13 @@ use uuid::Uuid;
 use super::{
     CreateInvoiceLineSelection, InvoiceCreationSnapshot, MoneyInput, QuoteInvoiceContext,
     build_selected_invoice_snapshot, closed_quote_invoice_message, coded_err, decimal_to_string,
-    ensure_interim_leaves_open_advance, ensure_patient_access, err, invoice_json_decimal,
+    ensure_interim_leaves_open_advance, ensure_patient_access,
+    ensure_quote_line_parts_within_totals, err, invoice_json_decimal,
     invoice_snapshot_has_package_overage, line_comments, link_package_consumptions_tx,
-    load_allocated_quote_quantities, load_invoice_detail, load_prepayment_advance_groups,
-    load_quote_invoice_context, lock_invoiceable_quote_tx, normalize_optional, parse_optional_date,
-    prepayment_advance_snapshot, write_invoice_audit_tx,
+    load_allocated_quote_quantities, load_billed_quote_lines, load_invoice_detail,
+    load_prepayment_advance_groups, load_quote_invoice_context, lock_invoiceable_quote_tx,
+    normalize_optional, parse_optional_date, prepayment_advance_snapshot, quote_line_amounts,
+    write_invoice_audit_tx,
 };
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
@@ -451,6 +453,17 @@ pub(super) async fn get_invoice_draft_editor(
                 Ok(value) => value,
                 Err(response) => return response,
             };
+            let billed_amounts =
+                match load_billed_quote_lines(&state.db, quote_id, Some(invoice_id)).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::error!(%error, %invoice_id, "load billed quote line amounts");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to load remaining invoice quantities",
+                        );
+                    }
+                };
             let mut selected = BTreeMap::<usize, (Decimal, Option<String>)>::new();
             for line in draft.line_items.as_array().into_iter().flatten() {
                 let Some(index) = line
@@ -495,6 +508,10 @@ pub(super) async fn get_invoice_draft_editor(
                 if open <= Decimal::ZERO && current.is_none() {
                     continue;
                 }
+                // The editor's running total bills a part the way the server
+                // does (`money::line_part_amounts`).
+                let line_amounts = quote_line_amounts(item);
+                let billed = billed_amounts.get(&line_index).copied().unwrap_or_default();
                 quote_lines.push(json!({
                     "line_index": line_index,
                     "description": item.get("description").and_then(Value::as_str).unwrap_or_default(),
@@ -504,6 +521,17 @@ pub(super) async fn get_invoice_draft_editor(
                     "is_cost_passthrough": item.get("is_cost_passthrough").and_then(Value::as_bool).unwrap_or(false),
                     "quoted_quantity": decimal_to_string(quoted),
                     "open_quantity": decimal_to_string(open),
+                    "billed_quantity": decimal_to_string(
+                        allocated
+                            .get(&line_index)
+                            .copied()
+                            .unwrap_or(Decimal::ZERO)
+                            .round_commercial(2),
+                    ),
+                    "line_net": decimal_to_string(line_amounts.net),
+                    "line_gross": decimal_to_string(line_amounts.gross),
+                    "billed_net": decimal_to_string(billed.net),
+                    "billed_gross": decimal_to_string(billed.gross),
                     "selected_quantity": current.map(|(quantity, _)| decimal_to_string(*quantity)),
                     "comment": current.and_then(|(_, comment)| comment.clone()),
                 }));
@@ -634,6 +662,8 @@ pub(super) async fn update_invoice_draft(
 
     let mode = lines_mode(&draft);
     let mut rebuilt: Option<(InvoiceCreationSnapshot, &'static str)> = None;
+    // The quote lines the rebuilt allocations are checked against.
+    let mut rebuilt_quote_lines = Value::Null;
     if let Some(items) = body.line_items.as_deref() {
         let (LinesMode::QuotePositions, Some(quote_id)) = (mode, draft.quote_id) else {
             return lines_locked(mode.reason().unwrap_or("other_sources"));
@@ -650,6 +680,7 @@ pub(super) async fn update_invoice_draft(
             Ok(snapshot) => rebuilt = Some((snapshot, "quote_positions")),
             Err(response) => return response,
         }
+        rebuilt_quote_lines = ctx.line_items.clone();
     } else if let Some(split) = body.advance_split.as_deref() {
         let (LinesMode::AdvanceSplit, Some(quote_id)) = (mode, draft.quote_id) else {
             return lines_locked(mode.reason().unwrap_or("other_sources"));
@@ -769,6 +800,21 @@ pub(super) async fn update_invoice_draft(
                         _ => err(StatusCode::INTERNAL_SERVER_ERROR, FAILED),
                     };
                 }
+            }
+            let touched = snapshot
+                .allocations
+                .iter()
+                .map(|allocation| allocation.quote_line_index)
+                .collect::<Vec<_>>();
+            if let Err(response) = ensure_quote_line_parts_within_totals(
+                &mut transaction,
+                quote_id,
+                &rebuilt_quote_lines,
+                &touched,
+            )
+            .await
+            {
+                return response;
             }
         }
         if let Err(error) = sqlx::query(

@@ -34,6 +34,23 @@ export function staffCreditSideLabel(summary: CreditSummary | null | undefined, 
   return lang === "de" ? "Guthaben" : "Переплата";
 }
 
+/**
+ * The staff header shows a paid advance not yet set off on its own
+ * («Предоплата (не зачтена)»), so a credit above it counts as «Переплата»
+ * only with the advance taken out: 1.027,33 credit with a 1.000,00 advance is
+ * 27,33 overpaid (QA 2026-11-15, A-3). A credit the advance covers in full
+ * stays as it was (labelled «Предоплата»).
+ */
+export function staffBalanceWithoutUnappliedAdvance(
+  balance: PatientBalancePresentation | null,
+  summary: CreditSummary | null | undefined,
+): PatientBalancePresentation | null {
+  if (!balance || !summary || balance.side !== "credit" || balance.amount == null) return balance;
+  const advance = Number(summary.available_prepayment ?? 0);
+  if (!(advance > 0) || advance >= balance.amount) return balance;
+  return { ...balance, amount: Math.round((balance.amount - advance) * 100) / 100 };
+}
+
 export type PatientBalancePresentation = {
   amount: number | null;
   /** With the reconciliation still open: the calculated balance with its sign. */

@@ -82,7 +82,7 @@ export function dunningOverrideCopy(lang: string) {
 /**
  * Credit on the recipient's other invoices next to a reminder (owner decision
  * 2026-11-12): the reminder demands the invoice's own open amount, the credit
- * is only named and applied by Billing with «Guthaben verrechnen». `null`
+ * is only named and applied by Billing with the credit transfer button. `null`
  * without credit. `amountLabel` is the formatted money.
  */
 export function dunningCreditNotice(credit: unknown, amountLabel: string, lang: string): string | null {
@@ -90,7 +90,7 @@ export function dunningCreditNotice(credit: unknown, amountLabel: string, lang: 
   if (!Number.isFinite(value) || value <= 0) return null;
   return lang === "de"
     ? `Guthaben ${amountLabel} verfügbar – die Buchhaltung verrechnet es mit «Guthaben verrechnen». Die Mahnung fordert den offenen Betrag dieser Rechnung ohne das Guthaben.`
-    : `Доступен кредит ${amountLabel} – бухгалтерия зачитывает его через «Guthaben verrechnen». Напоминание требует открытую сумму этого счёта без учёта кредита.`;
+    : `Доступен кредит ${amountLabel} – бухгалтерия зачитывает его через «Зачесть переплату». Напоминание требует открытую сумму этого счёта без учёта кредита.`;
 }
 
 // Keep the preflight in sync with create_dunning_event. The server uses Berlin dates.

@@ -73,6 +73,9 @@ export type InvoiceLineItem = {
   quote_line_index?: number;
   quoted_quantity?: string;
   invoiced_quantity?: string;
+  /** What the invoices of the quote bill of the line (net, gross). */
+  invoiced_net?: string;
+  invoiced_gross?: string;
   remaining_quantity?: string;
   fully_invoiced?: boolean;
 };

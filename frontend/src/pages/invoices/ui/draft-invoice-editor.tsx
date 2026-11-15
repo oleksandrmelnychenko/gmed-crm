@@ -18,6 +18,7 @@ import {
   draftFormDirty,
   draftFormFrom,
   draftLinesProblem,
+  draftLinesTotal,
   draftUpdatePayload,
   type DraftEditorPayload,
   type DraftForm,
@@ -161,6 +162,7 @@ export function DraftInvoiceEditorDialog({
   const splitProblem = payload && form ? advanceSplitProblem(payload, form.split) : null;
   const problem = dueProblem ?? (linesProblem ? copy[linesProblem] : null) ?? (splitProblem ? copy[splitProblem] : null);
   const preview = payload && form && payload.advance ? advanceSplitPreview(payload, form.split) : null;
+  const linesTotal = payload && form ? draftLinesTotal(payload, form) : null;
 
   async function save() {
     if (!payload || !form || busy || problem || !dirty) return;
@@ -291,6 +293,16 @@ export function DraftInvoiceEditorDialog({
                       );
                     })}
                   </div>
+                  {linesTotal ? (
+                    <div
+                      className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-sm tabular-nums"
+                      data-testid="invoice-draft-lines-total"
+                    >
+                      <span className="text-muted-foreground">{copy.net}: {money(linesTotal.net)}</span>
+                      <span className="text-muted-foreground">{copy.vat}: {money(linesTotal.vat)}</span>
+                      <span className="font-medium text-foreground">{copy.total}: {money(linesTotal.gross)}</span>
+                    </div>
+                  ) : null}
                 </section>
               ) : null}
 

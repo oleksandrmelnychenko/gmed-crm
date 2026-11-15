@@ -498,6 +498,27 @@ describe("invoice creation totals", () => {
     });
   });
 
+  it("prices the part completing a quote line as its exact rest (QA 2026-11-15, A-1)", () => {
+    const hours = line({
+      quantity: "3",
+      unit_price: "33.33",
+      vat_rate: "19",
+      line_net: "99.99",
+      line_vat: "19",
+      line_gross: "118.99",
+      invoiced_quantity: "2.5",
+      invoiced_net: "83.33",
+      invoiced_gross: "99.16",
+      remaining_quantity: "0.5",
+    });
+    expect(calculateInvoiceSelectionTotals([hours], [0], { "0": "0.5" })).toEqual({
+      net: 16.66,
+      vat: 3.17,
+      gross: 19.83,
+      lineGrossByIndex: { 0: 19.83 },
+    });
+  });
+
   it("uses the quoted scope no invoice bills for an advance and the remaining scope for settlements", () => {
     const quoteLine = line({ quantity: "3", remaining_quantity: "1" });
     expect(invoiceLineQuantityAvailable(quoteLine, "advance")).toBe(3);

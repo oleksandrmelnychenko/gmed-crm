@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { portalCreditSideLabel, resolvePatientBalancePresentation, staffCreditSideLabel } from "./account-balance";
+import {
+  portalCreditSideLabel,
+  resolvePatientBalancePresentation,
+  staffBalanceWithoutUnappliedAdvance,
+  staffCreditSideLabel,
+} from "./account-balance";
 
 describe("portalCreditSideLabel", () => {
   it("calls a paid advance a prepayment, not an overpayment", () => {
@@ -114,5 +119,20 @@ describe("resolvePatientBalancePresentation", () => {
         balance_side: "settled",
       }),
     ).toBeNull();
+  });
+});
+
+describe("staffBalanceWithoutUnappliedAdvance (QA 2026-11-15, A-3)", () => {
+  it("counts only the cash above an unapplied advance as overpayment", () => {
+    const summary = { closing_balance: "-1027.33", balance_side: "credit" as const, available_prepayment: "1000.00" };
+    const balance = staffBalanceWithoutUnappliedAdvance(resolvePatientBalancePresentation(summary), summary);
+    expect(balance).toMatchObject({ amount: 27.33, side: "credit" });
+    expect(staffCreditSideLabel(summary, "ru")).toBe("Переплата");
+  });
+  it("leaves a credit the advance covers and a debt as they are", () => {
+    const advanceOnly = { closing_balance: "-1000.00", balance_side: "credit" as const, available_prepayment: "1000.00" };
+    expect(staffBalanceWithoutUnappliedAdvance(resolvePatientBalancePresentation(advanceOnly), advanceOnly)).toMatchObject({ amount: 1000 });
+    const debt = { closing_balance: "50.00", balance_side: "debit" as const, available_prepayment: "1000.00" };
+    expect(staffBalanceWithoutUnappliedAdvance(resolvePatientBalancePresentation(debt), debt)).toMatchObject({ amount: 50, side: "debit" });
   });
 });

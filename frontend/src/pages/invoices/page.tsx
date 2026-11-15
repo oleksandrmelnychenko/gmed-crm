@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { hasFormChanges } from "@/lib/form-changes";
-import { moneyInputText, parseMoneyInput } from "@/lib/money";
+import { moneyInputMessage, moneyInputProblem, moneyInputText, parseMoneyInput } from "@/lib/money";
 import { MoneyInput } from "@/components/ui/money-input";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -19,6 +19,7 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  Ban,
   BookOpen,
   ChartColumn,
   NotebookPen,
@@ -114,7 +115,7 @@ import {
   effectiveCreditNoteSelection,
   previewCreditNote,
 } from "./model/credit-note";
-import { CREDIT_TRANSFER_METHOD, creditablePrepayments, paymentOverpayment } from "./model/overpayment";
+import { CREDIT_TRANSFER_METHOD, creditablePrepayments, overpaymentConfirmed, paymentOverpayment } from "./model/overpayment";
 import { CreditBalancePanel } from "./ui/credit-balance-panel";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { InvoiceLineComment } from "./ui/invoice-line-comment";
@@ -223,6 +224,7 @@ import {
   invoiceIssuedAt,
   invoiceDocumentState,
   invoiceStatusFormProblem,
+  canStornoInvoice,
   isInvoiceReleased,
   canEditInvoiceDueDate,
   invoiceRecipientAddressLines,
@@ -444,6 +446,9 @@ async function downloadInvoicePdf(
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+/** Anchor of the credit note section the status dialog of a paid invoice points to. */
+const INVOICE_CREDIT_NOTE_SECTION_ID = "invoice-credit-note-section";
 
 async function downloadCreditNotePdf(invoiceId: string, creditNoteId: string, documentNumber: string) {
   const blob = await fetchCreditNotePdfBlob(invoiceId, creditNoteId);
@@ -1244,6 +1249,13 @@ function useStaffInvoicesPageContent() {
     if (createOpen && !createBusy && selectedInvoiceId) setCreateOpen(false);
   }, [createOpen, createBusy, selectedInvoiceId]);
 
+  // `?create=1` opens the dialog once: closed in any way, the flag leaves the
+  // URL, so a later remount (e.g. after issuing) never reopens it (QA 2026-11-15, A-8).
+  const createFlagInUrl = searchParams.get("create") === "1";
+  useEffect(() => {
+    if (!createOpen && createFlagInUrl) syncQuery({ create: null }, { replace: true });
+  }, [createOpen, createFlagInUrl]);
+
   useEffect(() => {
     const firstAvailable = creditablePrepayments(detail?.available_prepayments)[0];
     const prefilled: InvoicePrepaymentDraft = {
@@ -1846,6 +1858,10 @@ function useStaffInvoicesPageContent() {
     accountingMonthly,
     accountingYear,
   );
+  // The invoice whose detail was loaded last: a reload of the same invoice
+  // (realtime events of other invoices trigger them) keeps the dunning note
+  // being typed (QA 2026-11-15, A-8).
+  const loadedInvoiceIdRef = useRef<string | null>(null);
   const applyLoadedInvoiceDetail = useCallback((
     data: NonNullable<typeof detail>,
     dunning: typeof dunningEvents,
@@ -1861,8 +1877,11 @@ function useStaffInvoicesPageContent() {
     setStornoConfirmOpen(false);
     setVisibilityForm(invoiceToVisibilityForm(data));
     setPayerForm(invoiceToPayerForm(data));
-    setDunningForm({ note: "" });
-    setDunningError(null);
+    if (loadedInvoiceIdRef.current !== data.id) {
+      loadedInvoiceIdRef.current = data.id;
+      setDunningForm({ note: "" });
+      setDunningError(null);
+    }
     setVisibilityError(null);
     setPayerError(null);
     dispatchWorkspaceState({
@@ -2120,7 +2139,17 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleRecordPayment() {
-    if (!detail || paymentDateRefused || !(parseMoneyInput(paymentForm.amountGross) > 0)) return;
+    if (!detail) return;
+    // Never a click that does nothing (QA 2026-11-15, A-8): what holds the
+    // payment back is said.
+    const amountProblem = moneyInputProblem(paymentForm.amountGross) ?? (
+      paymentForm.amountGross.trim() === "" ? "not_positive" : null
+    );
+    if (amountProblem) {
+      setPaymentError(moneyInputMessage(amountProblem, lang));
+      return;
+    }
+    if (paymentDateRefused) return;
     // A second click before the busy state re-renders the button does nothing;
     // the server also replays a repeated request id instead of booking twice.
     if (paymentInFlight.current) return;
@@ -2137,7 +2166,7 @@ function useStaffInvoicesPageContent() {
         note: paymentForm.note.trim() || null,
         payer_name: paymentForm.payerName.trim() || null,
         // The notice above the button showed the excess before this click.
-        accept_overpayment: overpaymentAcceptedFor === paymentForm.amountGross
+        accept_overpayment: overpaymentConfirmed(overpaymentAcceptedFor, paymentForm.amountGross)
           && paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0,
       });
       // The booked payment leaves an empty form (amount, today, bank transfer,
@@ -2369,6 +2398,8 @@ function useStaffInvoicesPageContent() {
       setDraftDeleteOpen(false);
       setSelectedInvoiceId("");
       setDetail(null);
+      // The URL opens the sheet again otherwise, on the deleted draft (QA 2026-11-15, A-4).
+      syncQuery({ invoice: null }, { replace: true });
       clearApiCache("/invoices");
       setReloadToken((current) => current + 1);
     } catch (error) {
@@ -3094,6 +3125,7 @@ function useStaffInvoicesPageContent() {
         if (!open) {
           setSelectedInvoiceId("");
           setDetail(null);
+          loadedInvoiceIdRef.current = null;
           setDunningEvents([]);
           setDunningError(null);
           setVisibilityError(null);
@@ -3304,24 +3336,47 @@ function useStaffInvoicesPageContent() {
                           </Button>
                         </>
                       ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="size-8 rounded-lg"
-                          onClick={() => {
-                            setStatusError(null);
-                            setStatusConfirmation(null);
-                            setStornoConfirmOpen(false);
-                            // A status preset by «Выставить» and then dismissed is not kept.
-                            setStatusForm((current) => ({ ...current, status: invoiceToStatusForm(detail).status }));
-                            setStatusDialogOpen(true);
-                          }}
-                          disabled={!access.canManage}
-                          aria-label={t.common_edit}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
+                        <>
+                          {/* Storno with a named button (QA 2026-11-15, A-5). */}
+                          {access.canManage && canStornoInvoice(detail) ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1.5 rounded-lg text-destructive hover:text-destructive"
+                              data-testid="invoice-storno"
+                              onClick={() => {
+                                setStatusError(null);
+                                setStatusConfirmation(null);
+                                setStornoConfirmOpen(false);
+                                setStatusForm((current) => ({ ...current, status: "cancelled" }));
+                                setStatusDialogOpen(true);
+                              }}
+                            >
+                              <Ban className="size-3.5" />
+                              {t.revenue_invoices_storno_action}
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="size-8 rounded-lg"
+                            onClick={() => {
+                              setStatusError(null);
+                              setStatusConfirmation(null);
+                              setStornoConfirmOpen(false);
+                              // A status preset by «Выставить» and then dismissed is not kept.
+                              setStatusForm((current) => ({ ...current, status: invoiceToStatusForm(detail).status }));
+                              setStatusDialogOpen(true);
+                            }}
+                            disabled={!access.canManage}
+                            aria-label={t.common_edit}
+                            title={t.common_edit}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        </>
                       )}
                     </div>
                   }
@@ -3563,7 +3618,7 @@ function useStaffInvoicesPageContent() {
                               <input
                                 type="checkbox"
                                 data-testid="payment-overpayment-confirm"
-                                checked={overpaymentAcceptedFor === paymentForm.amountGross}
+                                checked={overpaymentConfirmed(overpaymentAcceptedFor, paymentForm.amountGross)}
                                 onChange={(event) =>
                                   setOverpaymentAcceptedFor(event.target.checked ? paymentForm.amountGross : null)
                                 }
@@ -3588,7 +3643,7 @@ function useStaffInvoicesPageContent() {
                               !paymentForm.receivedOn ||
                               // An overpayment is booked only when confirmed for this amount (R4-6).
                               (paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0
-                                && overpaymentAcceptedFor !== paymentForm.amountGross)
+                                && !overpaymentConfirmed(overpaymentAcceptedFor, paymentForm.amountGross))
                             }
                             onClick={() => void handleRecordPayment()}
                           >
@@ -3778,6 +3833,7 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </SectionCard>
 
+                <div id={INVOICE_CREDIT_NOTE_SECTION_ID} className="scroll-mt-4">
                 <SectionCard icon={FileMinus} title={t.finance_credit_note_section_title}>
                   <div className="space-y-4">
                     {access.canManage && !["draft", "cancelled"].includes(detail.status) && Number(detail.adjusted_total_gross ?? detail.total_gross) > 0 ? (
@@ -3890,6 +3946,7 @@ function useStaffInvoicesPageContent() {
                     )}
                   </div>
                 </SectionCard>
+                </div>
 
                 {Number(detail.credit_balance ?? 0) > 0 || (detail.credit_transfers?.length ?? 0) > 0 ? (
                   <SectionCard icon={WalletCards} title={t.finance_credit_section_title}>
@@ -5299,7 +5356,28 @@ function useStaffInvoicesPageContent() {
                     }
                     disabled={!access.canManage || statusNotesLocked}
                   />
-                  {statusNotesLocked ? (
+                  {statusNotesLocked && detail && !canStornoInvoice(detail) && detail.status !== "cancelled" ? (
+                    <div className="flex flex-wrap items-center gap-2" data-testid="invoice-status-credit-note-hint">
+                      <p className="text-xs text-muted-foreground">{t.revenue_invoices_notes_locked_credit_note}</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5 rounded-lg"
+                        onClick={() => {
+                          setStatusDialogOpen(false);
+                          window.setTimeout(() => {
+                            document
+                              .getElementById(INVOICE_CREDIT_NOTE_SECTION_ID)
+                              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }, 0);
+                        }}
+                      >
+                        <FileMinus className="size-3.5" />
+                        {t.revenue_invoices_open_credit_note}
+                      </Button>
+                    </div>
+                  ) : statusNotesLocked ? (
                     <p className="text-xs text-muted-foreground">{t.revenue_invoices_notes_locked}</p>
                   ) : null}
                 </Field>

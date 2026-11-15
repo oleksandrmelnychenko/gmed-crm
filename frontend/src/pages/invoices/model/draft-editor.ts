@@ -7,7 +7,7 @@
  * (`PUT /invoices/{id}/draft`) checks everything again.
  */
 
-import { normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
+import { moneyLinePartAmounts, normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
 
 export type DraftEditorQuoteLine = {
   line_index: number;
@@ -18,6 +18,13 @@ export type DraftEditorQuoteLine = {
   is_cost_passthrough: boolean;
   quoted_quantity: string;
   open_quantity: string;
+  /** What other invoices bill of the line already (quantity, net, gross). */
+  billed_quantity?: string;
+  billed_net?: string;
+  billed_gross?: string;
+  /** The whole quote line's net and gross. */
+  line_net?: string;
+  line_gross?: string;
   selected_quantity: string | null;
   comment: string | null;
 };
@@ -122,6 +129,45 @@ export function draftLinesChanged(payload: DraftEditorPayload, form: DraftForm):
 }
 
 export type SplitRow = { net: number; vat: number; gross: number };
+
+/**
+ * One part of a quote line the way the server bills it
+ * (`money::line_part_amounts`): the part completing the line takes exactly
+ * what is left of the line total; any other part is rounded on its own,
+ * never above that rest (QA 2026-11-15, A-1).
+ */
+export function linePartAmounts(line: DraftEditorQuoteLine, quantity: number): SplitRow {
+  return moneyLinePartAmounts({
+    quantity,
+    unitPriceNet: Number(line.unit_price ?? 0),
+    vatRatePercent: Number(line.vat_rate ?? 0),
+    lineQuantity: Number(line.quoted_quantity),
+    billedQuantity: Number(line.billed_quantity ?? 0),
+    lineNet: Number(line.line_net ?? Number.NaN),
+    lineGross: Number(line.line_gross ?? Number.NaN),
+    billedNet: Number(line.billed_net ?? 0),
+    billedGross: Number(line.billed_gross ?? 0),
+  });
+}
+
+/** Running net, VAT and gross of the chosen lines; null while a quantity cannot be read. */
+export function draftLinesTotal(payload: DraftEditorPayload, form: DraftForm): SplitRow | null {
+  if (payload.lines_mode !== "quote_positions") return null;
+  let total: SplitRow = { net: 0, vat: 0, gross: 0 };
+  for (const line of payload.quote_lines) {
+    const entry = form.lines[line.line_index];
+    if (!entry?.selected) continue;
+    const quantity = readQuantity(entry.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) return null;
+    const part = linePartAmounts(line, roundCents(quantity));
+    total = {
+      net: roundCents(total.net + part.net),
+      vat: roundCents(total.vat + part.vat),
+      gross: roundCents(total.gross + part.gross),
+    };
+  }
+  return total;
+}
 
 /** Net and VAT of a gross share, worked back like the server (`line_amounts_for_gross`). */
 export function amountsForGross(gross: number, vatRatePercent: number): SplitRow {

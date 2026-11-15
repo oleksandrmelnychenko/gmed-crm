@@ -138,6 +138,36 @@ export function moneyLineAmounts(
   return { net, vat, gross: roundCents(net + vat) };
 }
 
+/**
+ * One part of a line billed in parts, as the server bills it
+ * (`money::line_part_amounts`): the part completing the line's quantity takes
+ * exactly what the line total has left after the parts billed before; any
+ * other part is rounded on its own, never above that rest (QA 2026-11-15, A-1).
+ * Without the line totals the part is priced on its own.
+ */
+export function moneyLinePartAmounts(part: {
+  quantity: number;
+  unitPriceNet: number;
+  vatRatePercent: number;
+  lineQuantity: number;
+  billedQuantity: number;
+  lineNet: number;
+  lineGross: number;
+  billedNet: number;
+  billedGross: number;
+}): MoneyLineAmounts {
+  const own = moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent);
+  if (![part.lineNet, part.lineGross, part.lineQuantity].every(Number.isFinite)) return own;
+  const billedNet = Number.isFinite(part.billedNet) ? part.billedNet : 0;
+  const billedGross = Number.isFinite(part.billedGross) ? part.billedGross : 0;
+  const billedQuantity = Number.isFinite(part.billedQuantity) ? part.billedQuantity : 0;
+  const restNet = Math.max(roundCents(part.lineNet - billedNet), 0);
+  const restGross = Math.max(roundCents(part.lineGross - billedGross), restNet);
+  const rest = { net: restNet, vat: roundCents(restGross - restNet), gross: restGross };
+  if (toCents(billedQuantity + part.quantity) >= toCents(part.lineQuantity)) return rest;
+  return toCents(own.net) <= toCents(rest.net) && toCents(own.gross) <= toCents(rest.gross) ? own : rest;
+}
+
 function moneyNumber(value: unknown): number {
   const numeric =
     typeof value === "number"

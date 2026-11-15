@@ -9,8 +9,20 @@ import {
   creditTransferTargetLabel,
   creditTransferTargets,
   creditablePrepayments,
+  overpaymentConfirmed,
   paymentOverpayment,
 } from "./overpayment";
+
+describe("overpayment confirmation (QA 2026-11-15, A-8)", () => {
+  it("keeps covering the same amount written with German thousands separators", () => {
+    expect(overpaymentConfirmed("1.000,00", "1000,00")).toBe(true);
+    expect(overpaymentConfirmed("1.000,00", "1.000,00")).toBe(true);
+    expect(overpaymentConfirmed("1.000,00", "1.000,01")).toBe(false);
+    expect(overpaymentConfirmed(null, "1.000,00")).toBe(false);
+    expect(overpaymentConfirmed("1.000,00", "1,000.00")).toBe(false);
+    expect(paymentOverpayment("1.000,00", "990.45")).toBeCloseTo(9.55, 2);
+  });
+});
 
 describe("advances of another recipient (owner decision 2026-11-12)", () => {
   it("offers only the same recipient person's advances", () => {

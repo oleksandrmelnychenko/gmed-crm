@@ -7,7 +7,9 @@ import {
   draftFormDirty,
   draftFormFrom,
   draftLinesProblem,
+  draftLinesTotal,
   draftUpdatePayload,
+  linePartAmounts,
   type DraftEditorPayload,
 } from "./draft-editor";
 
@@ -112,5 +114,41 @@ describe("draft invoice editor", () => {
     expect(advanceSplitProblem(advance, ["49,00", "150,00"])).toBe("sum_mismatch");
     expect(advanceSplitProblem(advance, ["150,00", "50,00"])).toBe("over_open");
     expect(defaultSplitForm(advance)).toEqual(["119,00", "81,00"]);
+  });
+});
+
+describe("running total of the draft lines (QA 2026-11-15, A-1/A-5)", () => {
+  const hours = {
+    line_index: 0,
+    description: "Dolmetscher Stunde",
+    unit: null,
+    unit_price: "33.33",
+    vat_rate: "19",
+    is_cost_passthrough: false,
+    quoted_quantity: "3",
+    open_quantity: "0.5",
+    billed_quantity: "2.5",
+    billed_net: "83.33",
+    billed_gross: "99.16",
+    line_net: "99.99",
+    line_gross: "118.99",
+    selected_quantity: "0.5",
+    comment: null,
+  };
+
+  it("bills the part completing the line with exactly its rest", () => {
+    expect(linePartAmounts(hours, 0.5)).toEqual({ net: 16.66, vat: 3.17, gross: 19.83 });
+    const first = { ...hours, open_quantity: "3", billed_quantity: "0", billed_net: "0", billed_gross: "0" };
+    expect(linePartAmounts(first, 2.5)).toEqual({ net: 83.33, vat: 15.83, gross: 99.16 });
+  });
+
+  it("sums the chosen lines as net, VAT and gross", () => {
+    const payload: DraftEditorPayload = { ...positions, quote_lines: [hours, positions.quote_lines[1]] };
+    const form = draftFormFrom(payload);
+    expect(draftLinesTotal(payload, form)).toEqual({ net: 16.66, vat: 3.17, gross: 19.83 });
+    form.lines[1] = { selected: true, quantity: "1", comment: "" };
+    expect(draftLinesTotal(payload, form)).toEqual({ net: 66.66, vat: 12.67, gross: 79.33 });
+    form.lines[1] = { selected: true, quantity: "x", comment: "" };
+    expect(draftLinesTotal(payload, form)).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { t } from "@/lib/i18n";
 
 import {
+  portalInvoiceNeedsNoPaymentProof,
   feedbackStatusLabel,
   formatPortalAverage,
   isOpenOwnServiceRequest,
@@ -125,5 +126,15 @@ describe("portal services (concierge QA 2026-11-12 D-8, D-9)", () => {
       "late",
       "no-time",
     ]);
+  });
+});
+
+describe("payment proof of a settled invoice (QA 2026-11-15, A-7)", () => {
+  it("asks for none on paid, cancelled or fully credited invoices", () => {
+    expect(portalInvoiceNeedsNoPaymentProof({ status: "paid" })).toBe(true);
+    expect(portalInvoiceNeedsNoPaymentProof({ status: "cancelled" })).toBe(true);
+    expect(portalInvoiceNeedsNoPaymentProof({ status: "sent", display_status: "credited" })).toBe(true);
+    expect(portalInvoiceNeedsNoPaymentProof({ status: "sent", display_status: "sent" })).toBe(false);
+    expect(portalInvoiceNeedsNoPaymentProof({ status: "overdue" })).toBe(false);
   });
 });

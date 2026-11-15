@@ -710,6 +710,7 @@ fn add_remaining_quote_quantities(
     mut line_items: Value,
     allocated_quantities: &Value,
     service_quantities: &Value,
+    invoiced_amounts: &Value,
 ) -> Value {
     let Some(items) = line_items.as_array_mut() else {
         return line_items;
@@ -739,6 +740,18 @@ fn add_remaining_quote_quantities(
                 "invoiced_quantity".to_string(),
                 Value::String(decimal_to_string(allocated)),
             );
+            // What the invoices of this quote bill of the line: the dialog
+            // prices the part completing it as its exact rest (QA
+            // 2026-11-15, A-1, `money::line_part_amounts`).
+            let billed = invoiced_amounts.get(index.to_string().as_str());
+            for (field, key) in [("invoiced_net", "net"), ("invoiced_gross", "gross")] {
+                map.insert(
+                    field.to_string(),
+                    Value::String(decimal_to_string(quote_decimal_value(
+                        billed.and_then(|amounts| amounts.get(key)),
+                    ))),
+                );
+            }
             map.insert(
                 "remaining_quantity".to_string(),
                 Value::String(decimal_to_string(remaining)),
@@ -4199,6 +4212,23 @@ async fn load_quote_detail(
                       WHERE allocated.quantity > 0
                   ), '{}'::jsonb) AS invoiced_quantities,
                   COALESCE((
+                      SELECT jsonb_object_agg(
+                                 billed.quote_line_index::text,
+                                 jsonb_build_object('net', billed.net, 'gross', billed.gross)
+                             )
+                      FROM (
+                          SELECT allocation.quote_line_index,
+                                 SUM(allocation.amount_net_snapshot) AS net,
+                                 SUM(allocation.amount_gross_snapshot) AS gross
+                          FROM invoice_order_line_allocations allocation
+                          JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                          WHERE allocation.quote_id = q.id
+                            AND invoice.status <> 'cancelled'
+                            AND NOT invoice_quote_line_credited(invoice.id, allocation.quote_line_index)
+                          GROUP BY allocation.quote_line_index
+                      ) billed
+                  ), '{}'::jsonb) AS invoiced_amounts,
+                  COALESCE((
                       SELECT jsonb_object_agg(service.id::text, service.quantity)
                       FROM order_leistungen service
                       WHERE service.order_id = q.order_id AND service.status <> 'cancelled'
@@ -4339,6 +4369,7 @@ async fn load_quote_detail(
             row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
             &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
             &row.try_get::<Value, _>("service_quantities").unwrap_or_else(|_| serde_json::json!({})),
+            &row.try_get::<Value, _>("invoiced_amounts").unwrap_or_else(|_| serde_json::json!({})),
         ),
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         // Staff only: quotes are never served to the patient portal or a payer.
@@ -4380,6 +4411,23 @@ async fn list_quotes(
                       FROM quote_line_invoiced_quantities(q.id) allocated
                       WHERE allocated.quantity > 0
                   ), '{}'::jsonb) AS invoiced_quantities,
+                  COALESCE((
+                      SELECT jsonb_object_agg(
+                                 billed.quote_line_index::text,
+                                 jsonb_build_object('net', billed.net, 'gross', billed.gross)
+                             )
+                      FROM (
+                          SELECT allocation.quote_line_index,
+                                 SUM(allocation.amount_net_snapshot) AS net,
+                                 SUM(allocation.amount_gross_snapshot) AS gross
+                          FROM invoice_order_line_allocations allocation
+                          JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                          WHERE allocation.quote_id = q.id
+                            AND invoice.status <> 'cancelled'
+                            AND NOT invoice_quote_line_credited(invoice.id, allocation.quote_line_index)
+                          GROUP BY allocation.quote_line_index
+                      ) billed
+                  ), '{}'::jsonb) AS invoiced_amounts,
                   COALESCE((
                       SELECT jsonb_object_agg(service.id::text, service.quantity)
                       FROM order_leistungen service
@@ -4558,6 +4606,7 @@ async fn list_quotes(
                         row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
             &row.try_get::<Value, _>("service_quantities").unwrap_or_else(|_| serde_json::json!({})),
+            &row.try_get::<Value, _>("invoiced_amounts").unwrap_or_else(|_| serde_json::json!({})),
                     ),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                     "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),

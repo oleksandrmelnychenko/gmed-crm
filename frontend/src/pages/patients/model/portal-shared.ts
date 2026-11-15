@@ -380,6 +380,17 @@ export function portalInvoiceNeedsPaymentProof(
 }
 
 /**
+ * A paid, cancelled or fully credited invoice asks for no payment proof: the
+ * portal shows none instead of «Не загружено» (QA 2026-11-15, A-7).
+ */
+export function portalInvoiceNeedsNoPaymentProof(
+  invoice: Pick<PortalInvoiceItem, "status" | "display_status">,
+): boolean {
+  return ["paid", "cancelled", "credited"].includes(invoice.display_status ?? invoice.status)
+    || ["paid", "cancelled"].includes(invoice.status);
+}
+
+/**
  * Who pays a third party's invoice: «zahlt <Zahler>» while it is open,
  * «bezahlt von <Zahler>» only once it is settled (QA F-x6).
  */

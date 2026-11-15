@@ -391,6 +391,10 @@ struct UpdateInvoiceStatusRequest {
     /// document), or why an overdue invoice goes back to `sent` (the reason of
     /// the dunning block that keeps it there).
     reason: Option<String>,
+    /// Never applied here: lines change only in the draft editor, and an
+    /// issued invoice only by credit note. Read so that a request carrying
+    /// them is refused instead of answered with 200 (QA 2026-11-15, A-6).
+    line_items: Option<Value>,
     /// Warnings about the recipient that billing confirmed for a release.
     #[serde(flatten)]
     confirmations: payer::ReleaseConfirmations,
@@ -3882,18 +3886,180 @@ fn invoice_json_decimal(item: &Value, key: &str) -> Option<Decimal> {
 /// beyond its quote.
 const QUOTE_BEHIND_ACTUAL_SERVICES: &str = "quote_behind_actual_services";
 
-/// The gross of a quote line that no invoice bills yet, from the quantity
-/// invoices bill of it.
-fn unbilled_line_gross(line: &Value, billed: Option<Decimal>) -> Decimal {
-    let gross = invoice_json_decimal(line, "line_gross").unwrap_or(Decimal::ZERO);
+/// What invoices already bill of one quote line: the quantity and the amounts
+/// of their allocations (same reading as `quote_line_invoiced_quantities`).
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct BilledQuoteLine {
+    pub(super) quantity: Decimal,
+    pub(super) net: Decimal,
+    pub(super) gross: Decimal,
+}
+
+/// Net, VAT and gross of a whole quote line as the quote states them; a line
+/// without stored amounts is computed from quantity and unit price.
+pub(super) fn quote_line_amounts(line: &Value) -> money::LineAmounts {
+    let quantity = invoice_json_decimal(line, "quantity")
+        .unwrap_or(Decimal::ZERO)
+        .round_commercial(2);
+    let unit_price = invoice_json_decimal(line, "unit_price")
+        .unwrap_or(Decimal::ZERO)
+        .round_cents();
+    let vat_rate = invoice_json_decimal(line, "vat_rate")
+        .unwrap_or(Decimal::ZERO)
+        .round_commercial(2);
+    let computed = money::line_amounts(quantity, unit_price, vat_rate);
+    match (
+        invoice_json_decimal(line, "line_net"),
+        invoice_json_decimal(line, "line_gross"),
+    ) {
+        (Some(net), Some(gross)) if net >= Decimal::ZERO && gross >= net => money::LineAmounts {
+            net: net.round_cents(),
+            vat: gross.round_cents() - net.round_cents(),
+            gross: gross.round_cents(),
+        },
+        _ => computed,
+    }
+}
+
+/// The gross of a quote line that no invoice bills yet: the line gross minus
+/// what invoices bill of it, so it agrees to the cent with the parts billed
+/// (QA 2026-11-15, A-1).
+fn unbilled_line_gross(line: &Value, billed: Option<&BilledQuoteLine>) -> Decimal {
+    let gross = quote_line_amounts(line).gross;
     let quoted = invoice_json_decimal(line, "quantity").unwrap_or(Decimal::ZERO);
     match billed {
-        Some(billed) if billed > Decimal::ZERO && quoted > Decimal::ZERO => {
-            gross * (quoted - billed).max(Decimal::ZERO) / quoted
+        Some(billed) if billed.quantity > Decimal::ZERO && quoted > Decimal::ZERO => {
+            if billed.quantity >= quoted {
+                Decimal::ZERO
+            } else {
+                (gross - billed.gross).max(Decimal::ZERO)
+            }
         }
         _ => gross,
     }
     .round_cents()
+}
+
+/// Checked inside the transaction that stores new allocations, under the quote
+/// lock: the parts of every quote line the new invoice bills stay within the
+/// line total. Two parts priced at the same time from the same state would
+/// each round on their own and together pass the line (QA 2026-11-15, A-1).
+pub(super) async fn ensure_quote_line_parts_within_totals(
+    conn: &mut sqlx::PgConnection,
+    quote_id: Uuid,
+    quote_lines: &Value,
+    touched_lines: &[i32],
+) -> Result<(), axum::response::Response> {
+    if touched_lines.is_empty() {
+        return Ok(());
+    }
+    let rows = sqlx::query(
+        r#"SELECT allocation.quote_line_index,
+                  SUM(allocation.amount_net_snapshot)::NUMERIC AS net,
+                  SUM(allocation.amount_gross_snapshot)::NUMERIC AS gross
+           FROM invoice_order_line_allocations allocation
+           JOIN invoices invoice ON invoice.id = allocation.invoice_id
+           WHERE allocation.quote_id = $1
+             AND allocation.quote_line_index = ANY($2)
+             AND invoice.status <> 'cancelled'
+             AND NOT invoice_quote_line_credited(invoice.id, allocation.quote_line_index)
+           GROUP BY allocation.quote_line_index"#,
+    )
+    .bind(quote_id)
+    .bind(touched_lines)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %quote_id, "check billed quote line totals");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save invoice line allocation",
+        )
+    })?;
+    for row in rows {
+        let Some(line) = row
+            .try_get::<i32, _>("quote_line_index")
+            .ok()
+            .and_then(|index| usize::try_from(index).ok())
+            .and_then(|index| quote_lines.get(index))
+        else {
+            continue;
+        };
+        let totals = quote_line_amounts(line);
+        let net = row.try_get::<Decimal, _>("net").unwrap_or(Decimal::ZERO);
+        let gross = row.try_get::<Decimal, _>("gross").unwrap_or(Decimal::ZERO);
+        if net > totals.net || gross > totals.gross {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Invoice quantity changed; reload the quote and try again",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Quantity and amounts invoices bill per quote line: allocations of the line
+/// itself plus allocations of the same order service from other quotes of the
+/// order, on invoices not cancelled and lines not credited in full. The
+/// allocations of `excluded_invoice` (a draft being rebuilt) are left out.
+pub(super) async fn load_billed_quote_lines<'e, E>(
+    executor: E,
+    quote_id: Uuid,
+    excluded_invoice: Option<Uuid>,
+) -> Result<BTreeMap<usize, BilledQuoteLine>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let rows = sqlx::query(
+        r#"SELECT line.quote_line_index,
+                  COALESCE(SUM(allocation.quantity), 0)::NUMERIC AS quantity,
+                  COALESCE(SUM(allocation.amount_net_snapshot), 0)::NUMERIC AS net,
+                  COALESCE(SUM(allocation.amount_gross_snapshot), 0)::NUMERIC AS gross
+           FROM (
+               SELECT (item.ordinality - 1)::INTEGER AS quote_line_index,
+                      CASE
+                          WHEN COALESCE(item.value ->> 'source_order_leistung_id', '')
+                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                              THEN (item.value ->> 'source_order_leistung_id')::UUID
+                      END AS order_leistung_id
+               FROM quotes quote
+               CROSS JOIN LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(quote.line_items) = 'array'
+                        THEN quote.line_items ELSE '[]'::jsonb END
+               ) WITH ORDINALITY AS item(value, ordinality)
+               WHERE quote.id = $1
+           ) line
+           JOIN invoice_order_line_allocations allocation
+             ON (allocation.quote_id = $1
+                 AND allocation.quote_line_index = line.quote_line_index)
+             OR (allocation.quote_id <> $1
+                 AND line.order_leistung_id IS NOT NULL
+                 AND allocation.order_leistung_id = line.order_leistung_id)
+           JOIN invoices invoice ON invoice.id = allocation.invoice_id
+           WHERE invoice.status <> 'cancelled'
+             AND NOT invoice_quote_line_credited(invoice.id, allocation.quote_line_index)
+             AND ($2::UUID IS NULL OR allocation.invoice_id <> $2)
+           GROUP BY line.quote_line_index
+           HAVING COALESCE(SUM(allocation.quantity), 0) > 0"#,
+    )
+    .bind(quote_id)
+    .bind(excluded_invoice)
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let index = usize::try_from(row.try_get::<i32, _>("quote_line_index").ok()?).ok()?;
+            Some((
+                index,
+                BilledQuoteLine {
+                    quantity: row.try_get("quantity").unwrap_or(Decimal::ZERO),
+                    net: row.try_get("net").unwrap_or(Decimal::ZERO),
+                    gross: row.try_get("gross").unwrap_or(Decimal::ZERO),
+                },
+            ))
+        })
+        .collect())
 }
 
 async fn load_allocated_quote_quantities(
@@ -3951,6 +4117,15 @@ async fn build_selected_invoice_snapshot(
 
     let allocated = load_allocated_quote_quantities(state, ctx.quote_id).await?;
     let allocated = drafts::without_own_allocations(state, ctx, allocated).await?;
+    let billed_amounts = load_billed_quote_lines(&state.db, ctx.quote_id, ctx.editing_invoice_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, quote_id = %ctx.quote_id, "load billed quote line amounts");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load remaining invoice quantities",
+            )
+        })?;
     let mut requested = BTreeMap::<usize, Decimal>::new();
     let mut requested_comments = BTreeMap::<usize, String>::new();
     if let Some(items) = requested_items {
@@ -4114,8 +4289,23 @@ async fn build_selected_invoice_snapshot(
                 "Quote contains invalid price or VAT data",
             ));
         }
-        let (line_net, line_vat, line_gross) =
-            compute_invoice_line_parts(selected_quantity, unit_price, vat_rate);
+        // The part completing the line bills exactly what is left of the line
+        // total; no split bills more than the quote line (QA 2026-11-15, A-1).
+        let billed = billed_amounts.get(&line_index).copied().unwrap_or_default();
+        let part = money::line_part_amounts(
+            selected_quantity,
+            already_allocated,
+            quoted_quantity,
+            unit_price,
+            vat_rate,
+            quote_line_amounts(source_item),
+            money::LineAmounts {
+                net: billed.net,
+                vat: billed.gross - billed.net,
+                gross: billed.gross,
+            },
+        );
+        let (line_net, line_vat, line_gross) = (part.net, part.vat, part.gross);
         let mut selected_item = source_item.clone();
         if let Some(map) = selected_item.as_object_mut() {
             map.insert(
@@ -4335,7 +4525,15 @@ async fn load_prepayment_advance_groups(
 ) -> Result<(Vec<drafts::AdvanceGroup>, bool), axum::response::Response> {
     // The prepayment is measured against what no invoice bills yet: beside an
     // interim invoice the whole quote would be billed twice (QA 2026-11-01, Y2 B1).
-    let allocated = load_allocated_quote_quantities(state, ctx.quote_id).await?;
+    let allocated = load_billed_quote_lines(&state.db, ctx.quote_id, None)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, quote_id = %ctx.quote_id, "load billed quote line amounts");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load remaining invoice quantities",
+            )
+        })?;
     let quote_items = ctx.line_items.as_array().cloned().unwrap_or_default();
     let mut groups = BTreeMap::<(bool, Decimal), Decimal>::new();
     for (line_index, item) in quote_items.iter().enumerate() {
@@ -4347,7 +4545,7 @@ async fn load_prepayment_advance_groups(
         if source_service_cancelled {
             continue;
         }
-        let gross = unbilled_line_gross(item, allocated.get(&line_index).copied());
+        let gross = unbilled_line_gross(item, allocated.get(&line_index));
         if gross <= Decimal::ZERO {
             continue;
         }
@@ -4373,7 +4571,9 @@ async fn load_prepayment_advance_groups(
             .or_insert(Decimal::ZERO) += gross;
     }
     let quote_gross: Decimal = groups.values().copied().sum();
-    let part_billed = allocated.values().any(|quantity| *quantity > Decimal::ZERO);
+    let part_billed = allocated
+        .values()
+        .any(|billed| billed.quantity > Decimal::ZERO);
     if quote_gross <= Decimal::ZERO && part_billed {
         return Err(err(
             StatusCode::CONFLICT,
@@ -8128,6 +8328,21 @@ async fn create_patient_billing_invoice(
                 );
             }
         }
+        let touched = snapshot
+            .allocations
+            .iter()
+            .map(|allocation| allocation.quote_line_index)
+            .collect::<Vec<_>>();
+        if let Err(response) = ensure_quote_line_parts_within_totals(
+            &mut transaction,
+            context.quote_id,
+            &context.line_items,
+            &touched,
+        )
+        .await
+        {
+            return response;
+        }
         if let Err(response) =
             ensure_interim_leaves_open_advance(&mut transaction, &invoice_type, invoice_id).await
         {
@@ -8437,6 +8652,21 @@ async fn create_invoice_from_quote(
                         ),
                     };
                 }
+            }
+            let touched = invoice_snapshot
+                .allocations
+                .iter()
+                .map(|allocation| allocation.quote_line_index)
+                .collect::<Vec<_>>();
+            if let Err(response) = ensure_quote_line_parts_within_totals(
+                &mut transaction,
+                ctx.quote_id,
+                &ctx.line_items,
+                &touched,
+            )
+            .await
+            {
+                return response;
             }
             if let Err(response) =
                 ensure_interim_leaves_open_advance(&mut transaction, &invoice_type, invoice_id)
@@ -14369,6 +14599,7 @@ async fn update_invoice_status(
     }
     let current = match sqlx::query(
         r#"SELECT invoice.patient_id, invoice.invoice_type, invoice.status,
+                  invoice.released_at IS NOT NULL AS released,
                   COALESCE((
                       SELECT SUM(
                           CASE
@@ -14409,6 +14640,23 @@ async fn update_invoice_status(
     let patient_id = current.try_get::<Uuid, _>("patient_id").unwrap_or_default();
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
+    }
+    if body
+        .line_items
+        .as_ref()
+        .is_some_and(|lines| !lines.is_null())
+    {
+        return if current.try_get::<bool, _>("released").unwrap_or(false) {
+            err(
+                StatusCode::CONFLICT,
+                "The lines of a released invoice cannot change; issue a credit note",
+            )
+        } else {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "The lines of a draft change in the draft editor",
+            )
+        };
     }
 
     let due_date = match parse_optional_date(body.due_date.as_deref()) {
@@ -14673,6 +14921,27 @@ async fn update_invoice_status(
             StatusCode::CONFLICT,
             "Payments, prepayments and credit notes must be reversed or released before cancellation",
         );
+    }
+
+    // A repeated request (double click, parallel issue calls) waits for the
+    // row lock above and then finds nothing to change: it answers with the
+    // invoice as it is and writes no second audit row (QA 2026-11-15, A-6).
+    let changes_notes = !locked_released
+        && body
+            .notes
+            .as_deref()
+            .is_some_and(|notes| Some(notes) != locked_notes.as_deref());
+    if requested_status == locked_status
+        && requested_paid_amount.is_none_or(|amount| amount == locked_paid_amount)
+        && due_date.is_none_or(|value| Some(value) == locked_due_date)
+        && !changes_notes
+    {
+        drop(transaction);
+        return match load_invoice_detail(&state, invoice_id, &auth).await {
+            Ok(Some(invoice)) => Json(invoice).into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+            Err(resp) => resp,
+        };
     }
 
     let mut legacy_payment_transaction_id = None;

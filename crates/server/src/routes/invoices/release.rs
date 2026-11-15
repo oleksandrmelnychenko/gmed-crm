@@ -10,9 +10,10 @@ use chrono::{Days, NaiveDate};
 use rust_decimal::Decimal;
 use serde_json::Value;
 use sqlx::{PgConnection, Row};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
-use super::{gen_invoice_number, unbilled_line_gross};
+use super::{BilledQuoteLine, gen_invoice_number, load_billed_quote_lines, unbilled_line_gross};
 use crate::money::CommercialRounding;
 
 /// Payment term when neither the request nor the draft names a due date.
@@ -123,19 +124,16 @@ pub(super) async fn advance_exceeds_unbilled_quote(
 async fn billed_quote_lines(
     conn: &mut PgConnection,
     quote_id: Uuid,
-) -> Result<Vec<(i32, Decimal)>, sqlx::Error> {
-    sqlx::query_as(
-        r#"SELECT quote_line_index, quantity
-           FROM quote_line_invoiced_quantities($1)
-           WHERE quantity > 0"#,
-    )
-    .bind(quote_id)
-    .fetch_all(conn)
-    .await
+) -> Result<BTreeMap<usize, BilledQuoteLine>, sqlx::Error> {
+    load_billed_quote_lines(conn, quote_id, None).await
 }
 
 /// The gross of the quote no invoice bills, cancelled services left out.
-fn unbilled_quote_gross(lines: &Value, billed: &[(i32, Decimal)], cancelled: &[Uuid]) -> Decimal {
+fn unbilled_quote_gross(
+    lines: &Value,
+    billed: &BTreeMap<usize, BilledQuoteLine>,
+    cancelled: &[Uuid],
+) -> Decimal {
     lines
         .as_array()
         .map(|lines| {
@@ -149,13 +147,7 @@ fn unbilled_quote_gross(lines: &Value, billed: &[(i32, Decimal)], cancelled: &[U
                         .and_then(|value| Uuid::parse_str(value).ok())
                         .is_some_and(|service_id| cancelled.contains(&service_id))
                 })
-                .map(|(line_index, line)| {
-                    let quantity = billed
-                        .iter()
-                        .find(|(index, _)| usize::try_from(*index).ok() == Some(line_index))
-                        .map(|(_, quantity)| *quantity);
-                    unbilled_line_gross(line, quantity)
-                })
+                .map(|(line_index, line)| unbilled_line_gross(line, billed.get(&line_index)))
                 .sum()
         })
         .unwrap_or(Decimal::ZERO)

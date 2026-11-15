@@ -613,3 +613,165 @@ async fn an_advance_covers_own_services_first_and_can_be_split_by_hand() {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "invoice_draft_lines_locked", "{body}");
 }
+
+/// QA 2026-11-15 A-1: 3 x 33,33 EUR (99,99 net / 118,99 gross) billed as
+/// 2,5 h and 0,5 h was 83,33 + 16,67 = 100,00 net. The part completing the
+/// line takes exactly its rest, so the parts add up to the quote line.
+#[tokio::test]
+async fn parts_of_a_quote_line_add_up_to_the_line_to_the_cent() {
+    let Some(fixture) = fixture(
+        "draft-parts",
+        &[("Dolmetscher Stunde", 3, 33.33, 19.0, false)],
+    )
+    .await
+    else {
+        return;
+    };
+    let (status, first) =
+        create_interim(&fixture, json!([{ "line_index": 0, "quantity": "2.5" }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    assert_eq!(
+        dec(&first["total_net"]),
+        "83.33".parse::<Decimal>().unwrap()
+    );
+    assert_eq!(
+        dec(&first["total_gross"]),
+        "99.16".parse::<Decimal>().unwrap()
+    );
+    let first_id = first["id"].as_str().unwrap().to_string();
+
+    let (status, last) =
+        create_interim(&fixture, json!([{ "line_index": 0, "quantity": "0.5" }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{last}");
+    assert_eq!(dec(&last["total_net"]), "16.66".parse::<Decimal>().unwrap());
+    assert_eq!(dec(&last["total_vat"]), "3.17".parse::<Decimal>().unwrap());
+    assert_eq!(
+        dec(&last["total_gross"]),
+        "19.83".parse::<Decimal>().unwrap()
+    );
+    let last_id = last["id"].as_str().unwrap().to_string();
+
+    // The editor of the last part offers what the server bills.
+    let (status, editor) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{last_id}/draft"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{editor}");
+    let line = &editor["quote_lines"][0];
+    assert_eq!(
+        dec(&line["billed_quantity"]),
+        "2.5".parse::<Decimal>().unwrap()
+    );
+    assert_eq!(
+        dec(&line["billed_net"]),
+        "83.33".parse::<Decimal>().unwrap()
+    );
+    assert_eq!(
+        dec(&line["line_gross"]),
+        "118.99".parse::<Decimal>().unwrap()
+    );
+
+    // Rebuilding the first part with the whole line is refused while the
+    // last part holds its quantity; rebuilt to 2,5 it stays 83,33.
+    let (status, rebuilt) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &first_id,
+        json!({ "due_date": null, "notes": null, "line_items": [{ "line_index": 0, "quantity": "2.5" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rebuilt}");
+    assert_eq!(
+        dec(&rebuilt["total_net"]),
+        "83.33".parse::<Decimal>().unwrap()
+    );
+
+    let (billed_net, billed_gross): (Decimal, Decimal) = sqlx::query_as(
+        r#"SELECT SUM(amount_net_snapshot), SUM(amount_gross_snapshot)
+           FROM invoice_order_line_allocations
+           WHERE invoice_id IN ($1::uuid, $2::uuid)"#,
+    )
+    .bind(&first_id)
+    .bind(&last_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .unwrap();
+    assert_eq!(billed_net, "99.99".parse::<Decimal>().unwrap());
+    assert_eq!(billed_gross, "118.99".parse::<Decimal>().unwrap());
+}
+
+/// QA 2026-11-15 A-6: a second issue request (double click, parallel calls)
+/// changes nothing and writes no second audit row; lines sent to the status
+/// endpoint are refused instead of ignored.
+#[tokio::test]
+async fn a_repeated_issue_request_writes_one_audit_row_and_lines_are_refused() {
+    let Some(fixture) = fixture("draft-issue-twice", SERVICES).await else {
+        return;
+    };
+    let (status, draft) =
+        create_interim(&fixture, json!([{ "line_index": 0, "quantity": 1 }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let path = format!("/api/v1/invoices/{invoice_id}/status");
+
+    let (status, body) = json_request(
+        &fixture.app,
+        "POST",
+        &path,
+        &fixture.billing,
+        Some(json!({ "status": "sent", "line_items": [{ "line_index": 0, "quantity": 2 }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let issue = || {
+        json_request(
+            &fixture.app,
+            "POST",
+            &path,
+            &fixture.billing,
+            Some(json!({ "status": "sent" })),
+        )
+    };
+    let ((first_status, first), (second_status, second), (third_status, _)) =
+        tokio::join!(issue(), issue(), issue());
+    assert_eq!(first_status, StatusCode::OK, "{first}");
+    assert_eq!(second_status, StatusCode::OK, "{second}");
+    assert_eq!(third_status, StatusCode::OK);
+    assert_eq!(first["invoice_number"], second["invoice_number"]);
+    assert_eq!(
+        audit_count(&fixture.pool, "update_invoice_status", &invoice_id).await,
+        1
+    );
+
+    let updated_at: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT updated_at FROM invoices WHERE id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    let (status, body) = json_request(
+        &fixture.app,
+        "POST",
+        &path,
+        &fixture.billing,
+        Some(json!({ "status": "sent", "line_items": [{ "line_index": 0, "quantity": 2 }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let after: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT updated_at FROM invoices WHERE id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    assert_eq!(after, updated_at);
+    assert_eq!(
+        audit_count(&fixture.pool, "update_invoice_status", &invoice_id).await,
+        1
+    );
+}
