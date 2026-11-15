@@ -53,7 +53,9 @@ jobs:
     runs-on: ubuntu-latest
     # Keep the full workspace gate; browser checks run alongside it so UI
     # failures are reported without waiting for the longer Rust suite.
-    timeout-minutes: 120
+    # Some suites stall ~60 s on the hosted runner (intermittent, under
+    # investigation); 180 keeps a slow but green run from being cancelled.
+    timeout-minutes: 180
     permissions:
       contents: read
     env:
