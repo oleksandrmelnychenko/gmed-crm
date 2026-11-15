@@ -1,4 +1,4 @@
-import type { EventInput } from "@fullcalendar/core";
+import type { EventInput } from "@fullcalendar/react";
 
 import { canRescheduleAppointmentItem } from "@/pages/appointments/model/selectors";
 import type {
@@ -34,7 +34,7 @@ export function toCalendarEvent(
     end: timed && item.time_end ? `${item.date}T${item.time_end}` : undefined,
     allDay: !timed,
     editable: canRescheduleAppointmentItem(canEditSchedule, item),
-    classNames: [appointmentEventClass(item)],
+    className: appointmentEventClass(item),
     extendedProps: {
       patientName: item.patient_name,
       patientPid: item.patient_pid,

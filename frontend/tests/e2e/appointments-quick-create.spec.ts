@@ -79,9 +79,11 @@ test.describe("quick visit from the calendar (owner 2026-11-14)", () => {
     await page.waitForURL(/\/$/, { timeout: 15_000 });
     await page.goto("/appointments");
 
-    const lane = page.locator('.fc-timegrid-slot-lane[data-time="10:00:00"]').first();
+    const lane = page.locator('.apt-cal-slot-lane[data-time="10:00:00"]').first();
     await expect(lane).toBeVisible();
-    await lane.click();
+    // FullCalendar 7 lays the day columns over the slot rows: the click lands
+    // on the column at the row's height, as a person's click does.
+    await lane.click({ force: true });
 
     const quick = page.getByTestId("appointment-quick-create");
     await expect(quick).toBeVisible();
@@ -143,13 +145,13 @@ test.describe("quick visit from the calendar (owner 2026-11-14)", () => {
     await page.waitForURL(/\/$/, { timeout: 15_000 });
     await page.goto("/appointments");
 
-    await page.locator('.fc-timegrid-slot-lane[data-time="14:00:00"]').first().click();
+    await page.locator('.apt-cal-slot-lane[data-time="14:00:00"]').first().click({ force: true });
     const quick = page.getByTestId("appointment-quick-create");
     await expect(quick).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(quick).toHaveCount(0);
 
-    await page.locator('.fc-timegrid-slot-lane[data-time="14:00:00"]').first().click();
+    await page.locator('.apt-cal-slot-lane[data-time="14:00:00"]').first().click({ force: true });
     await quick.getByRole("button", { name: "Больше полей…" }).click();
     await expect(quick).toHaveCount(0);
     const sheet = page.getByRole("dialog").last();

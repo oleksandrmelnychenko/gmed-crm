@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
-import type { EventDropArg } from "@fullcalendar/core";
-import type { EventResizeDoneArg } from "@fullcalendar/interaction";
+import type { EventDropInfo, EventResizeDoneInfo } from "@fullcalendar/react";
 
 import {
   updateAppointmentSchedule,
@@ -63,7 +62,7 @@ export function useAppointmentSchedulerActions({
   }, []);
 
   const handleInlineReschedule = useCallback(
-    async (info: EventDropArg | EventResizeDoneArg) => {
+    async (info: EventDropInfo | EventResizeDoneInfo) => {
       const source = appointmentsIndex.get(info.event.id);
       // A drop either saves or goes back with a message; it never leaves the
       // card at the new place without a request (concierge QA 2026-11-12, E F4).

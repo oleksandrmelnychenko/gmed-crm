@@ -1,4 +1,4 @@
-import type { EventContentArg } from "@fullcalendar/core";
+import type { EventDisplayInfo } from "@fullcalendar/react";
 
 import {
   appointmentText,
@@ -31,7 +31,7 @@ export function escapeCalendarEventHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-function resolveCalendarEventDurationMinutes(arg: EventContentArg): number {
+function resolveCalendarEventDurationMinutes(arg: EventDisplayInfo): number {
   const { start, end } = arg.event;
   if (!start || !end) return 30;
 
@@ -79,7 +79,7 @@ export type CalendarEventContentOptions = {
 };
 
 export function renderStaticCalendarEventContent(
-  arg: EventContentArg,
+  arg: EventDisplayInfo,
   dictionary: CalendarEventContentDictionary,
   options: CalendarEventContentOptions = {},
 ) {
@@ -87,10 +87,14 @@ export function renderStaticCalendarEventContent(
   const statusOrTypeLabel = resolveCalendarEventStatusOrTypeLabel(props, dictionary);
   const interpreterName = calendarText(props.interpreterName).trim();
   const quickActionsLabel = calendarText(options.quickActionsLabel).trim();
+  // FullCalendar 7 puts the content of a list view row in place of its time
+  // and title, so the tile draws the list's time column itself and the line
+  // below the title leaves the time out (as with FullCalendar 6).
+  const isListView = Boolean(arg.view?.type?.startsWith("list"));
   // Doctor, provider, place or curator — whatever is known. A visit with none
   // of them prints nothing there (the word «Приём» used to stand in).
   const secondaryLine = [
-    arg.timeText,
+    isListView ? "" : arg.timeText,
     props.patientName,
     props.doctorName || props.providerName || props.location || props.ownerName || "",
     interpreterName
@@ -107,8 +111,7 @@ export function renderStaticCalendarEventContent(
   // tile fits its 15 minutes and never runs under the next one (QA
   // 2026-11-11, B-01/B-02).
   const compact = durationMinutes <= 15;
-  return {
-    html: [
+  const card = [
       `<div class="fc-apt-event-card group relative${compact ? " fc-apt-event-card-compact" : ""}" data-event-duration-minutes="${durationMinutes}">`,
       `<div class="fc-apt-event-row-primary"${compact && arg.timeText ? ` data-event-time="${escapeCalendarEventHtml(arg.timeText)}"` : ""}>${escapeCalendarEventHtml(resolveCalendarEventPrimaryTitle(arg.event.title, props))}</div>`,
       secondaryLine
@@ -121,7 +124,10 @@ export function renderStaticCalendarEventContent(
         ? `<button type="button" class="fc-apt-event-menu-button" ${CALENDAR_EVENT_MENU_BUTTON_ATTRIBUTE} aria-haspopup="menu" aria-label="${escapeCalendarEventHtml(quickActionsLabel)}" title="${escapeCalendarEventHtml(quickActionsLabel)}"><span aria-hidden="true">⋯</span></button>`
         : "",
       "</div>",
-    ].join(""),
+    ].join("");
+  if (!isListView) return { html: card };
+  return {
+    html: `<div class="fc-apt-event-list-row"><div class="fc-apt-event-list-time">${escapeCalendarEventHtml(arg.timeText)}</div>${card}</div>`,
   };
 }
 

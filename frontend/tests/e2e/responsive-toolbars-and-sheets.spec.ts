@@ -130,8 +130,8 @@ test("B-01/B-04: back-to-back 15-minute visits in the week view never cover each
     visit("c0000000-0000-0000-0000-0000000000a2", "10:15", "10:30", "Kontrolle B"),
   ]);
   await page.goto("/appointments");
-  const first = page.locator(".fc-timegrid-event").filter({ hasText: "Kontrolle A" });
-  const second = page.locator(".fc-timegrid-event").filter({ hasText: "Kontrolle B" });
+  const first = page.locator(".apt-cal-column-event").filter({ hasText: "Kontrolle A" });
+  const second = page.locator(".apt-cal-column-event").filter({ hasText: "Kontrolle B" });
   await expect(first).toBeVisible();
   await expect(second).toBeVisible();
   const [a, b] = await Promise.all([first.boundingBox(), second.boundingBox()]);
@@ -140,13 +140,13 @@ test("B-01/B-04: back-to-back 15-minute visits in the week view never cover each
   const primary = first.locator(".fc-apt-event-row-primary");
   await expect(primary).toHaveAttribute("data-event-time", "10:00");
   const inOwnTile = await primary.evaluate((node) => {
-    const tile = node.closest(".fc-timegrid-event")!;
+    const tile = node.closest(".apt-cal-column-event")!;
     const box = node.getBoundingClientRect();
     const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
     return Boolean(hit && tile.contains(hit)) && box.bottom <= tile.getBoundingClientRect().bottom + 0.5;
   });
   expect(inOwnTile).toBe(true);
   // The empty all-day row keeps no month-cell height.
-  const allDay = page.locator(".fc-timegrid .fc-daygrid-body").first();
+  const allDay = page.locator(".apt-cal-view-timeGridWeek .apt-cal-day-cell").first();
   expect((await allDay.boundingBox())?.height ?? 0).toBeLessThan(60);
 });

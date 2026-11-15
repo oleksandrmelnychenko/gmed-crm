@@ -6,9 +6,11 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import type FullCalendar from "@fullcalendar/react";
-import type { DateClickArg } from "@fullcalendar/interaction";
-import type { DatesSetArg } from "@fullcalendar/core";
+import type {
+  CalendarRef,
+  DateClickInfo,
+  DatesSetInfo,
+} from "@fullcalendar/react";
 
 import {
   applyAppointmentCreateContext,
@@ -28,7 +30,7 @@ import type {
 } from "@/pages/appointments/model/types";
 
 type UseAppointmentSchedulerControlsOptions = {
-  calendarRef: RefObject<FullCalendar | null>;
+  calendarRef: RefObject<CalendarRef | null>;
   canCreate: boolean;
   currentUserId?: string;
   currentUserRole?: string;
@@ -98,7 +100,7 @@ export function useAppointmentSchedulerControls({
   );
 
   const handleDatesSet = useCallback(
-    (arg: DatesSetArg) => {
+    (arg: DatesSetInfo) => {
       const nextView = arg.view.type as CalendarView;
       const nextDate = toDateInput(arg.view.calendar.getDate());
       onDismissQuickActionMenu();
@@ -272,7 +274,7 @@ export function useAppointmentSchedulerControls({
   ]);
 
   const openCreateSheetFromDate = useCallback(
-    (info?: DateClickArg) => {
+    (info?: DateClickInfo) => {
       if (!canCreate) return;
       const next = blankCreateSeed();
       if (info) {

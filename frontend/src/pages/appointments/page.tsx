@@ -12,8 +12,12 @@ import {
   type SetStateAction,
 } from "react";
 import { useSearchParams } from "react-router-dom";
-import type FullCalendar from "@fullcalendar/react";
-import type { DateSelectArg, EventClickArg, EventContentArg } from "@fullcalendar/core";
+import type {
+  CalendarRef,
+  DateSelectInfo,
+  EventClickInfo,
+  EventDisplayInfo,
+} from "@fullcalendar/react";
 import { AppointmentQuickCreate } from "./ui/scheduler/appointment-quick-create";
 import { toDateInput, toTimeInput } from "./model/date-time";
 import {
@@ -326,7 +330,7 @@ function useStaffAppointmentsPageContent() {
   const patientSheetPermissions = linkedPatientPermissions(user);
   const canReviewAppointmentRequests = permissions.canManageStatus;
   const isMobile = useIsMobile();
-  const calendarRef = useRef<FullCalendar | null>(null);
+  const calendarRef = useRef<CalendarRef | null>(null);
   const [pageState, dispatchPageState] = useReducer(
     staffAppointmentsPageReducer,
     undefined,
@@ -1268,7 +1272,7 @@ function useStaffAppointmentsPageContent() {
     anchor: { x: number; y: number };
   } | null>(null);
   const handleCalendarSelect = useCallback(
-    (info: DateSelectArg) => {
+    (info: DateSelectInfo) => {
       calendarRef.current?.getApi().unselect();
       if (!permissions.canCreate) return;
       const base = applyAppointmentCreateContext(
@@ -1682,7 +1686,7 @@ function useStaffAppointmentsPageContent() {
     }
   }, 250);
 
-  function handleEventClick(info: EventClickArg) {
+  function handleEventClick(info: EventClickInfo) {
     // The tile's «⋯» button opens the quick-action menu, not the appointment.
     const menuButton =
       info.jsEvent.target instanceof Element
@@ -1709,7 +1713,7 @@ function useStaffAppointmentsPageContent() {
     ? tr.appointments_quick_actions
     : undefined;
   const renderCalendarEventContent = useCallback(
-    (arg: EventContentArg) =>
+    (arg: EventDisplayInfo) =>
       renderStaticCalendarEventContent(arg, tr, {
         quickActionsLabel: calendarQuickActionsLabel,
       }),

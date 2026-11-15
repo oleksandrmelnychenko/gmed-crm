@@ -57,7 +57,7 @@ export function calendarRangeTitle(
   return `${calendarDayTitle(start, lang)} – ${calendarDayTitle(end, lang)}`;
 }
 
-type TitleFormatterArg = { start: CalendarTitleDay; end?: CalendarTitleDay };
+type TitleFormatterArg = { start: CalendarTitleDay; end?: CalendarTitleDay | null };
 
 /** Per-view `titleFormat` options for FullCalendar in the UI language. */
 export function appointmentCalendarTitleViews(lang: Lang) {

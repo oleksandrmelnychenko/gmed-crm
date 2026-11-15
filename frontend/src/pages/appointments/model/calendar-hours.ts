@@ -1,4 +1,4 @@
-import type { EventInput } from "@fullcalendar/core";
+import type { EventInput } from "@fullcalendar/react";
 
 /** The hours the week and day views show when no visit lies outside them. */
 export const DEFAULT_TIMEGRID_START_HOUR = 6;

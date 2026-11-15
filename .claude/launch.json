@@ -4,37 +4,37 @@
     {
       "name": "frontend-dev",
       "runtimeExecutable": "fnm",
-      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev"],
+      "runtimeArgs": ["exec", "--using", "26", "--", "npm.cmd", "--prefix", "frontend", "run", "dev"],
       "port": 5173
     },
     {
       "name": "frontend-e2e",
       "runtimeExecutable": "fnm",
-      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1", "--port", "5174"],
+      "runtimeArgs": ["exec", "--using", "26", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1", "--port", "5174"],
       "port": 5174
     },
     {
       "name": "frontend-local-stack",
       "runtimeExecutable": "fnm",
-      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4174", "--strictPort"],
+      "runtimeArgs": ["exec", "--using", "26", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4174", "--strictPort"],
       "port": 4174
     },
     {
       "name": "frontend-local-stack-alt",
       "runtimeExecutable": "fnm",
-      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4175", "--strictPort"],
+      "runtimeArgs": ["exec", "--using", "26", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4175", "--strictPort"],
       "port": 4175
     },
     {
       "name": "frontend-devdb",
       "runtimeExecutable": "fnm",
-      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1", "--port", "4177", "--strictPort"],
+      "runtimeArgs": ["exec", "--using", "26", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1", "--port", "4177", "--strictPort"],
       "port": 4177
     },
     {
       "name": "frontend-qa",
       "runtimeExecutable": "fnm",
-      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4176", "--strictPort"],
+      "runtimeArgs": ["exec", "--using", "26", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4176", "--strictPort"],
       "port": 4176
     },
     {
@@ -42,7 +42,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4176 --strictPort"
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 26 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4176 --strictPort"
       ],
       "port": 4176
     },
@@ -51,7 +51,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4180 --strictPort"
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 26 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4180 --strictPort"
       ],
       "port": 4180
     },
@@ -60,7 +60,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4181 --strictPort"
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 26 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4181 --strictPort"
       ],
       "port": 4181
     },
@@ -69,7 +69,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4182 --strictPort"
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 26 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4182 --strictPort"
       ],
       "port": 4182
     },
@@ -78,7 +78,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& set VITE_IDLE_LOGOUT_MINUTES=2&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4183 --strictPort"
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& set VITE_IDLE_LOGOUT_MINUTES=2&& fnm exec --using 26 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4183 --strictPort"
       ],
       "port": 4183
     },
@@ -87,7 +87,7 @@
       "runtimeExecutable": "cmd",
       "runtimeArgs": [
         "/c",
-        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4184 --strictPort"
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 26 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4184 --strictPort"
       ],
       "port": 4184
     }

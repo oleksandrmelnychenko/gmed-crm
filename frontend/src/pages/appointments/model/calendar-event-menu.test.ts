@@ -1,4 +1,4 @@
-import type { EventContentArg } from "@fullcalendar/core";
+import type { EventDisplayInfo } from "@fullcalendar/react";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,7 +12,7 @@ import {
   calendarQuickActionsReducer,
 } from "@/pages/appointments/ui/hooks/use-appointment-calendar-quick-actions";
 
-function eventContentArg(extendedProps: Record<string, unknown>): EventContentArg {
+function eventContentArg(extendedProps: Record<string, unknown>): EventDisplayInfo {
   return {
     timeText: "10:00",
     event: {
@@ -21,7 +21,7 @@ function eventContentArg(extendedProps: Record<string, unknown>): EventContentAr
       end: new Date("2026-06-05T10:30:00"),
       extendedProps,
     },
-  } as unknown as EventContentArg;
+  } as unknown as EventDisplayInfo;
 }
 
 describe("calendar event tile: quick-action button", () => {
