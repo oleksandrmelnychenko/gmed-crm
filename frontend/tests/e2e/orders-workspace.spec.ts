@@ -629,6 +629,8 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
   await editor.getByRole("textbox", {name: "Название приёма"}).fill("Echo und Gespräch");
   await editor.getByRole("checkbox", {name: "Нужен переводчик"}).check();
   await editor.getByRole("combobox", {name: "Переводчик"}).click();
+  // The list is open before it is checked and closed with Escape.
+  await expect(page.getByRole("option", {name: "Olga Test"})).toBeVisible();
   await expect(page.getByRole("option", {name: "Blocked Person"})).toHaveCount(0);
   await page.keyboard.press("Escape");
   await chooseComboboxOption(page, editor.getByRole("combobox", {name: "Переводчик"}), "Olga Test");
@@ -638,6 +640,25 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
   await expect(planner.getByTestId("order-visit-planner-plan-row").first()).toContainText("Echo und Gespräch");
   await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Накладок нет");
   await expect.poll(() => batches.filter(batch => batch.dry_run).length).toBeGreaterThan(0);
+
+  // Bug 77: the plan not created yet survives another view and a reload, and
+  // «Показать план пациенту» waits for it instead of showing the patient less.
+  const section = page.getByTestId("order-planned-appointments");
+  await expect(section.getByTestId("order-plan-release-blocker")).toHaveText("Сначала создайте приёмы (2)");
+  await expect(section.getByTestId("order-plan-release")).toBeDisabled();
+  await section.getByRole("button", {name: "По дням"}).click();
+  await expect(planner).toHaveCount(0);
+  await expect(section.getByTestId("order-planned-appointments-grid-pending")).toHaveText("2");
+  await page.reload();
+  await expect(section.getByRole("button", {name: "Сетка"})).toBeVisible();
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toHaveCount(2);
+  await expect(section.getByTestId("order-plan-release")).toBeDisabled();
+  await section.getByRole("button", {name: "По дням"}).click();
+  await section.getByTestId("order-plan-release-blocker").click();
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toHaveCount(2);
+  // Step 3 in the step bar above the grid is the create action itself.
+  await expect(planner.getByTestId("order-visit-planner-create-step")).toHaveText(/Создать все приёмы \(2\)/);
+  await expect(planner.getByTestId("order-visit-planner-create-step")).toBeEnabled();
 
   await expect(create).toHaveText("Создать все приёмы (2)");
   await create.click();
@@ -651,6 +672,11 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
       title: "Echo und Gespräch", interpreter_needed: true, interpreter_id: "olga"}),
   ]);
   await expect(planner.getByTestId("order-visit-planner-draft")).toHaveCount(0);
+  // Created: nothing waits any more, the release is free and a reload brings no old grid back.
+  await expect(section.getByTestId("order-plan-release-blocker")).toHaveCount(0);
+  await page.reload();
+  await expect(planner).toBeVisible();
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toHaveCount(0);
 });
 
 test("the planning grid shows the server's refusal per visit and creates nothing (plan stage 6)", async ({page}) => {

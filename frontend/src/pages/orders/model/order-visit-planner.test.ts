@@ -16,8 +16,68 @@ import {
   minutesToTime,
   newDraft,
   timeToMinutes,
+  nextDraftNumber,
+  plannerDraftStorageKey,
+  readStoredPlannerDrafts,
+  writeStoredPlannerDrafts,
+  STORED_DRAFT_MAX_AGE_MS,
   type BusySlot,
 } from "./order-visit-planner";
+
+describe("unsaved grid kept per order (bug 77)", () => {
+  const memoryStore = () => {
+    const data = new Map<string, string>();
+    return {
+      data,
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => void data.set(key, value),
+      removeItem: (key: string) => void data.delete(key),
+    };
+  };
+  const doctor = { providerId: "p1", providerName: "Klinik", doctorId: "d1", doctorName: "Dr. A" };
+
+  it("keys by viewer and order under the prefix sign-out wipes", () => {
+    expect(plannerDraftStorageKey("o1", "u1")).toBe("gmed:secure:u1:v1:visit-plan:o1");
+    expect(plannerDraftStorageKey("o1", null)).toBe("gmed:secure:anon:v1:visit-plan:o1");
+  });
+
+  it("brings the grid back after a reload and drops it once created", () => {
+    const store = memoryStore();
+    const key = plannerDraftStorageKey("o1", "u1");
+    const drafts = [
+      newDraft("draft-3", doctor, "2026-11-20", 9 * 60),
+      newDraft("draft-7", doctor, "2026-11-21", 10 * 60),
+    ];
+    writeStoredPlannerDrafts(store, key, drafts, 1_000);
+    expect(readStoredPlannerDrafts(store, key, 2_000)).toEqual(drafts);
+    expect(nextDraftNumber(readStoredPlannerDrafts(store, key, 2_000))).toBe(8);
+    // Another order sees nothing.
+    expect(readStoredPlannerDrafts(store, plannerDraftStorageKey("o2", "u1"), 2_000)).toEqual([]);
+    writeStoredPlannerDrafts(store, key, [], 3_000);
+    expect(store.data.has(key)).toBe(false);
+  });
+
+  it("forgets a stale or broken entry and survives blocked storage", () => {
+    const store = memoryStore();
+    const key = plannerDraftStorageKey("o1", "u1");
+    writeStoredPlannerDrafts(store, key, [newDraft("draft-1", doctor, "2026-11-20", 9 * 60)], 0);
+    expect(readStoredPlannerDrafts(store, key, STORED_DRAFT_MAX_AGE_MS + 1)).toEqual([]);
+    expect(store.data.has(key)).toBe(false);
+    store.setItem(key, JSON.stringify({ savedAt: 1, drafts: [{ key: "x" }] }));
+    expect(readStoredPlannerDrafts(store, key, 2)).toEqual([]);
+    store.setItem(key, "{not json");
+    expect(readStoredPlannerDrafts(store, key, 2)).toEqual([]);
+    const fail = () => {
+      throw new Error("blocked");
+    };
+    const blocked = { getItem: fail, setItem: fail, removeItem: fail };
+    expect(readStoredPlannerDrafts(blocked, key)).toEqual([]);
+    expect(() =>
+      writeStoredPlannerDrafts(blocked, key, [newDraft("draft-1", doctor, "2026-11-20", 540)]),
+    ).not.toThrow();
+    expect(readStoredPlannerDrafts(null, key)).toEqual([]);
+  });
+});
 
 const mueller = { providerId: "p1", providerName: "Charité", doctorId: "d1", doctorName: "Dr. Müller" };
 const schmidt = { providerId: "p2", providerName: "Helios", doctorId: "d2", doctorName: "Dr. Schmidt" };

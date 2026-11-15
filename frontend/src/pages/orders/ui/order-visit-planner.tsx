@@ -48,6 +48,11 @@ import {
   type BusySlot,
   type DraftVisit,
   type SavedVisitDraft,
+  browserPlannerStore,
+  currentPlannerDraftKey,
+  nextDraftNumber,
+  readStoredPlannerDrafts,
+  writeStoredPlannerDrafts,
 } from "../model/order-visit-planner";
 import { PlanningDoctorPicker } from "./order-appointment-entry";
 
@@ -84,6 +89,8 @@ type OrderVisitPlannerProps = {
   mode?: "create" | "draft";
   /** The request's specialization codes: «Добавить врача» starts on them. */
   preferredSpecialtyCodes?: readonly string[];
+  /** A patient order's visits on the grid not created yet, after every change. */
+  onPendingChange?: (count: number) => void;
 };
 
 type DragPayload = { kind: "draft"; key: string };
@@ -113,12 +120,21 @@ export function OrderVisitPlanner({
   onCreated,
   mode = "create",
   preferredSpecialtyCodes = [],
+  onPendingChange,
 }: OrderVisitPlannerProps) {
   const draftMode = mode === "draft";
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
-  const [startDay, setStartDay] = useState(() => firstDay ?? appDateKey());
-  const [drafts, setDrafts] = useState<DraftVisit[]>([]);
+  // A patient order's grid not created yet is kept in this browser (bug 77);
+  // a lead's order keeps its draft on the server instead.
+  const storageKey = draftMode ? null : currentPlannerDraftKey(orderId);
+  const [restoredDrafts] = useState<DraftVisit[]>(() =>
+    storageKey ? readStoredPlannerDrafts(browserPlannerStore(), storageKey) : [],
+  );
+  const [startDay, setStartDay] = useState(
+    () => restoredDrafts.map((draft) => draft.date).sort()[0] ?? firstDay ?? appDateKey(),
+  );
+  const [drafts, setDrafts] = useState<DraftVisit[]>(restoredDrafts);
   const [popover, setPopover] = useState<Popover>(null);
   // An opened popover scrolls fully into the grid's view (a late-hour slot sits low).
   const popoverElement = useRef<HTMLDivElement | null>(null);
@@ -136,12 +152,37 @@ export function OrderVisitPlanner({
   const [notice, setNotice] = useState<string | null>(null);
   /** The grid as last saved as a draft; differs from the grid while unsaved. */
   const [savedDraft, setSavedDraft] = useState(() => JSON.stringify(draftSavePayload([])));
-  const nextKey = useRef(1);
+  const nextKey = useRef(nextDraftNumber(restoredDrafts));
   const savingRef = useRef(false);
   const onAddDoctorRef = useRef(onAddDoctor);
   onAddDoctorRef.current = onAddDoctor;
+  const onPendingChangeRef = useRef(onPendingChange);
+  onPendingChangeRef.current = onPendingChange;
   const knownDoctorKeys = useRef(new Set<string>());
   knownDoctorKeys.current = new Set(doctors.map(doctorKeyOf));
+  const addMissingDoctors = useCallback((restored: readonly DraftVisit[]) => {
+    const added = new Set<string>();
+    for (const draft of restored) {
+      const key = doctorKeyOf(draft.doctor);
+      if (!knownDoctorKeys.current.has(key) && !added.has(key)) {
+        added.add(key);
+        onAddDoctorRef.current(draft.doctor);
+      }
+    }
+  }, []);
+
+  // The kept grid's doctors join the grid's doctor list once.
+  useEffect(() => {
+    if (restoredDrafts.length > 0) addMissingDoctors(restoredDrafts);
+  }, [restoredDrafts, addMissingDoctors]);
+
+  // Every change of a patient order's grid is kept at once; created or
+  // cleared, the entry goes.
+  useEffect(() => {
+    if (!storageKey) return;
+    writeStoredPlannerDrafts(browserPlannerStore(), storageKey, drafts);
+    onPendingChangeRef.current?.(drafts.length);
+  }, [drafts, storageKey]);
 
   // The order's saved draft (laid out while it was a lead's order).
   useEffect(() => {
@@ -149,17 +190,12 @@ export function OrderVisitPlanner({
     apiFetch<{ items: SavedVisitDraft[] }>(`/orders/${orderId}/visit-drafts`)
       .then((result) => {
         if (cancelled || !Array.isArray(result?.items) || result.items.length === 0) return;
+        // The grid kept in this browser is newer than the lead-stage draft.
+        if (restoredDrafts.length > 0) return;
         const restored = draftsFromSaved(result.items);
         setDrafts(restored);
         setSavedDraft(JSON.stringify(draftSavePayload(restored)));
-        const added = new Set<string>();
-        for (const draft of restored) {
-          const key = doctorKeyOf(draft.doctor);
-          if (!knownDoctorKeys.current.has(key) && !added.has(key)) {
-            added.add(key);
-            onAddDoctorRef.current(draft.doctor);
-          }
-        }
+        addMissingDoctors(restored);
         if (restored[0]) setStartDay(restored.map((draft) => draft.date).sort()[0]);
       })
       .catch(() => {
@@ -168,7 +204,7 @@ export function OrderVisitPlanner({
     return () => {
       cancelled = true;
     };
-  }, [orderId]);
+  }, [orderId, restoredDrafts, addMissingDoctors]);
   const dragRef = useRef<DragPayload | null>(null);
 
   const days = useMemo(() => gridDays(startDay), [startDay]);
@@ -591,6 +627,28 @@ export function OrderVisitPlanner({
             const number = index + 1;
             const done = number < step;
             const current = number === step;
+            // Step 3 is the action itself, next to the grid: nothing is saved before it (bug 77).
+            if (number === 3 && current && !draftMode) {
+              return (
+                <li key={label} aria-current="step">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 gap-1.5 rounded-full bg-orange-500 px-2.5 text-xs text-white hover:bg-orange-600"
+                    data-testid="order-visit-planner-create-step"
+                    disabled={blocked}
+                    onClick={createAll}
+                  >
+                    {saving || checking ? (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : (
+                      <span className="grid size-5 place-items-center rounded-full bg-white/25 text-[11px] font-semibold">3</span>
+                    )}
+                    {tx(`Создать все приёмы (${drafts.length})`, `Alle Termine anlegen (${drafts.length})`)}
+                  </Button>
+                </li>
+              );
+            }
             return (
               <li
                 key={label}
@@ -900,7 +958,13 @@ export function OrderVisitPlanner({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div
+        data-testid="order-visit-planner-footer"
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-3",
+          drafts.length > 0 && "rounded-lg border border-orange-300 px-3 py-2",
+        )}
+      >
         <div className="min-w-0 flex-1 text-xs" data-testid="order-visit-planner-conflicts" aria-live="polite">
           {conflictCount > 0 ? (
             <span className="text-rose-700 dark:text-rose-400">

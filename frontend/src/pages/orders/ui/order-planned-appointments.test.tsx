@@ -26,6 +26,28 @@ describe("plan release controls", () => {
     ).toBe("");
   });
 
+  it("holds the release while grid visits are not created yet", () => {
+    const held = renderToStaticMarkup(
+      <PlanReleaseButton count={2} busy={false} lang="ru" pendingDrafts={3} onRelease={() => {}} />,
+    );
+    expect(held).toContain("Сначала создайте приёмы (3)");
+    expect(held).toContain('data-testid="order-plan-release-blocker"');
+    expect(held).toContain('disabled=""');
+
+    // Nothing released yet, only drafts: the blocker still says why.
+    const draftsOnly = renderToStaticMarkup(
+      <PlanReleaseButton count={0} busy={false} lang="de" pendingDrafts={1} onRelease={() => {}} />,
+    );
+    expect(draftsOnly).toContain("Erst Termine anlegen (1)");
+    expect(draftsOnly).toContain('disabled=""');
+
+    const free = renderToStaticMarkup(
+      <PlanReleaseButton count={2} busy={false} lang="ru" pendingDrafts={0} onRelease={() => {}} />,
+    );
+    expect(free).not.toContain("order-plan-release-blocker");
+    expect(free).not.toContain('disabled=""');
+  });
+
   it("marks an appointment the patient does not see", () => {
     expect(renderToStaticMarkup(<HiddenFromPatientMarker lang="ru" />)).toContain(
       "не видно пациенту",

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Stethoscope, CalendarDays, Clock3, Info, LayoutGrid, LoaderCircle } from "lucide-react";
+import { Stethoscope, CalendarDays, Clock3, Info, LayoutGrid, LoaderCircle, TriangleAlert } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { buttonVariants } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import {
   type OrderPipelineCareTeamMember,
 } from "../model/order-pipeline";
 import { AppointmentEntryRow, PlanningDoctorPicker } from "./order-appointment-entry";
+import { storedPlannerDraftCount } from "../model/order-visit-planner";
 import { OrderVisitPlanner } from "./order-visit-planner";
 import { appDateKey } from "@/lib/app-time-zone";
 
@@ -61,26 +62,55 @@ type PlanReleaseButtonProps = {
   busy: boolean;
   lang: string;
   onRelease: () => void;
+  /** Grid visits not created yet: the release waits for them (bug 77). */
+  pendingDrafts?: number;
+  /** «Сначала создайте приёмы (N)» opens the grid. */
+  onShowDrafts?: () => void;
 };
 
 /**
  * «Показать план пациенту (N)»: the planned appointments the portal does not
  * show yet become visible to the patient at once (owner decision 2026-11-02).
+ * While the grid holds visits not created yet, the release is held with the
+ * blocker that names them: it would show the patient a plan without them.
  */
-export function PlanReleaseButton({ count, busy, lang, onRelease }: PlanReleaseButtonProps) {
-  if (count <= 0) return null;
+export function PlanReleaseButton({
+  count,
+  busy,
+  lang,
+  onRelease,
+  pendingDrafts = 0,
+  onShowDrafts,
+}: PlanReleaseButtonProps) {
+  if (count <= 0 && pendingDrafts <= 0) return null;
   const label = lang === "de" ? "Plan dem Patienten zeigen" : "Показать план пациенту";
+  const held = pendingDrafts > 0;
   return (
-    <button
-      type="button"
-      data-testid="order-plan-release"
-      disabled={busy}
-      onClick={onRelease}
-      data-slot="button" data-variant="default" data-size="sm" className={buttonVariants({ size: "sm" })}
-    >
-      {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-      {`${label} (${count})`}
-    </button>
+    <>
+      {held ? (
+        <button
+          type="button"
+          data-testid="order-plan-release-blocker"
+          onClick={onShowDrafts}
+          className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-800 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
+        >
+          <TriangleAlert aria-hidden="true" className="size-3.5" />
+          {lang === "de"
+            ? `Erst Termine anlegen (${pendingDrafts})`
+            : `Сначала создайте приёмы (${pendingDrafts})`}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        data-testid="order-plan-release"
+        disabled={busy || held}
+        onClick={onRelease}
+        data-slot="button" data-variant="default" data-size="sm" className={buttonVariants({ size: "sm" })}
+      >
+        {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+        {count > 0 ? `${label} (${count})` : label}
+      </button>
+    </>
   );
 }
 
@@ -197,10 +227,17 @@ export function OrderPlannedAppointments({
   const [releasing, setReleasing] = useState(false);
   const [confirmRelease, setConfirmRelease] = useState(false);
   const releasingRef = useRef(false);
+  // Grid visits of a patient order not created yet (kept in this browser).
+  const [pending, setPending] = useState<{ orderId: string; count: number } | null>(null);
+  const pendingDrafts = planning
+    ? pending?.orderId === orderId
+      ? pending.count
+      : storedPlannerDraftCount(orderId)
+    : 0;
 
   const releasePlan = () => {
     setConfirmRelease(false);
-    if (releasingRef.current) return;
+    if (releasingRef.current || pendingDrafts > 0) return;
     releasingRef.current = true;
     setReleasing(true);
     setError(null);
@@ -333,10 +370,12 @@ export function OrderPlannedAppointments({
               busy={releasing}
               lang={lang}
               onRelease={() => setConfirmRelease(true)}
+              pendingDrafts={pendingDrafts}
+              onShowDrafts={() => setGroupBy("grid")}
             />
           ) : null}
           <DirtyDismissConfirmDialog
-            open={confirmRelease && unreleased > 0}
+            open={confirmRelease && unreleased > 0 && pendingDrafts === 0}
             title={tx("Показать план пациенту?", "Plan dem Patienten zeigen?")}
             message={tx(
               `Пациент увидит в портале приёмы плана (${unreleased}) и получит уведомление. Раздел «Мои визиты» открыт в портале только при активном тарифе в заказе.`,
@@ -366,6 +405,15 @@ export function OrderPlannedAppointments({
               >
                 <Icon aria-hidden="true" className="size-3.5 shrink-0" />
                 {label}
+                {value === "grid" && groupBy !== "grid" && pendingDrafts > 0 ? (
+                  <span
+                    data-testid="order-planned-appointments-grid-pending"
+                    aria-label={tx(`не создано: ${pendingDrafts}`, `nicht angelegt: ${pendingDrafts}`)}
+                    className="grid h-4 min-w-4 place-items-center rounded-full bg-orange-500 px-1 text-[10px] font-semibold text-white tabular-nums"
+                  >
+                    {pendingDrafts}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -407,6 +455,7 @@ export function OrderPlannedAppointments({
             onCreated={() => handleCreated("")}
             mode={drafting ? "draft" : "create"}
             preferredSpecialtyCodes={preferredSpecialtyCodes}
+            onPendingChange={(count) => setPending({ orderId, count })}
           />
         ) : null}
         {appointments && !gridShown && groups.length === 0 ? (

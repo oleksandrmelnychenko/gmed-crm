@@ -1,3 +1,4 @@
+import { getAccessTokenSubject } from "@/lib/api";
 import { addDaysToDateKey } from "@/lib/app-time-zone";
 
 import type { PlanningDoctor } from "./order-planned-appointments";
@@ -470,4 +471,111 @@ export function batchFailureText(failure: BatchFailure, lang: string): string {
   return de
     ? "Arzt, Klinik oder Dolmetscher können nicht gebucht werden"
     : "Врача, клинику или переводчика нельзя записать";
+}
+
+/** The browser storage the unsaved grid is kept in (a test passes a map). */
+export type PlannerDraftStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** Unsaved grid visits older than this are not brought back. */
+export const STORED_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Per viewer and order, under the `gmed:secure:` prefix that sign-out wipes:
+ * a patient order's grid not created yet survives a view switch, another
+ * section and a reload (owner bug 77: the planned visits «disappeared»).
+ */
+export function plannerDraftStorageKey(orderId: string, userId: string | null) {
+  return `gmed:secure:${userId ?? "anon"}:v1:visit-plan:${orderId}`;
+}
+
+function isStoredDraft(value: unknown): value is DraftVisit {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as Record<string, unknown>;
+  const doctor = draft.doctor as Record<string, unknown> | null | undefined;
+  return (
+    typeof draft.key === "string" &&
+    typeof draft.date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.date) &&
+    typeof draft.start === "number" &&
+    typeof draft.duration === "number" &&
+    draft.duration > 0 &&
+    typeof draft.title === "string" &&
+    typeof draft.interpreterNeeded === "boolean" &&
+    typeof draft.interpreterId === "string" &&
+    typeof draft.patientPlanText === "string" &&
+    typeof draft.patientPreparationNote === "string" &&
+    !!doctor &&
+    typeof doctor.providerId === "string" &&
+    typeof doctor.providerName === "string" &&
+    (doctor.doctorId === null || typeof doctor.doctorId === "string") &&
+    (doctor.doctorName === null || typeof doctor.doctorName === "string")
+  );
+}
+
+/** The kept grid; nothing when storage is off, the entry is stale or unreadable. */
+export function readStoredPlannerDrafts(
+  store: PlannerDraftStore | null,
+  key: string,
+  now = Date.now(),
+): DraftVisit[] {
+  if (!store) return [];
+  try {
+    const raw = store.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { savedAt?: unknown; drafts?: unknown } | null;
+    const fresh =
+      typeof parsed?.savedAt === "number" && now - parsed.savedAt <= STORED_DRAFT_MAX_AGE_MS;
+    if (!fresh || !Array.isArray(parsed?.drafts) || !parsed.drafts.every(isStoredDraft)) {
+      store.removeItem(key);
+      return [];
+    }
+    return parsed.drafts;
+  } catch {
+    return [];
+  }
+}
+
+/** Keeps the grid as it stands; an empty grid removes the entry. */
+export function writeStoredPlannerDrafts(
+  store: PlannerDraftStore | null,
+  key: string,
+  drafts: readonly DraftVisit[],
+  now = Date.now(),
+) {
+  if (!store) return;
+  try {
+    if (drafts.length === 0) store.removeItem(key);
+    else store.setItem(key, JSON.stringify({ savedAt: now, drafts }));
+  } catch {
+    // Storage full or blocked: the grid still works, it is just not kept.
+  }
+}
+
+/** The browser's localStorage, or nothing where it is blocked. */
+export function browserPlannerStore(): PlannerDraftStore | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** This viewer's key for the order's unsaved grid. */
+export function currentPlannerDraftKey(orderId: string) {
+  return plannerDraftStorageKey(orderId, getAccessTokenSubject());
+}
+
+/** How many grid visits of the order wait for «Создать все приёмы». */
+export function storedPlannerDraftCount(orderId: string) {
+  return readStoredPlannerDrafts(browserPlannerStore(), currentPlannerDraftKey(orderId)).length;
+}
+
+/** The next free `draft-N` number after restored visits. */
+export function nextDraftNumber(drafts: readonly DraftVisit[]) {
+  let max = 0;
+  for (const draft of drafts) {
+    const match = /^draft-(\d+)$/.exec(draft.key);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return max + 1;
 }
