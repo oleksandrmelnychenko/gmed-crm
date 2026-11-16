@@ -247,6 +247,28 @@ describe("LeadPayerLinkPanel", () => {
     expect(render(state())).not.toContain("lead-payer-link-previous");
   });
 
+  it("offers the manual code only where the server allows it and shows its history line (2026-11-16)", () => {
+    const link = {
+      id: "link-1",
+      status: "sent",
+      email: "viktor.zahler@example.com",
+      language: "de",
+      sent_at: "2026-11-16T09:00:00Z",
+      created_at: "2026-11-16T09:00:00Z",
+      expires_at: "2026-12-16T09:00:00Z",
+      last_email_status: "sent",
+    };
+    const issued = [{ issued_at: "2026-11-16T10:05:00Z", expires_at: "2026-11-16T10:20:00Z", issued_by_name: "Chef" }];
+    const ceo = render(state({ link: { ...link, can_issue_manual_code: true, manual_codes: issued } }));
+    expect(ceo).toContain("Выдать код вручную");
+    expect(ceo).toContain("Код выдан вручную 16.11.2026 11:05 (CEO)");
+    const manager = render(state({ link: { ...link, can_issue_manual_code: false, manual_codes: issued } }), { tx: de });
+    expect(manager).not.toContain("Code manuell ausgeben");
+    expect(manager).toContain("Code manuell ausgegeben 16.11.2026 11:05 (CEO)");
+    const none = render(state({ link }));
+    expect(none).not.toContain("вручную");
+  });
+
   it("reads the lead's language as one of the four", () => {
     expect(payerLinkLanguageOf("uk-UA")).toBe("uk");
     expect(payerLinkLanguageOf("UA")).toBe("uk");

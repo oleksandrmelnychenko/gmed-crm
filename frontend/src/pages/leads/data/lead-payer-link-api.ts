@@ -61,6 +61,23 @@ export type PayerLinkInfo = {
   last_email_status: "sent" | "failed" | null;
   /** The newest invitation and code e-mail with their delivery (2026-10-24). */
   emails: PayerLinkEmail[];
+  /** Codes the CEO issued by hand, newest first (2026-11-16); never the code itself. */
+  manual_codes?: PayerLinkManualCode[];
+  /** The server's answer to "may this login issue a code by hand now" (CEO, active link). */
+  can_issue_manual_code?: boolean;
+};
+
+/** One code the CEO issued by hand: who and when, never the code. */
+export type PayerLinkManualCode = {
+  issued_at: string;
+  expires_at: string | null;
+  issued_by_name: string | null;
+};
+
+/** The code just issued by hand: shown once, kept only in component memory. */
+export type PayerLinkIssuedCode = {
+  code: string;
+  expires_at: string;
 };
 
 export const PAYER_LINK_DELIVERY_STATUSES = [
@@ -279,6 +296,15 @@ export async function revokeLeadPayerLink(leadId: string): Promise<LeadPayerLink
   return normalizeLeadPayerLinkState(await apiFetch<unknown>(`${base(leadId)}/revoke`, { method: "POST" }));
 }
 
+/** The CEO issues the link's code by hand (2026-11-16); the answer carries it once. */
+export async function issueLeadPayerLinkManualCode(leadId: string): Promise<PayerLinkIssuedCode> {
+  const raw = asRecord(await apiFetch<unknown>(`${base(leadId)}/manual-code`, { method: "POST" }));
+  const code = typeof raw?.code === "string" && /^\d{6}$/.test(raw.code) ? raw.code : null;
+  const expiresAt = textOrNull(raw?.expires_at);
+  if (!code || !expiresAt) throw new Error("Invalid manual code response");
+  return { code, expires_at: expiresAt };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
@@ -318,6 +344,16 @@ function normalizeLink(value: unknown): PayerLinkInfo | null {
     revoked_reason: textOrNull(raw.revoked_reason),
     last_email_status: raw.last_email_status === "sent" || raw.last_email_status === "failed" ? raw.last_email_status : null,
     emails: Array.isArray(raw.emails) ? raw.emails.map(normalizeLinkEmail).filter((email) => email !== null) : [],
+    manual_codes: Array.isArray(raw.manual_codes)
+      ? raw.manual_codes.flatMap((item) => {
+          const entry = asRecord(item);
+          const issuedAt = textOrNull(entry?.issued_at);
+          return entry && issuedAt
+            ? [{ issued_at: issuedAt, expires_at: textOrNull(entry.expires_at), issued_by_name: textOrNull(entry.issued_by_name) }]
+            : [];
+        })
+      : [],
+    can_issue_manual_code: raw.can_issue_manual_code === true,
   };
 }
 

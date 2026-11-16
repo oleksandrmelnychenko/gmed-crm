@@ -76,6 +76,7 @@ use crate::routes::lead_representatives::{self, Representative};
 use crate::services::citizenships::{normalize_citizenships, normalize_country_code};
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
+use gmed_domain::role::Role;
 
 /// Header of the link token (64 hex characters from the URL fragment).
 pub const HEADER_LINK: &str = "x-payer-link";
@@ -344,6 +345,12 @@ pub fn router() -> Router<AppState> {
             get(staff_get).post(staff_send),
         )
         .route("/leads/{lead_id}/payer-link/revoke", post(staff_revoke))
+        // The CEO hands the code over by phone when the e-mail cannot reach
+        // the payer (owner decision 2026-11-16).
+        .route(
+            "/leads/{lead_id}/payer-link/manual-code",
+            post(staff_manual_code),
+        )
         // Staff enter the payer's signed paper Selbstauskunft (owner 2026-10-30).
         .route(
             "/leads/{lead_id}/payer-questionnaire",
@@ -2729,7 +2736,22 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
         return Err(Refusal::LinkInvalid);
     };
     let link = Link::from_row(&row)?;
-    if link.revoked_at.is_some() || !row.try_get::<bool, _>("lead_open").unwrap_or(false) {
+    let lead_open = row.try_get::<bool, _>("lead_open").unwrap_or(false);
+    check_usable(conn, &link, lead_open).await?;
+    Ok(link)
+}
+
+/// Whether a loaded link still works: not revoked, its lead open, the
+/// declaration still naming this third party at this address (no paying
+/// parent), within its time and not locked. Shared by the payer's calls and
+/// the CEO's manual code, so no code is issued for a link the payer could
+/// not use.
+async fn check_usable(
+    conn: &mut PgConnection,
+    link: &Link,
+    lead_open: bool,
+) -> Result<(), Refusal> {
+    if link.revoked_at.is_some() || !lead_open {
         return Err(Refusal::LinkRevoked);
     }
     let declaration = lead_payer::load_declaration(conn, link.lead_id).await?;
@@ -2755,7 +2777,7 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
     if link.locked_at.is_some() {
         return Err(Refusal::LinkLocked);
     }
-    Ok(link)
+    Ok(())
 }
 
 /// The `X-Payer-Session` header against the link's current session.
@@ -5120,14 +5142,32 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
             Some((link, _, _)) => link_emails(&mut conn, link.id).await?,
             None => Vec::new(),
         };
+        let manual = match &link {
+            Some((link, _, _)) => manual_codes(&mut conn, link.id).await?,
+            None => Vec::new(),
+        };
+        // Whether the CEO could issue a code now: the checks of the payer's
+        // own calls (the declaration still names this payer and address).
+        let usable = match &link {
+            Some((link, _, _)) if link.revoked_at.is_none() && !context.converted => {
+                match check_usable(&mut conn, link, context.open).await {
+                    Ok(()) => true,
+                    Err(Refusal::Database(error)) => return Err(error),
+                    Err(_) => false,
+                }
+            }
+            _ => false,
+        };
         let check = lead_enhanced_check::payer_form_check(&mut conn, lead_id).await?;
         // The stored assessment only (the send itself reassesses in the gate).
         let risk = crate::risk::store::load(&mut conn, lead_id).await?;
         let previous = previous_questionnaires(&mut conn, lead_id).await?;
-        Ok::<_, sqlx::Error>(Some((context, link, emails, check, risk, previous)))
+        Ok::<_, sqlx::Error>(Some((
+            context, link, emails, check, risk, previous, manual, usable,
+        )))
     }
     .await;
-    let (context, link, emails, check, risk, previous) = match loaded {
+    let (context, link, emails, check, risk, previous, manual, usable) = match loaded {
         Ok(Some(found)) => found,
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(error) => return intake::internal(error, "load payer link"),
@@ -5171,6 +5211,9 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
             "last_email_status": last_email_status,
             // The newest invitation and code with their delivery.
             "emails": emails,
+            // The codes the CEO issued by hand, newest first (2026-11-16).
+            "manual_codes": manual,
+            "can_issue_manual_code": auth.role == Role::Ceo && usable && status != "submitted",
         })
     });
     let questionnaire_value = context.statement.as_ref().map(|_| {
@@ -6075,6 +6118,206 @@ async fn staff_revoke(
         publish(&state, Some(auth.user_id), lead_id, None).await;
     }
     staff_payload(&state, &auth, lead_id).await
+}
+
+/// 409 `payer_link_inactive`: no link a code could be issued for; `reason`
+/// is `none`, `revoked`, `expired`, `locked` or `submitted`.
+fn payer_link_inactive(reason: &str) -> Response {
+    coded(
+        StatusCode::CONFLICT,
+        "payer_link_inactive",
+        "The payer link is not active",
+        json!({ "reason": reason }),
+    )
+}
+
+/// `POST /leads/{id}/payer-link/manual-code` (owner decision 2026-11-16):
+/// when the code e-mail cannot reach the payer, the CEO — and only the CEO —
+/// issues the code of the active link and hands it over by phone after
+/// identifying the payer. The code is made like a mailed one (six digits,
+/// the same hash, time and wrong tries) and replaces any earlier code; the
+/// answer carries it once. It is never stored in plain text, logged,
+/// audited or published: the audit row and the history row name the link
+/// and the expiry only. At most one a minute and five an hour per link.
+async fn staff_manual_code(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+) -> Response {
+    // The CEO holds every capability: the role itself decides.
+    if let Err(response) = auth.require_exact_role(&[Role::Ceo]) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin payer manual code"),
+    };
+    let context = match lock_lead(&mut tx, lead_id).await {
+        Ok(true) => match load_context(&mut tx, lead_id).await {
+            Ok(Some(context)) => context,
+            Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
+            Err(error) => return intake::internal(error, "load payer link"),
+        },
+        Ok(false) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(error) => return intake::internal(error, "lock lead"),
+    };
+    if context.converted {
+        return coded(
+            StatusCode::CONFLICT,
+            "lead_converted",
+            "The lead is converted",
+            json!({}),
+        );
+    }
+    let row = match sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {LINK_COLUMNS}, ({PORTAL_LEAD_SQL}) AS lead_open
+           FROM lead_payer_links k
+           JOIN leads l ON l.id = k.lead_id
+           WHERE k.lead_id = $1 AND k.revoked_at IS NULL
+           ORDER BY k.created_at DESC, k.id DESC
+           LIMIT 1
+           FOR UPDATE OF k"#
+    )))
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return payer_link_inactive("none"),
+        Err(error) => return intake::internal(error, "load payer link"),
+    };
+    let link = match Link::from_row(&row) {
+        Ok(link) => link,
+        Err(error) => return intake::internal(error, "read payer link"),
+    };
+    let lead_open = row.try_get::<bool, _>("lead_open").unwrap_or(false);
+    if let Err(refusal) = check_usable(&mut tx, &link, lead_open).await {
+        return match refusal {
+            Refusal::LinkExpired => payer_link_inactive("expired"),
+            Refusal::LinkLocked => payer_link_inactive("locked"),
+            Refusal::Database(error) => intake::internal(error, "check payer link"),
+            _ => payer_link_inactive("revoked"),
+        };
+    }
+    let now = Utc::now().trunc_subsecs(6);
+    if link.status(context.statement.as_ref(), now) == "submitted" {
+        return payer_link_inactive("submitted");
+    }
+    // Counted on the manual codes alone: a mailed code that bounced must not
+    // hold back the code this route exists for.
+    let recent: Vec<DateTime<Utc>> = match sqlx::query_scalar(
+        r#"SELECT created_at FROM lead_payer_link_manual_codes
+           WHERE link_id = $1 AND created_at > $2
+           ORDER BY created_at"#,
+    )
+    .bind(link.id)
+    .bind(now - Duration::hours(1))
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(recent) => recent,
+        Err(error) => return intake::internal(error, "count manual payer codes"),
+    };
+    let rate_limited = |wait: i64| {
+        coded(
+            StatusCode::TOO_MANY_REQUESTS,
+            "code_rate_limited",
+            "Please wait before issuing another code",
+            json!({ "retry_after_seconds": wait.max(1) }),
+        )
+    };
+    if let Some(last) = recent.last() {
+        let wait = CODE_RESEND_SECONDS - (now - *last).num_seconds();
+        if wait > 0 {
+            return rate_limited(wait);
+        }
+    }
+    if recent.len() >= CODES_PER_HOUR {
+        let oldest = recent.first().copied().unwrap_or(now);
+        return rate_limited((oldest + Duration::hours(1) - now).num_seconds());
+    }
+    let code = new_code();
+    let expires_at = now + Duration::minutes(CODE_VALID_MINUTES);
+    let issued = async {
+        // A fresh `code_sent_at` also keeps the clean-up of a code e-mail
+        // still on its way (`send_code`) from clearing this code.
+        sqlx::query(
+            r#"UPDATE lead_payer_links
+               SET code_hash = $2, code_sent_at = $3, code_expires_at = $4, code_attempts = 0
+               WHERE id = $1"#,
+        )
+        .bind(link.id)
+        .bind(code_hash(link.id, &code))
+        .bind(now)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"INSERT INTO lead_payer_link_manual_codes
+                   (lead_id, link_id, issued_by, created_at, expires_at)
+               VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(lead_id)
+        .bind(link.id)
+        .bind(auth.user_id)
+        .bind(now)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "payer_link_manual_code_issued",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "link_id": link.id, "expires_at": expires_at }),
+            ),
+        )
+        .await?;
+        tx.commit().await
+    }
+    .await;
+    if let Err(error) = issued {
+        return intake::internal(error, "issue manual payer code");
+    }
+    publish(&state, Some(auth.user_id), lead_id, None).await;
+    let mut response = Json(json!({
+        "code": code,
+        "expires_at": expires_at,
+        "link_id": link.id,
+    }))
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+/// The codes the CEO issued by hand for a link, newest first (who, when,
+/// until when — never the code).
+async fn manual_codes(conn: &mut PgConnection, link_id: Uuid) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT m.created_at, m.expires_at, u.name AS issued_by_name
+           FROM lead_payer_link_manual_codes m
+           LEFT JOIN users u ON u.id = m.issued_by
+           WHERE m.link_id = $1
+           ORDER BY m.created_at DESC
+           LIMIT 5"#,
+    )
+    .bind(link_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            json!({
+                "issued_at": row.try_get::<DateTime<Utc>, _>("created_at").ok(),
+                "expires_at": row.try_get::<DateTime<Utc>, _>("expires_at").ok(),
+                "issued_by_name": row.try_get::<Option<String>, _>("issued_by_name").ok().flatten(),
+            })
+        })
+        .collect())
 }
 
 // ----------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, FileSignature, FileText, History, Info, LoaderCircle, Mail, Undo2, Link2 } from "lucide-react";
+import { ChevronRight, FileSignature, FileText, History, Info, KeyRound, LoaderCircle, Mail, Undo2, Link2 } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, checkboxClass } from "@/components/ui-shell";
@@ -10,7 +10,9 @@ import { downloadDocumentFile } from "@/pages/documents/data/document-api";
 
 import {
   PAYER_LINK_LANGUAGES,
+  issueLeadPayerLinkManualCode,
   prepareLeadPayerLink,
+  type PayerLinkIssuedCode,
   type PayerLinkShare,
   type LeadPayerLinkState,
   type PayerLinkLanguage,
@@ -22,6 +24,7 @@ import {
   payerLinkCabinetNote,
   payerLinkEmailLines,
   payerLinkErrorText,
+  payerLinkManualCodeLine,
   payerLinkStatusLine,
   previousQuestionnaireSummary,
   type Tx,
@@ -29,6 +32,7 @@ import {
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
 import { LeadPayerLinkDialog } from "./lead-payer-link-dialog";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
+import { LeadPayerManualCodeDialog } from "./lead-payer-manual-code-dialog";
 import { LeadPayerQuestionnairePreview } from "./lead-payer-questionnaire-preview";
 
 const PACKAGE_TONES: Record<PayerPackageStatus, StatusChipTone> = {
@@ -92,11 +96,14 @@ export function LeadPayerLinkPanel({
 }) {
   const [language, setLanguage] = useState<PayerLinkLanguage | null>(null);
   const [reopen, setReopen] = useState(false);
-  const [busy, setBusy] = useState<"prepare" | "send" | "revoke" | null>(null);
+  const [busy, setBusy] = useState<"prepare" | "send" | "revoke" | "manual" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  // The question asked before revoking, or before a new link replaces one the payer is filling in.
-  const [confirm, setConfirm] = useState<"revoke" | "resend" | null>(null);
+  // The question asked before revoking, before a new link replaces one the payer is filling in,
+  // or before the CEO issues a code by hand.
+  const [confirm, setConfirm] = useState<"revoke" | "resend" | "manual" | null>(null);
+  // The code issued by hand: in memory for this lead only, gone once its dialog closes.
+  const [issued, setIssued] = useState<{ leadId: string; data: PayerLinkIssuedCode } | null>(null);
 
   const [share, setShare] = useState<{ leadId: string; data: PayerLinkShare } | null>(null);
   const link = state.link;
@@ -175,6 +182,26 @@ export function LeadPayerLinkPanel({
     }
   }
 
+  async function issueManualCode() {
+    setConfirm(null);
+    setBusy("manual");
+    setError("");
+    setNotice("");
+    try {
+      const data = await issueLeadPayerLinkManualCode(leadId);
+      setIssued({ leadId, data });
+    } catch (cause) {
+      setError(message(cause));
+    } finally {
+      setBusy(null);
+      // The history line and the button follow the server.
+      void controller.reload();
+    }
+  }
+
+  const manualCodeLine = link ? payerLinkManualCodeLine(link.manual_codes, tx) : null;
+  const currentIssued = issued?.leadId === leadId ? issued.data : null;
+
   return (
     <div className="space-y-2 bg-card text-[13px] text-foreground" data-testid="lead-payer-link">
       <div className="flex flex-wrap items-center gap-2">
@@ -214,6 +241,29 @@ export function LeadPayerLinkPanel({
                 </li>
               ))}
             </ul>
+          ) : null}
+          {manualCodeLine || link?.can_issue_manual_code ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs leading-5">
+              {manualCodeLine ? (
+                <span className="rounded-md border border-border bg-muted/40 px-2 py-1 break-words text-foreground" data-testid="lead-payer-link-manual-code-line">
+                  {manualCodeLine}
+                </span>
+              ) : null}
+              {link?.can_issue_manual_code ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 rounded-lg text-xs"
+                  disabled={locked}
+                  data-testid="lead-payer-link-manual-code"
+                  onClick={() => setConfirm("manual")}
+                >
+                  {busy === "manual" ? <LoaderCircle className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+                  {tx("Выдать код вручную", "Code manuell ausgeben")}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           {actions.highlight ? (
             // Its own line, not glued to the "no link yet" chip (QA 2026-10-25).
@@ -383,6 +433,20 @@ export function LeadPayerLinkPanel({
         onConfirm={() => void prepare()}
         onCancel={() => setConfirm(null)}
       />
+      <LeadConfirmDialog
+        open={confirm === "manual"}
+        testId="lead-payer-link-manual-code-dialog"
+        title={tx("Выдать код вручную?", "Code manuell ausgeben?")}
+        description={tx(
+          "Сообщите код плательщику по телефону после его идентификации.",
+          "Geben Sie den Code dem Zahler telefonisch, nachdem Sie ihn identifiziert haben.",
+        )}
+        confirmLabel={tx("Выдать код", "Code ausgeben")}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        onConfirm={() => void issueManualCode()}
+        onCancel={() => setConfirm(null)}
+      />
+      {currentIssued ? <LeadPayerManualCodeDialog issued={currentIssued} tx={tx} onClose={() => setIssued(null)} /> : null}
     </div>
   );
 }

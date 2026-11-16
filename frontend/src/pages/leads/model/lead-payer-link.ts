@@ -14,6 +14,7 @@ import {
   type PayerLinkDeliveryStatus,
   type PayerLinkEmail,
   type PayerLinkInfo,
+  type PayerLinkManualCode,
   type PayerLinkRiskHold,
   type PayerPreviousQuestionnaire,
   type PayerQuestionnaireDocument,
@@ -236,6 +237,13 @@ export function payerLinkEmailLines(
   });
 }
 
+/** The newest code the CEO issued by hand: «Код выдан вручную DD.MM.YYYY HH:MM (CEO)» (2026-11-16). */
+export function payerLinkManualCodeLine(codes: readonly PayerLinkManualCode[] | undefined, tx: Tx): string | null {
+  const newest = codes?.[0];
+  if (!newest) return null;
+  return `${tx("Код выдан вручную", "Code manuell ausgegeben")} ${formatAppDateTime(newest.issued_at)} (CEO)`;
+}
+
 /** Why the link cannot be sent now, as a sentence. */
 export function payerLinkBlockedReasonText(reason: string | null | undefined, tx: Tx): string {
   switch (reason) {
@@ -335,6 +343,10 @@ export function payerLinkErrorText(error: unknown, tx: Tx): string | null {
       );
     case "mail_not_configured":
       return payerLinkMailMissingText(tx);
+    case "payer_link_inactive":
+      return tx("Ссылка не активна: код выдать нельзя.", "Der Link ist nicht aktiv: Es kann kein Code ausgegeben werden.");
+    case "code_rate_limited":
+      return tx("Код уже выдан. Повторите через минуту.", "Der Code wurde bereits ausgegeben. Bitte in einer Minute erneut versuchen.");
     // Level 3 holds the link until block D is requested (QA 2026-10-10: staff were not told the way out).
     case "risk_review_required":
       return payerLinkRiskHoldText(

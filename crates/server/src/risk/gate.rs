@@ -417,6 +417,7 @@ mod tests {
             "/orders/{id}/status",
             "/leads/{id}/payer-signature-package/prepare",
             "/leads/{id}/payer-link/revoke",
+            "/leads/{id}/payer-link/manual-code",
             "/leads/{id}/update",
             "/framework-contracts/{id}/terminate",
         ] {

@@ -4280,3 +4280,214 @@ async fn the_payers_notice_accepted_in_a_manual_link_counts_as_informed() {
     assert!(saved["payer_informed_by"].is_null(), "{saved}");
     assert_eq!(saved["payer_informed_via"], "link", "{saved}");
 }
+
+/// The CEO's manual code (owner decision 2026-11-16) as a raw call: the
+/// status, the headers and the body.
+async fn issue_manual_code(
+    app: &PayerApp,
+    lead_id: Uuid,
+    bearer: &str,
+) -> (StatusCode, HeaderMap, Value) {
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/leads/{lead_id}/payer-link/manual-code"))
+        .header("Authorization", bearer)
+        .header("Content-Type", "application/json")
+        .body(Body::empty())
+        .unwrap();
+    call(app, request).await
+}
+
+#[tokio::test]
+async fn only_the_ceo_issues_a_code_by_hand_and_the_payer_verifies_with_it() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, patient) = lead_with_payer(&app, "manual-code").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let link = [("X-Payer-Link", token.as_str())];
+    let ceo_id = app
+        .users
+        .iter()
+        .find(|(role, _)| *role == "ceo")
+        .map(|(_, id)| *id)
+        .unwrap();
+
+    // The payer asked for an e-mail code (it may never arrive) and mistyped once.
+    let (status, sent) = as_payer(&app, "POST", CODE, &link, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
+    let mailed = app.last_code();
+    let wrong = if mailed == "000000" {
+        "111111"
+    } else {
+        "000000"
+    };
+    let (_, body) = as_payer(&app, "POST", VERIFY, &link, Some(json!({ "code": wrong }))).await;
+    assert_eq!(body["attempts_left"], 4, "{body}");
+
+    // Everyone but the CEO is refused, the CEO's assistant too.
+    for role in [
+        "patient_manager",
+        "sales",
+        "ceo_assistant",
+        "billing",
+        "concierge",
+    ] {
+        let (status, _, body) = issue_manual_code(&app, lead_id, &app.staff(role)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {body}");
+    }
+    let (status, _, _) = issue_manual_code(&app, lead_id, &patient).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let issued: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lead_payer_link_manual_codes WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(issued, 0);
+
+    // Within the minute of the e-mail code: the CEO is not held back by it.
+    let (status, headers, body) = issue_manual_code(&app, lead_id, &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(headers.get("cache-control").unwrap(), "no-store");
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(
+        code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit()),
+        "{code}"
+    );
+    let expires_at: chrono::DateTime<chrono::Utc> =
+        body["expires_at"].as_str().unwrap().parse().unwrap();
+    let minutes = (expires_at - chrono::Utc::now()).num_minutes();
+    assert!((13..=15).contains(&minutes), "{minutes}");
+    let link_id: Uuid = body["link_id"].as_str().unwrap().parse().unwrap();
+
+    // Not stored in plain text: the link holds a hash, attempts start over.
+    let (stored, attempts): (String, i32) =
+        sqlx::query_as("SELECT code_hash, code_attempts FROM lead_payer_links WHERE id = $1")
+            .bind(link_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_ne!(stored, code);
+    assert_eq!(attempts, 0);
+
+    // A second one within the minute waits.
+    let (status, _, limited) = issue_manual_code(&app, lead_id, &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{limited}");
+    assert_eq!(limited["code"], "code_rate_limited");
+
+    // The audit row names the link and the expiry, never the code.
+    let audited = audit_contexts(pool, "payer_link_manual_code_issued", lead_id).await;
+    assert_eq!(audited.len(), 1);
+    assert_eq!(audited[0].0, Some(ceo_id));
+    let context = audited[0].1.as_object().unwrap();
+    let mut keys: Vec<&str> = context.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["expires_at", "link_id"], "{context:?}");
+    assert_eq!(context["link_id"], json!(link_id));
+    let quoted = format!("\"{code}\"");
+    let leaked: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE (entity_id = $1 OR context->>'lead_id' = $1::text) AND context::text LIKE $2"#,
+    )
+    .bind(lead_id)
+    .bind(format!("%{quoted}%"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0);
+
+    // Staff see the history line, the CEO the button; the code is not there.
+    let path = format!("/api/v1/leads/{lead_id}/payer-link");
+    let (status, state) = with_login(&app, "GET", &path, &app.staff("ceo"), None).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert!(!state.to_string().contains(&quoted), "{state}");
+    let manual = state["link"]["manual_codes"].as_array().unwrap();
+    assert_eq!(manual.len(), 1, "{state}");
+    assert_eq!(manual[0]["issued_by_name"], "ceo payer link");
+    assert!(manual[0]["issued_at"].is_string());
+    assert_eq!(state["link"]["can_issue_manual_code"], true, "{state}");
+    let (_, state) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(state["link"]["manual_codes"].as_array().unwrap().len(), 1);
+    assert_eq!(state["link"]["can_issue_manual_code"], false, "{state}");
+
+    // The payer page shows the code field; the mailed code no longer works,
+    // the wrong try before the manual code is forgotten.
+    let (_, opened) = as_payer(&app, "GET", OPEN, &link, None).await;
+    assert_eq!(opened["code_pending"], true, "{opened}");
+    if mailed != code {
+        let (status, body) =
+            as_payer(&app, "POST", VERIFY, &link, Some(json!({ "code": mailed }))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "code_invalid");
+        assert_eq!(body["attempts_left"], 4, "{body}");
+    }
+    let (status, verified) =
+        as_payer(&app, "POST", VERIFY, &link, Some(json!({ "code": code }))).await;
+    assert_eq!(status, StatusCode::OK, "{verified}");
+    assert!(verified["session"].is_string());
+
+    // A revoked link takes no code.
+    let (status, _) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-link/revoke"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, body) = issue_manual_code(&app, lead_id, &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_link_inactive");
+    let (_, state) = with_login(&app, "GET", &path, &app.staff("ceo"), None).await;
+    assert_eq!(state["link"]["can_issue_manual_code"], false, "{state}");
+}
+
+#[tokio::test]
+async fn no_manual_code_without_an_active_link() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+
+    // No link yet.
+    let (lead_id, _) = lead_with_payer(&app, "manual-none").await;
+    let (status, _, body) = issue_manual_code(&app, lead_id, &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["reason"], "none");
+
+    // An expired link.
+    send_link(&app, lead_id, json!({})).await;
+    sqlx::query(
+        "UPDATE lead_payer_links SET expires_at = now() - interval '1 minute' WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, _, body) = issue_manual_code(&app, lead_id, &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["reason"], "expired");
+
+    // A locked link.
+    let (other, _) = lead_with_payer(&app, "manual-locked").await;
+    send_link(&app, other, json!({})).await;
+    sqlx::query("UPDATE lead_payer_links SET locked_at = now() WHERE lead_id = $1")
+        .bind(other)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, _, body) = issue_manual_code(&app, other, &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["reason"], "locked");
+
+    // An unknown lead.
+    let (status, _, _) = issue_manual_code(&app, Uuid::new_v4(), &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let issued: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_payer_link_manual_codes WHERE lead_id = ANY($1)",
+    )
+    .bind(vec![lead_id, other])
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(issued, 0);
+}
