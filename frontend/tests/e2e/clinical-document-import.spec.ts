@@ -6,6 +6,7 @@ import { pickerSection } from "./helpers";
 
 // Optional local corpus stays outside source control. The default is synthetic.
 const corpus = process.env.PARSER_CORPUS_DIR;
+const previewPdf = new URL("./fixtures/signature-preview.pdf", import.meta.url);
 test.use({ trace: "off", video: "off", screenshot: "off", actionTimeout: 15_000 });
 if (process.env.PARSER_TEST_BASE_URL) test.use({ baseURL: process.env.PARSER_TEST_BASE_URL });
 const patientId = "00000000-0000-0000-0000-000000000101";
@@ -37,7 +38,7 @@ async function mount(page: Page, draft: ClinicalDocumentImportDraft, file?: stri
     let body: unknown = [];
     if (url.endsWith("/me")) body = { id: "tester", name: "Manager", email: "qa@example.test", role: "ceo" };
     else if (url.endsWith("/upload")) body = { id: record.document_id };
-    else if (url.endsWith("/download")) return route.fulfill({ contentType: "application/pdf", body: file ? fs.readFileSync(file) : "%PDF-1.4\n%%EOF" });
+    else if (url.endsWith("/download")) return route.fulfill({ contentType: "application/pdf", body: fs.readFileSync(file ?? previewPdf) });
     else if (url.endsWith("/prepare")) {
       const payload = route.request().postDataJSON(); prepared.push(payload);
       body = { ok: true, id: record.id, status: "applying", idempotent: false, source_country: payload.source_country,
@@ -73,6 +74,8 @@ for (const key of corpus ? ["lab", "letter", "report"] : ["synthetic"]) {
     const draft: ClinicalDocumentImportDraft = corpus ? JSON.parse(fs.readFileSync(path.join(corpus, `${key}.json`), "utf8")) : synthetic;
     const files = corpus ? JSON.parse(fs.readFileSync(path.join(corpus, 'files.json'), 'utf8')) : {};
     const prepared = await mount(page, draft, files[key]);
+    // The source PDF is drawn by pdf.js, not in a browser-viewer <iframe>.
+    await expect(page.getByRole('dialog', { name: 'Assistent für den Import' }).getByTestId("pdf-pages-preview")).toHaveAttribute("data-state", "ready");
     // Use the real payload builder against every extracted laboratory entry.
     const laboratory = draft.candidates.filter(c => c.target === "lab_result");
     if (laboratory.length) {

@@ -2,6 +2,7 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
 import { Paperclip, Download, Eye, FileText, LoaderCircle, Shield, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PdfPreview } from "@/components/pdf-pages-preview";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -22,8 +23,8 @@ function useBlobUrl(blob: Blob | null) {
 
 function AttachmentPreview({ blob, filename, onClose }: { blob: Blob; filename: string; onClose: () => void }) {
   const { t } = useLang();
-  const url = useBlobUrl(blob);
   const kind = chatAttachmentPreviewKind(filename);
+  const url = useBlobUrl(kind === "image" ? blob : null);
   const [text, setText] = useState("");
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -42,7 +43,7 @@ function AttachmentPreview({ blob, filename, onClose }: { blob: Blob; filename: 
         <div className="min-h-0 overflow-auto rounded-lg border bg-muted/20">
           {failed || !kind ? <p className="p-5 text-sm text-muted-foreground">{t.chat_attachment_preview_unavailable}</p>
             : kind === "image" ? <img src={url || undefined} alt={filename} onError={() => setFailed(true)} className="mx-auto max-h-[65dvh] object-contain" />
-            : kind === "pdf" ? <iframe src={url || undefined} title={filename} className="h-[65dvh] w-full" referrerPolicy="no-referrer" />
+            : kind === "pdf" ? <PdfPreview source={blob} className="h-[65dvh] w-full overflow-y-auto p-3" />
             : <pre className="max-h-[65dvh] whitespace-pre-wrap break-words p-4 text-sm">{text}{blob.size > 256_000 ? `\n\n${t.chat_attachment_preview_truncated}` : ""}</pre>}
         </div>
         <div className="flex justify-end"><Button type="button" onClick={() => downloadChatAttachment(blob, filename)}><Download />{t.chat_attachment_download}</Button></div>

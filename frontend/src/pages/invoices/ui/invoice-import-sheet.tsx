@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Banner, Field } from "@/components/ui-shell";
+import { PdfPreview } from "@/components/pdf-pages-preview";
 import { useLang } from "@/lib/i18n";
 import { ApiRequestError } from "@/lib/api";
 import { formatRecognizedMoney } from "@/lib/money";
@@ -264,7 +265,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
               <input ref={fileInput} type="file" className="sr-only" aria-label={tx("Файл инвойса", "Rechnungsdatei")} accept="application/pdf,image/png,image/jpeg,application/xml,text/xml,.xml" onChange={(event) => { void selectFile(event.target.files?.[0]); event.target.value = ""; }} />
               {previewUrl ? (
                 file && isInvoiceXml(file) ? <XmlInvoiceOriginal file={file} url={previewUrl} /> : file?.type === "application/pdf"
-                  ? <div className="m-3 flex min-h-[420px] flex-1 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm lg:min-h-0"><iframe key={`${previewUrl}:${originalPage}`} title={tx("Оригинал инвойса", "Originalrechnung")} src={`${previewUrl}#toolbar=1&page=${originalPage}`} className="h-full min-h-[420px] w-full flex-1 bg-white lg:min-h-0" /></div>
+                  ? <div className="m-3 flex min-h-[420px] flex-1 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm lg:min-h-0"><PdfPreview source={file} page={originalPage} className="h-full max-h-[70dvh] min-h-[420px] w-full flex-1 overflow-y-auto bg-muted/40 p-3 lg:max-h-none lg:min-h-0" /></div>
                   : <div className="m-3 flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-lg border border-border/70 bg-card p-4 shadow-sm"><img src={previewUrl} alt={tx("Оригинал инвойса", "Originalrechnung")} className="h-auto max-w-full object-contain" /></div>
               ) : (
                 <button type="button" className="m-5 flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-12 text-center hover:bg-muted/50" onClick={() => fileInput.current?.click()}

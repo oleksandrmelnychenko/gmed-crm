@@ -97,6 +97,7 @@ import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { IssuerTaxRegistrationBanner } from "@/components/issuer-tax-registration-banner";
+import { PdfPreview } from "@/components/pdf-pages-preview";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview, pdfPreviewBlob } from "@/pages/documents/data/document-api";
 import { describeCashMovement } from "@/pages/company-finance/table-model";
@@ -1112,7 +1113,7 @@ function useStaffInvoicesPageContent() {
   const setDunningDialogOpen = (value: SetStateAction<boolean>) =>
     setInvoiceUiField("dunningDialogOpen", value);
   const [invoicePdfPreview, setInvoicePdfPreview] = useState<{
-    url: string;
+    data: ArrayBuffer;
     title: string;
   } | null>(null);
   const [invoicePdfPreviewBusy, setInvoicePdfPreviewBusy] = useState(false);
@@ -1302,24 +1303,16 @@ function useStaffInvoicesPageContent() {
     setReversalNote("");
   }, [detail?.id, detail?.balance_due]);
 
-  useEffect(() => {
-    return () => {
-      if (invoicePdfPreview?.url) {
-        URL.revokeObjectURL(invoicePdfPreview.url);
-      }
-    };
-  }, [invoicePdfPreview?.url]);
-
   async function handleOpenInvoicePdfPreview(invoice: InvoiceItem) {
     setInvoicePdfPreviewBusy(true);
     setDetailError(null);
     try {
-      // The preview frame is not sandboxed: it only receives a real PDF.
+      // Drawn by pdf.js: a PDF <iframe> stays blank without the browser's viewer.
       const blob = await pdfPreviewBlob(await fetchInvoicePdfBlob(invoice.id));
       if (!blob) throw new Error(text.pdfOpenError);
-      const url = URL.createObjectURL(blob);
+      const data = await blob.arrayBuffer();
       setInvoicePdfPreview({
-        url,
+        data,
         title: invoice.invoice_number
           ? `${invoice.invoice_number}.pdf`
           : t.revenue_invoices_pdf_fallback_filename,
@@ -5147,10 +5140,9 @@ function useStaffInvoicesPageContent() {
           </DialogHeader>
           <div className="min-h-0 flex-1 bg-muted p-3">
             {invoicePdfPreview ? (
-              <iframe
-                title={invoicePdfPreview.title}
-                src={invoicePdfPreview.url}
-                className="h-full min-h-[32rem] w-full rounded-lg border border-border bg-white"
+              <PdfPreview
+                source={invoicePdfPreview.data}
+                className="h-full overflow-y-auto rounded-lg border border-border bg-muted/40 p-3"
               />
             ) : null}
           </div>

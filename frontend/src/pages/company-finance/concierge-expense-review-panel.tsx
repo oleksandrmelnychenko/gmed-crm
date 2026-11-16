@@ -23,6 +23,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { PdfPreview } from "@/components/pdf-pages-preview";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { formatMoneyAmount } from "@/lib/money";
@@ -96,6 +97,8 @@ type PreviewState = {
   url: string;
   contentType: string;
   filename: string;
+  /** The bytes of a PDF receipt, drawn by pdf.js. */
+  pdfData?: ArrayBuffer;
 };
 
 const emptyForm: ExpensePostForm = {
@@ -651,9 +654,9 @@ export function ConciergeExpenseReviewPanel({
         selected.id,
       );
       const receiptType = result.contentType || receipt.mime_type || "";
-      // The PDF frame is not sandboxed, so it only ever receives a real PDF
-      // whose blob type is forced; images go to an <img>, the rest is not shown.
+      // Only a real PDF is drawn (pdf.js); images go to an <img>, the rest is not shown.
       const pdf = receiptType === "application/pdf" ? await pdfPreviewBlob(result.blob) : null;
+      const pdfData = pdf ? await pdf.arrayBuffer() : undefined;
       if (previewRequestRef.current !== request) return;
       revokePreview();
       const url = URL.createObjectURL(pdf ?? result.blob);
@@ -662,6 +665,7 @@ export function ConciergeExpenseReviewPanel({
         url,
         contentType: receiptType === "application/pdf" && !pdf ? "application/octet-stream" : receiptType,
         filename: result.filename || receipt.original_filename || "receipt",
+        pdfData,
       });
     } catch (error) {
       if (previewRequestRef.current === request) {
@@ -1000,8 +1004,8 @@ export function ConciergeExpenseReviewPanel({
                         <div className="mt-3 min-w-0 overflow-hidden rounded-md border border-border bg-background">
                           {preview.contentType.startsWith("image/") ? (
                             <img src={preview.url} alt={preview.filename} className="max-h-[34rem] w-full object-contain" />
-                          ) : preview.contentType === "application/pdf" ? (
-                            <iframe src={preview.url} title={preview.filename} className="h-[28rem] w-full bg-white sm:h-[34rem]" />
+                          ) : preview.pdfData ? (
+                            <PdfPreview source={preview.pdfData} className="h-[28rem] w-full overflow-y-auto bg-muted/40 p-3 sm:h-[34rem]" />
                           ) : (
                             <p className="px-4 py-10 text-center text-sm text-muted-foreground">{text.previewUnavailable}</p>
                           )}

@@ -1120,17 +1120,11 @@ test.describe("chat secure flows", () => {
     await page.locator("form button[type='submit']").click();
     await expect(page.getByTestId("chat-attachment-queue")).toHaveCount(0);
     await page.getByRole("button", { name: "Vorschau: valid.pdf", exact: true }).click();
-    const frame = page.getByRole("dialog").locator("iframe");
-    await expect(frame).toBeVisible();
-    await expect(frame).toHaveAttribute("src", /^blob:/);
-    const content = await frame.evaluate(async (element: HTMLIFrameElement) => {
-      const response = await fetch(element.src);
-      return { type: response.headers.get("content-type"), text: await response.text() };
-    });
-    expect(content.type).toBe("application/pdf");
-    expect(content.text).toBe(pdf);
-    // Chrome's PDF viewer takes keyboard focus once the PDF has loaded; Escape from the
-    // dialog itself closes it whether or not the browser renders PDFs inline.
+    // The PDF is drawn by pdf.js, not in an <iframe> that depends on the browser's viewer.
+    const preview = page.getByRole("dialog").getByTestId("pdf-pages-preview");
+    await expect(preview).toHaveAttribute("data-state", "ready");
+    await expect(preview.locator("canvas[data-pdf-page]")).toHaveCount(1);
+    await expect(page.getByRole("dialog").locator("iframe")).toHaveCount(0);
     await page.getByRole("dialog").getByRole("button", { name: "Schließen", exact: true }).press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByRole("button", { name: "Vorschau: corrupt.pdf", exact: true }).click();

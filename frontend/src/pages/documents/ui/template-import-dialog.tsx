@@ -47,7 +47,7 @@ import {
   type ImportedTemplate,
   type ImportedTemplateVariable,
 } from "../data/template-import-api";
-import { PdfPagesPreview } from "./pdf-pages-preview";
+import { PdfPagesPreview } from "@/components/pdf-pages-preview";
 
 /**
  * Import of the agency's own document templates on the documents page.

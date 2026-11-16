@@ -359,7 +359,11 @@ for (const lang of ["ru", "de"]) {
       await page.screenshot({ path: `../artifacts/design-qa/invoice-lines-${lang}-${width}.png`, animations: "disabled" });
       await sheet.getByRole("button", { name: lang === "de" ? "PDF-Vorschau" : "Предпросмотр PDF", exact: true }).click();
       await expect.poll(() => fixture.pdfReads).toBe(1);
-      await expect(page.locator("iframe")).toHaveCount(1);
+      // Drawn by pdf.js: a PDF <iframe> stays blank without the browser's viewer.
+      const preview = page.getByTestId("pdf-pages-preview");
+      await expect(preview).toHaveAttribute("data-state", "ready");
+      await expect(preview.locator("canvas[data-pdf-page]").first()).toBeVisible();
+      await expect(page.locator("iframe")).toHaveCount(0);
       expect(fixture.errors).toEqual([]);
     });
   }

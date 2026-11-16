@@ -15,7 +15,6 @@ import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   createDocumentPreviewObjectUrl,
-  documentPreviewSandbox,
   createDocumentTranslation,
   downloadDocumentFile,
   fetchDocumentTranslations,
@@ -29,6 +28,7 @@ import type {
   MachineTranslationCapability,
 } from "../model/types";
 import { RichMarkupEditor } from "./rich-markup-editor";
+import { DocumentPreviewSurface } from "./document-preview-surface";
 
 const TARGET_LANGUAGES = ["de", "ru", "uk", "en"] as const;
 const SOURCE_LANGUAGES = ["de", "ru", "uk", "en"] as const;
@@ -78,7 +78,7 @@ type Props = {
 export function DocumentTranslationDialog({ documentId, title, open, onOpenChange, onSaved, documentLanguage, editing }: Props) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
-  const [preview, setPreview] = useState<{ url: string; contentType: string } | null>(null);
+  const [preview, setPreview] = useState<{ url: string; contentType: string; pdfData?: ArrayBuffer } | null>(null);
   const [previewError, setPreviewError] = useState("");
   const previewUrlRef = useRef<string | null>(null);
   const [capability, setCapability] = useState<MachineTranslationCapability | null>(null);
@@ -266,12 +266,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain lg:grid lg:overflow-hidden lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
           <div className="h-[clamp(10rem,32dvh,20rem)] shrink-0 border-b border-border/70 bg-muted p-3 lg:h-auto lg:min-h-0 lg:border-b-0 lg:border-r">
             {preview ? (
-              <iframe
-                title={title}
-                src={preview.url}
-                sandbox={documentPreviewSandbox(preview.contentType)}
-                className="h-full w-full rounded-lg border border-border bg-white"
-              />
+              <DocumentPreviewSurface preview={preview} title={title} className="h-full w-full" />
             ) : previewError ? (
               <p className="p-3 text-sm text-destructive">{previewError}</p>
             ) : (

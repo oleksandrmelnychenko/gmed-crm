@@ -6,6 +6,7 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { CountBadge, Field, textareaClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { PdfPreview } from "@/components/pdf-pages-preview";
 import {
   Dialog,
   DialogContent,
@@ -170,14 +171,10 @@ export function RowIconAction({
 
 type LoadedFile = { blob: Blob; contentType: string; filename: string | null };
 
-/** Same rule as the documents pages: PDFs keep the viewer, everything else is fully sandboxed. */
-function previewSandbox(mimeType: string): string | undefined {
-  return mimeType.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf" ? undefined : "";
-}
-
 /**
- * Shows a stored file in the app's document preview shell through a blob URL
- * (the API needs the bearer token, so a plain link cannot open it). TIFF and
+ * Shows a stored file in the app's document preview shell (the API needs the
+ * bearer token, so a plain link cannot open it). A PDF is drawn by pdf.js;
+ * images and text go to a fully sandboxed frame through a blob URL. TIFF and
  * unknown types are offered as a download only.
  */
 export function FilePreviewDialog({
@@ -200,6 +197,7 @@ export function FilePreviewDialog({
   const { t } = useLang();
   const [file, setFile] = useState<LoadedFile | null>(null);
   const [url, setUrl] = useState<string | null>(null);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -211,17 +209,22 @@ export function FilePreviewDialog({
     setError("");
     setFile(null);
     setUrl(null);
+    setPdfData(null);
     load()
       .then(async (loaded) => {
         if (cancelled) return;
         setFile(loaded);
         if (canPreviewInline(mimeType)) {
-          // The blob type is forced to the stored type, never the response's;
-          // the unsandboxed PDF frame only receives a real PDF.
-          const typed = mimeType === "application/pdf"
-            ? await pdfPreviewBlob(loaded.blob)
-            : new Blob([loaded.blob], { type: mimeType });
-          if (cancelled || !typed) return;
+          // The blob type is forced to the stored type, never the response's.
+          // A PDF is drawn by pdf.js, and only when the bytes are a real PDF.
+          if (mimeType === "application/pdf") {
+            const pdf = await pdfPreviewBlob(loaded.blob);
+            const data = pdf ? await pdf.arrayBuffer() : null;
+            if (!cancelled && data) setPdfData(data);
+            return;
+          }
+          const typed = new Blob([loaded.blob], { type: mimeType });
+          if (cancelled) return;
           objectUrl = URL.createObjectURL(typed);
           setUrl(objectUrl);
         }
@@ -282,11 +285,16 @@ export function FilePreviewDialog({
             >
               {error}
             </div>
+          ) : pdfData ? (
+            <PdfPreview
+              source={pdfData}
+              className="h-full min-h-[560px] w-full overflow-y-auto rounded-lg border border-border bg-muted/40 p-3"
+            />
           ) : url ? (
             <iframe
               title={fileName || t.personnel_preview}
               src={url}
-              sandbox={previewSandbox(mimeType)}
+              sandbox=""
               className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
             />
           ) : file ? (

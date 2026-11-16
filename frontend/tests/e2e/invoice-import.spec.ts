@@ -3,6 +3,7 @@ import type { InvoiceImportPreview } from "../../src/pages/invoices/model/import
 import fs from "node:fs";
 import { pickerValueInput } from "./helpers";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 if (process.env.PARSER_TEST_BASE_URL) test.use({ baseURL: process.env.PARSER_TEST_BASE_URL });
 
 for (const lang of ["ru", "de"] as const) test(`patient invoice without an order remains on the incoming tab in ${lang}`, async ({ page }) => {
@@ -154,6 +155,15 @@ test("company supplier invoice saves without a patient or order", async ({ page 
     currency: "EUR",
   });
   expect(writes[0]).not.toHaveProperty("patient_id");
+});
+
+test("a PDF original is drawn by pdf.js, not in a browser-viewer iframe", async ({ page }) => {
+  const pdf = fileURLToPath(new URL("./fixtures/signature-preview.pdf", import.meta.url));
+  const { dialog } = await prepare(page, { scope: "company", pdf });
+  const original = dialog.getByRole("region", { name: /Оригинал инвойса|Originalrechnung/ });
+  await expect(original.getByTestId("pdf-pages-preview")).toHaveAttribute("data-state", "ready");
+  await expect(original.locator("canvas[data-pdf-page]").first()).toBeVisible();
+  await expect(original.locator("iframe")).toHaveCount(0);
 });
 
 test("replace discards an unfinished uploaded original and recognizes the new file immediately", async ({ page }) => {

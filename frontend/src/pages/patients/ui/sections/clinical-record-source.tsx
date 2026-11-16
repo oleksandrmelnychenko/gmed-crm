@@ -12,9 +12,9 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import { DocumentPreviewSurface } from "@/pages/documents/ui/document-preview-surface";
 import {
   createDocumentPreviewObjectUrl,
-  documentPreviewSandbox,
   downloadDocumentFile,
   revokeDocumentPreviewObjectUrl,
 } from "@/pages/documents/data/document-api";
@@ -32,6 +32,7 @@ type DocumentPreview = {
   title: string;
   contentType?: string;
   url?: string;
+  pdfData?: ArrayBuffer;
 };
 
 function supportsInlinePreview(contentType?: string) {
@@ -99,6 +100,7 @@ export function ClinicalRecordSource({
         title: item.source_document_name || tx("Документ", "Dokument"),
         contentType: result.contentType,
         url: result.url,
+        pdfData: result.pdfData,
       });
     } catch {
       if (previewRequestRef.current === requestId) {
@@ -200,11 +202,11 @@ export function ClinicalRecordSource({
                 {previewError}
               </div>
             ) : preview?.url && supportsInlinePreview(preview.contentType) ? (
-              <iframe
+              <DocumentPreviewSurface
+                preview={preview}
+                page={item.source_page ?? undefined}
                 title={preview.title}
-                src={preview.url}
-                sandbox={documentPreviewSandbox(preview.contentType)}
-                className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
+                className="h-full min-h-[560px] w-full"
               />
             ) : preview?.url ? (
               <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-card p-8 text-center">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import { DocumentPreviewSurface } from "@/pages/documents/ui/document-preview-surface";
 import {
   Activity,
   AlertTriangle,
@@ -43,7 +44,6 @@ import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import {
   createDocumentPreviewObjectUrl,
-  documentPreviewSandbox,
   revokeDocumentPreviewObjectUrl,
   uploadDocument,
 } from "@/pages/documents/data/document-api";
@@ -1007,7 +1007,7 @@ export function ClinicalDocumentImportSheet({
   const [candidateGrouping, setCandidateGrouping] = useState<"type" | "page">("type");
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
   const [sourcePageNumber, setSourcePageNumber] = useState(1);
-  const [preview, setPreview] = useState<{ url: string; contentType: string } | null>(null);
+  const [preview, setPreview] = useState<{ url: string; contentType: string; pdfData?: ArrayBuffer } | null>(null);
   const [previewError, setPreviewError] = useState("");
   const [busy, setBusy] = useState(false);
   const [imports, setImports] = useState<ClinicalDocumentImportSummary[]>([]);
@@ -3485,12 +3485,11 @@ export function ClinicalDocumentImportSheet({
                   <img src={preview.url} alt={tx("Медицинский документ", "Medizinisches Dokument")} className="max-w-full bg-white" />
                 </div>
               ) : (
-                <iframe
-                  key={`${preview.url}-${activePage}`}
+                <DocumentPreviewSurface
+                  preview={preview}
+                  page={activePage}
                   title={documentImport?.document_name ?? tx("Предпросмотр документа", "Dokumentvorschau")}
-                  src={`${preview.url}#page=${activePage}&zoom=page-width`}
-                  sandbox={documentPreviewSandbox(preview.contentType)}
-                  className="h-full w-full rounded-lg border border-border bg-white shadow-sm"
+                  className="h-full w-full shadow-sm"
                 />
               )
             ) : previewError ? (
