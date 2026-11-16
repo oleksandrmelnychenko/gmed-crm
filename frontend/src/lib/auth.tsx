@@ -10,6 +10,7 @@ import {
   getAccessTokenExpiresAtMs,
   getAccessTokenSubject,
   markApiSessionEnded,
+  noteApiSessionUser,
   refreshAuthSession,
 } from "@/lib/api";
 import {
@@ -280,6 +281,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const { user, loading, signOut } = authState;
   const { setLang } = useLang();
+  // A newly signed-in user (a stored session, a sign-in in another tab) lifts
+  // the stop of session-only reads set at a sign-out in this tab. Noted while
+  // rendering (idempotent): the children's effects read before this
+  // provider's own effects would run.
+  noteApiSessionUser(user?.id ?? null);
 
   // The language saved on the profile wins over the browser default once the
   // account is known; a later manual toggle is kept until the next sign-in.

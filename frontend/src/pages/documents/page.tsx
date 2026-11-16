@@ -1196,18 +1196,20 @@ function StaffDocumentsPage({
   const urlValidityRef = useRef(urlValidity);
   urlValidityRef.current = urlValidity;
   useEffect(() => {
-    // A link opened while the page is mounted (a notice, the back button).
+    // A link opened while the list is mounted (a notice, the back button);
+    // the detail route keeps the list's filter as it is.
+    if (routeDocumentId) return;
     setFilters((current) => (current.validity === urlValidity ? current : { ...current, validity: urlValidity }));
-  }, [urlValidity]);
+  }, [urlValidity, routeDocumentId]);
   useEffect(() => {
-    if (urlValidityRef.current === filters.validity) return;
+    if (routeDocumentId || urlValidityRef.current === filters.validity) return;
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       if (filters.validity) next.set("validity", filters.validity);
       else next.delete("validity");
       return next;
     }, { replace: true });
-  }, [filters.validity, setSearchParams]);
+  }, [filters.validity, setSearchParams, routeDocumentId]);
   const deferredSearch = useDeferredValue(filters.search);
   const [mobileDocumentFiltersOpen, setMobileDocumentFiltersOpen] = useState(false);
   const legacyQueryDocumentId = searchParams.get("document") ?? "";
@@ -6827,7 +6829,7 @@ function StaffDocumentsPage({
                           busyId={outdatedRenewal.busyId}
                           onRenew={canRenewOutdated && detail.patient_id ? (id) => void outdatedRenewal.renew(id, "expired") : undefined}
                           onExtend={canRenewOutdated && detail.patient_id ? (id, date) => outdatedRenewal.extend(id, date) : undefined}
-                          onUploadNew={canUpload && canManage ? () => {
+                          onUploadNew={canUpload && canRenewOutdated ? () => {
                             setUploadForm({
                               ...emptyUploadForm(detail.patient_id ?? ""),
                               orderId: detail.order_id ?? "",

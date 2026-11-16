@@ -1,4 +1,4 @@
-import { apiFetch, clearApiCache } from "@/lib/api";
+import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import type { DocumentItem, TemplateCatalogResponse } from "../model/types";
 import { buildGenerateDocumentPayload, templateForDocument } from "../model/document-model";
 import { isOutdatedCurrentVersion, oneClickReplacementForm, regeneratesInOneClick } from "../model/outdated-document-version";
@@ -71,10 +71,19 @@ export async function regenerateOutdatedDocument(
  * the server, so a failed second step can simply be retried.
  */
 export async function extendEstimateValidity(documentId: string, validUntil: string): Promise<RegeneratedDocument> {
-  await apiFetch<unknown>(`/documents/${documentId}/extend-quote-validity`, {
-    method: "POST",
-    body: JSON.stringify({ valid_until: validUntil }),
-  });
+  try {
+    await apiFetch<unknown>(`/documents/${documentId}/extend-quote-validity`, {
+      method: "POST",
+      body: JSON.stringify({ valid_until: validUntil }),
+    });
+  } catch (error) {
+    // The estimate prints an earlier quote: its new version takes the
+    // order's current quote and that quote's date.
+    const code = error instanceof ApiRequestError
+      ? (error.body as { error?: string } | null | undefined)?.error ?? error.code
+      : undefined;
+    if (code !== "estimate_quote_not_current") throw error;
+  }
   clearApiCache("/quotes");
   clearApiCache("/orders");
   return regenerateOutdatedDocument(documentId, "expired");

@@ -72,6 +72,22 @@ describe("ended session", () => {
     await apiFetch("/me/documents");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("lifts the stop for a newly shown user, not for the one signing out", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { apiFetch, markApiSessionEnded, noteApiSessionUser } = await loadApiModule();
+    noteApiSessionUser("user-a");
+    markApiSessionEnded(true);
+    noteApiSessionUser("user-a");
+    await expect(apiFetch("/me/documents")).rejects.toMatchObject({ code: "session_ended" });
+    noteApiSessionUser(null);
+    noteApiSessionUser("user-a");
+    await apiFetch("/me/documents");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("API validation errors", () => {

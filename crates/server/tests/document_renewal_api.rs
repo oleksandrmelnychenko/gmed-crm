@@ -313,6 +313,37 @@ async fn an_estimate_is_renewed_through_its_quote_and_identical_versions_are_ref
     assert_eq!(status, StatusCode::OK, "{reopened}");
     assert_eq!(reopened["status"], "sent");
 
+    // A newer quote of the order: the estimate printed the earlier one, which
+    // is not redated (its new version takes the current quote).
+    sqlx::query(
+        r#"INSERT INTO quotes (order_id, quote_number, total_net, total_vat, total_gross,
+                               status, valid_until, line_items, created_by)
+           SELECT order_id, quote_number || '-N', total_net, total_vat, total_gross,
+                  'sent', $2, line_items, created_by
+           FROM quotes WHERE id = $1"#,
+    )
+    .bind(quote_id)
+    .bind(later)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before: Option<NaiveDate> =
+        sqlx::query_scalar("SELECT valid_until FROM quotes WHERE id = $1")
+            .bind(quote_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (status, stale) = extend(&second_id, later + chrono::Days::new(20)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{stale}");
+    assert_eq!(stale["error"], "estimate_quote_not_current");
+    let after: Option<NaiveDate> =
+        sqlx::query_scalar("SELECT valid_until FROM quotes WHERE id = $1")
+            .bind(quote_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(before, after);
+
     // Only roles that manage quotes extend one.
     let interpreter = seed_user(&pool, &tag, "interpreter").await;
     let (status, _) = json_request(

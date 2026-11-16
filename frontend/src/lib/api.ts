@@ -86,9 +86,21 @@ export function getAccessToken() {
 const SESSION_ONLY_PATH = /^\/(?:me|notifications|messages|announcements)(?:[/?]|$)/;
 let apiSessionEnded = false;
 
+let apiSessionUserId: string | null = null;
+
 /** The session ended (sign-out) or started again (sign-in, refreshed tokens). */
 export function markApiSessionEnded(ended: boolean) {
   apiSessionEnded = ended;
+}
+
+/**
+ * The signed-in user the app shows (null when signed out): a new user (a
+ * stored session, a sign-in in another tab) lifts the stop; the same user
+ * re-rendering while the sign-out runs does not.
+ */
+export function noteApiSessionUser(userId: string | null) {
+  if (userId && userId !== apiSessionUserId) apiSessionEnded = false;
+  apiSessionUserId = userId;
 }
 
 function sessionEndedError() {
@@ -553,6 +565,8 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   erasure_blocked_by_open_business: "api_erasure_blocked_by_open_business",
   // Portal release of an archived or file-less document (documents.rs).
   document_archived_not_releasable: "api_document_archived_not_releasable",
+  // A new version that would print the same as the current one (documents.rs, QA 2026-11-16 S2-1).
+  no_changes: "api_document_no_changes",
   // DSGVO consent and the confidentiality release follow signed documents only (patients.rs).
   legal_status_requires_signed_document: "api_patients_legal_status_requires_signed_document",
   // "Compliance completed" after a revoked consent (patients.rs).

@@ -1717,6 +1717,9 @@ function usePatientDetailPageContent() {
 
   const handleDocumentUploadOpenChange = useCallback((open: boolean) => {
     if (open) preloadPatientDetailOverlayLayers();
+    // A closed dialog forgets «Загрузить новый»: the next plain upload must
+    // not archive that document.
+    else setDocumentUploadInitialForm(null);
     setDocumentUploadOpen(open);
   }, []);
 

@@ -5873,14 +5873,22 @@ async fn extend_estimate_quote_validity(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
         }
     };
+    // Only the order's current quote (the one a new version of the estimate
+    // prints) is redated: an older one stays closed, and the new version of
+    // the estimate simply takes the current quote and its date.
+    if let Err(error) = lock_open_order_quotes_tx(&mut tx, order_id).await {
+        tracing::error!(%error, %order_id, "lock order quotes for validity");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+    }
     let quote = match sqlx::query(
-        r#"SELECT q.id, q.status, q.valid_until
+        r#"SELECT q.id, q.status, q.valid_until, q.quote_number
            FROM quotes q
-           WHERE q.order_id = $1 AND q.quote_number = $2
+           WHERE q.order_id = $1 AND q.status <> 'superseded'
+           ORDER BY q.created_at DESC, q.id DESC
+           LIMIT 1
            FOR UPDATE"#,
     )
     .bind(order_id)
-    .bind(&quote_number)
     .fetch_optional(&mut *tx)
     .await
     {
@@ -5891,6 +5899,17 @@ async fn extend_estimate_quote_validity(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
         }
     };
+    if quote
+        .try_get::<String, _>("quote_number")
+        .unwrap_or_default()
+        != quote_number
+    {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "estimate_quote_not_current",
+            "The estimate prints an earlier quote; its new version takes the current one",
+        );
+    }
     let quote_id = quote.try_get::<Uuid, _>("id").unwrap_or_default();
     let previous_status = quote.try_get::<String, _>("status").unwrap_or_default();
     let previous_valid_until = quote
