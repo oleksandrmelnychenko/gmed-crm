@@ -13,6 +13,9 @@ use gmed_server::settings::{SettingsCache, TokenSettings};
 use gmed_server::state::AppState;
 
 static TEST_BACKEND: Mutex<Weak<TestDatabaseBackend>> = Mutex::new(Weak::new());
+/// Serialises creating the shared backend: two tests starting at once used to
+/// start two Postgres containers.
+static TEST_BACKEND_INIT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const TEST_AUDIT_IP_SALT: &str = "test-audit-ip-salt";
 
 /// Explicit entitlement for fixtures testing a paid portal module. Tests of
@@ -362,6 +365,7 @@ where
 }
 
 async fn get_or_create_test_backend() -> Result<Arc<TestDatabaseBackend>, String> {
+    let _init = TEST_BACKEND_INIT.lock().await;
     if let Some(existing) = TEST_BACKEND
         .lock()
         .map_err(|_| "test backend mutex poisoned".to_string())?
@@ -389,12 +393,27 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
         std::process::id(),
         Uuid::new_v4().simple()
     );
-    let create_sql = format!(r#"CREATE DATABASE "{database_name}""#);
+    let template = migrated_template_database(&backend).await?;
+    let create_sql = format!(r#"CREATE DATABASE "{database_name}" TEMPLATE "{template}""#);
 
-    sqlx::query(sqlx::AssertSqlSafe::<&str>(&create_sql))
-        .execute(&admin_pool)
-        .await
-        .map_err(|error| format!("create database {database_name}: {error}"))?;
+    // Copies of one template may collide for a moment ("source database is
+    // being accessed by other users"); retry briefly.
+    let mut attempt = 0;
+    loop {
+        match sqlx::query(sqlx::AssertSqlSafe::<&str>(&create_sql))
+            .execute(&admin_pool)
+            .await
+        {
+            Ok(_) => break,
+            Err(error)
+                if attempt < 40 && error.to_string().contains("being accessed by other users") =>
+            {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            Err(error) => return Err(format!("create database {database_name}: {error}")),
+        }
+    }
 
     let pool = match connect_pool(
         &backend.admin_database_url,
@@ -412,14 +431,6 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
             return Err(format!("connect database {database_name}: {error}"));
         }
     };
-
-    if let Err(error) = gmed_db::run_migrations(&pool).await {
-        let drop_sql = format!(r#"DROP DATABASE IF EXISTS "{database_name}""#);
-        let _ = sqlx::query(sqlx::AssertSqlSafe::<&str>(&drop_sql))
-            .execute(&admin_pool)
-            .await;
-        return Err(format!("run migrations for {database_name}: {error}"));
-    }
 
     // The production hardening migration disables all historical demo
     // credentials. Integration suites explicitly opt the isolated fixture
@@ -463,6 +474,9 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
 struct TestDatabaseBackend {
     admin_database_url: String,
     docker_container: Option<String>,
+    /// A database with every migration applied, made once per backend; each
+    /// suite database is a copy of it (`CREATE DATABASE … TEMPLATE`).
+    template_database: tokio::sync::OnceCell<String>,
 }
 
 async fn resolve_test_backend() -> Result<TestDatabaseBackend, String> {
@@ -470,6 +484,7 @@ async fn resolve_test_backend() -> Result<TestDatabaseBackend, String> {
         return Ok(TestDatabaseBackend {
             admin_database_url: url,
             docker_container: None,
+            template_database: tokio::sync::OnceCell::new(),
         });
     }
 
@@ -477,10 +492,52 @@ async fn resolve_test_backend() -> Result<TestDatabaseBackend, String> {
         return Ok(TestDatabaseBackend {
             admin_database_url: url,
             docker_container: None,
+            template_database: tokio::sync::OnceCell::new(),
         });
     }
 
     start_docker_postgres().await
+}
+
+/// The migrated template of this backend, created on first use: all
+/// migrations run once instead of once per test.
+async fn migrated_template_database(backend: &TestDatabaseBackend) -> Result<String, String> {
+    backend
+        .template_database
+        .get_or_try_init(|| async {
+            let admin_pool = connect_pool(&backend.admin_database_url, "postgres", 1)
+                .await
+                .map_err(|error| format!("connect admin database: {error}"))?;
+            let template = format!(
+                "gmed_test_tpl_{}_{}",
+                std::process::id(),
+                Uuid::new_v4().simple()
+            );
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                r#"CREATE DATABASE "{template}""#
+            )))
+            .execute(&admin_pool)
+            .await
+            .map_err(|error| format!("create template database {template}: {error}"))?;
+            let pool = connect_pool(&backend.admin_database_url, &template, 4)
+                .await
+                .map_err(|error| format!("connect template database {template}: {error}"))?;
+            let migrated = gmed_db::run_migrations(&pool).await;
+            // A template must have no open connections to be copied.
+            pool.close().await;
+            if let Err(error) = migrated {
+                let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+                    r#"DROP DATABASE IF EXISTS "{template}""#
+                )))
+                .execute(&admin_pool)
+                .await;
+                return Err(format!("run migrations for template {template}: {error}"));
+            }
+            admin_pool.close().await;
+            Ok(template)
+        })
+        .await
+        .cloned()
 }
 
 async fn connect_pool(
@@ -554,6 +611,7 @@ async fn start_docker_postgres() -> Result<TestDatabaseBackend, String> {
             return Ok(TestDatabaseBackend {
                 admin_database_url,
                 docker_container: Some(container_id),
+                template_database: tokio::sync::OnceCell::new(),
             });
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -654,6 +712,32 @@ impl Drop for TestDatabaseBackend {
         if let Some(container_id) = self.docker_container.clone() {
             thread::sleep(Duration::from_millis(200));
             let _ = docker_stop(&container_id);
+            return;
         }
+        // A shared server outlives the tests: remove this process's template.
+        let Some(template) = self.template_database.get().cloned() else {
+            return;
+        };
+        let admin_database_url = self.admin_database_url.clone();
+        let _ = thread::spawn(move || {
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            runtime.block_on(async move {
+                let Ok(admin_pool) = connect_pool(&admin_database_url, "postgres", 1).await else {
+                    return;
+                };
+                let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+                    r#"DROP DATABASE IF EXISTS "{template}""#
+                )))
+                .execute(&admin_pool)
+                .await;
+                admin_pool.close().await;
+            });
+        })
+        .join();
     }
 }
