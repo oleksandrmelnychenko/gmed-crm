@@ -60,6 +60,15 @@ AS $$
                     'framework_contract', 'single_order', 'order_cost_estimate', 'cost_estimate',
                     'cost_coverage_declaration', 'payer_cost_estimate', 'patient_payer_statement'))
            AND document_terms_current(d.id) IS NOT FALSE
+           -- A Kostenvoranschlag printing an earlier quote of its order is
+           -- renewed for the current quote.
+           AND NOT (d.generated_template_id = 'order_cost_estimate'
+                    AND d.order_id IS NOT NULL
+                    AND d.generated_bindings ->> '_quote_number' IS DISTINCT FROM (
+                        SELECT q.quote_number FROM quotes q
+                        WHERE q.order_id = d.order_id AND q.status <> 'superseded'
+                        ORDER BY q.status IN ('rejected', 'expired'), q.created_at DESC, q.id DESC
+                        LIMIT 1))
            AND (d.valid_until IS NULL
                 OR d.valid_until > (now() AT TIME ZONE 'Europe/Berlin')::date + 30)
            AND EXISTS (
