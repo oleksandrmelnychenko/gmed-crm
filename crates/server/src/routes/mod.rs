@@ -67,6 +67,7 @@ pub mod notifications;
 pub mod order_intakes;
 pub mod order_service_groups;
 pub mod orders;
+pub mod patient_consent_choices;
 pub mod patient_document_requests;
 pub mod patient_financials;
 pub mod patient_next_actions;
@@ -149,6 +150,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(order_intakes::router())
         .merge(patient_financials::router())
         .merge(patient_payer_summary::router())
+        .merge(patient_consent_choices::router())
         .merge(patient_recommendations::router())
         .merge(patient_next_actions::router())
         .merge(patient_document_requests::router())

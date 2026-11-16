@@ -8406,6 +8406,7 @@ async fn list_patient_documents(
                   -- An order document made before the order's terms changed
                   -- needs a new version before it is signed (owner 2026-11-15).
                   document_terms_current(d.id) AS terms_current,
+                  document_manual_version_locked(d.id) AS manual_version_locked,
                   d.file_size,
                   d.is_medical,
                   d.art,
@@ -8540,6 +8541,7 @@ async fn list_patient_documents(
                 "replaces_document_id": row.try_get::<Option<Uuid>, _>("replaces_document_id").unwrap_or_default(),
                 "version_number": row.try_get::<i32, _>("version_number").unwrap_or(1),
                 "terms_current": row.try_get::<Option<bool>, _>("terms_current").ok().flatten(),
+                "manual_version_locked": row.try_get::<Option<bool>, _>("manual_version_locked").ok().flatten().unwrap_or(false),
                 "file_size": row.try_get::<i64, _>("file_size").unwrap_or_default(),
                 "is_medical": row.try_get::<bool, _>("is_medical").unwrap_or(false),
                 "art": row.try_get::<String, _>("art").unwrap_or_default(),

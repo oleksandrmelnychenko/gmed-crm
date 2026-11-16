@@ -32,6 +32,7 @@ import {
 } from "@/pages/patients/model/portal-shared";
 import type { PortalPrivacyRequest } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
+import { PortalConsentChoicesSection } from "@/pages/patients/ui/sections/patient-consent-choices";
 
 type RequestType =
   | "erasure"
@@ -263,6 +264,8 @@ export function PatientPrivacyPage() {
       />
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
+
+      <PortalConsentChoicesSection />
 
       <section className="grid items-start gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
         <Section

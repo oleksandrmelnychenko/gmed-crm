@@ -5825,7 +5825,7 @@ struct TrustedPersonsRequest {
     recorded_note: Option<String>,
 }
 
-async fn disclosure_company_name<'e, E>(executor: E) -> Result<String, sqlx::Error>
+pub(crate) async fn disclosure_company_name<'e, E>(executor: E) -> Result<String, sqlx::Error>
 where
     E: sqlx::PgExecutor<'e>,
 {

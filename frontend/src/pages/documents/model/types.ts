@@ -92,6 +92,8 @@ export type DocumentItem = {
    * signature would cover stale terms; `null`/absent for other documents.
    */
   terms_current?: boolean | null;
+  /** An open order: no manual new version of this order or contract document (owner 2026-11-16). */
+  manual_version_locked?: boolean;
   generated_bindings?: Record<string, unknown> | null;
   generated_manual_text?: string | null;
   notes: string | null;

@@ -45,6 +45,9 @@ export function renewalErrorText(error: unknown, tx: Tx): string {
   if (code === "no_changes") {
     return tx("Нет изменений для новой версии", "Keine Änderungen für eine neue Version");
   }
+  if (code === "document_locked_by_active_order") {
+    return tx("Заказ открыт: новая версия этого документа создаётся только при изменении заказа.", "Der Auftrag ist offen: Eine neue Version dieses Dokuments entsteht nur durch eine Änderung des Auftrags.");
+  }
   if (code === "quote_valid_until_past") {
     return tx("Срок действия сметы не может быть в прошлом.", "Das Gültigkeitsdatum des Kostenvoranschlags darf nicht in der Vergangenheit liegen.");
   }
@@ -129,7 +132,7 @@ export function useOutdatedDocumentRenewal({
   }, [onNeedsForm, onRenewed, tx]);
 
   const renew = useCallback(
-    (documentId: string, reason: "outdated" | "expired" = "outdated") =>
+    (documentId: string, reason: "outdated" | "expired" | "consent_changed" = "outdated") =>
       run(documentId, () => regenerateOutdatedDocument(documentId, reason)),
     [run],
   );

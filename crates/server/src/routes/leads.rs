@@ -10925,6 +10925,20 @@ async fn convert_lead(
         tracing::error!(%error, lead_id = %lead_id, patient_id = %patient_id, "link lead portal account");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    // The consent choices of the lead become the patient's: the patient
+    // changes them later in the patient card or the portal (owner request
+    // 2026-11-16, `routes::patient_consent_choices`).
+    if let Err(error) = sqlx::query(
+        "UPDATE consent_form_choices SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, lead_id = %lead_id, patient_id = %patient_id, "link consent choices");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     if let Err(error) = sqlx::query(
         r#"WITH consent_evidence AS (

@@ -174,6 +174,15 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
       de: "Bitte ein neues Einwilligungsdokument und eine neue Signatureinladung erstellen.",
     },
   },
+  // An existing patient changed the consents in the portal
+  // (crates/server/src/routes/patient_consent_choices.rs, 2026-11-16).
+  patient_consent_choice_changed: {
+    title: { ru: "Пациент изменил согласия", de: "Einwilligungen geändert" },
+    body: {
+      ru: "Создайте новую версию согласия на передачу данных.",
+      de: "Bitte eine neue Version der Einverständniserklärung erstellen.",
+    },
+  },
   // The patient withdrew the consent to the payer's cost estimate
   // (crates/server/src/routes/lead_payer_package.rs).
   lead_cost_estimate_consent_withdrawn: {

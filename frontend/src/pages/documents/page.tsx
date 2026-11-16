@@ -17,6 +17,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { PatientConsentEmbeddedEditor, printsConsentChoice, type ConsentEditorHandle } from "@/pages/patients/ui/sections/patient-consent-embedded-editor";
 import { createPortal, flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -1282,6 +1283,8 @@ function StaffDocumentsPage({
   // adult (QA 2026-10-12 B2-05, B3-06).
   const [generatePatientBirthDate, setGeneratePatientBirthDate] = useState<string | null>(null);
   const [generateBusy, setGenerateBusy] = useState(false);
+  // The consent choices edited in the dialog of the Einverständniserklärung (owner 2026-11-16).
+  const consentEditor = useRef<ConsentEditorHandle>(null);
   const [generateError, setGenerateError] = useState("");
 
   const [selectedId, setSelectedId] = useState(() =>
@@ -2810,6 +2813,10 @@ function StaffDocumentsPage({
     setGenerateBusy(true);
     setGenerateError("");
     try {
+      // The changed consent choice is saved first; the form then prints it.
+      if (printsConsentChoice(selectedTemplate.id) && consentEditor.current && !(await consentEditor.current.commit())) {
+        return;
+      }
       const response = await generateDocument(
         buildGenerateDocumentPayload({
           template: selectedTemplate,
@@ -4212,11 +4219,8 @@ function StaffDocumentsPage({
                         </p>
                       </div>
                     ) : null}
-                    {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
-                        {t.documents_generate_replace_warning}{" "}
-                        {detail.version_number}.
-                      </div>
+                    {selectedTemplate && printsConsentChoice(selectedTemplate.id) && generateForm.patientId ? (
+                      <PatientConsentEmbeddedEditor key={generateForm.patientId} patientId={generateForm.patientId} handle={consentEditor} />
                     ) : null}
                     {selectedTemplateNeedsFrameworkContract &&
                     generateForm.patientId &&
@@ -6852,6 +6856,7 @@ function StaffDocumentsPage({
                       currentDetailTemplate &&
                       detail.is_latest_version &&
                       detail.status !== "archived" &&
+                      !detail.manual_version_locked &&
                       !(canRenewOutdated && (detailOutdated || detailValidityRenewal === "new_version")) ? (
                         <Button
                           type="button"

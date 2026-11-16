@@ -2088,6 +2088,21 @@ where
     .await
 }
 
+/// A manual new version of an order or contract document while the order is
+/// open (owner 2026-11-16).
+fn document_locked_by_active_order() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "document_locked_by_active_order",
+            "message": "The order is open: a new version of this document is made only when the order changes",
+            "message_ru": "Заказ открыт: новая версия этого документа создаётся только при изменении заказа",
+            "message_de": "Der Auftrag ist offen: Eine neue Version dieses Dokuments entsteht nur durch eine Änderung des Auftrags",
+        })),
+    )
+        .into_response()
+}
+
 fn signature_pending_response() -> axum::response::Response {
     (
         StatusCode::CONFLICT,
@@ -14442,6 +14457,8 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         // of the order's terms (services, period; for the estimate also the
         // prepayment) is outdated: `false`. `null` for every other document.
         "terms_current": row.try_get::<Option<bool>, _>("terms_current").ok().flatten(),
+        // No manual new version while an order is open (owner 2026-11-16).
+        "manual_version_locked": row.try_get::<Option<bool>, _>("manual_version_locked").ok().flatten().unwrap_or(false),
         "file_deleted_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at").unwrap_or_default(),
         "file_deleted_by": row.try_get::<Option<Uuid>, _>("file_deleted_by").unwrap_or_default(),
         "file_deleted_by_name": row.try_get::<Option<String>, _>("file_deleted_by_name").unwrap_or_default(),
@@ -14702,6 +14719,7 @@ async fn fetch_document_row(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
                   document_terms_current(d.id) AS terms_current,
+                  document_manual_version_locked(d.id) AS manual_version_locked,
                   EXISTS(
                     SELECT 1
                     FROM document_shares ds
@@ -17960,6 +17978,27 @@ async fn generate_document(
             require_existing_document_upload_access(&state, &auth, replace_document_id).await
     {
         return response;
+    }
+    // Integrity of the order logic (owner 2026-11-16): no manual new version
+    // of an order or contract document while the patient's order is open; a
+    // new version the order asks for (outdated terms, «Gültig bis» near or
+    // passed) stays possible (`document_manual_version_locked`).
+    if let Some(replace_document_id) = body.replace_document_id {
+        match sqlx::query_scalar::<_, bool>("SELECT document_manual_version_locked($1)")
+            .bind(replace_document_id)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) => return document_locked_by_active_order(),
+            Err(error) => {
+                tracing::error!(%error, %replace_document_id, "check the order lock of a new version");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check the document",
+                );
+            }
+        }
     }
 
     // An imported agency template (owner request 2026-11-10) is its text
@@ -33122,6 +33161,7 @@ async fn list_documents(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
                   document_terms_current(d.id) AS terms_current,
+                  document_manual_version_locked(d.id) AS manual_version_locked,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
@@ -33411,6 +33451,7 @@ async fn list_document_intake_queue(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
                   document_terms_current(d.id) AS terms_current,
+                  document_manual_version_locked(d.id) AS manual_version_locked,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
@@ -33803,6 +33844,7 @@ async fn list_document_versions(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
                   document_terms_current(d.id) AS terms_current,
+                  document_manual_version_locked(d.id) AS manual_version_locked,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id

@@ -3,9 +3,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
+import { PatientConsentEmbeddedEditor, printsConsentChoice, type ConsentEditorHandle } from "../sections/patient-consent-embedded-editor";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -103,6 +105,7 @@ export function PatientDocumentGenerateDialog({
     useState<PatientDocumentProfile | null>(null);
   const [relations, setRelations] = useState<DocumentRelationSource[]>([]);
   const [busy, setBusy] = useState(false);
+  const consentEditor = useRef<ConsentEditorHandle>(null);
   const [validationError, setValidationError] = useState("");
   const patientOptions = useMemo(
     () => (patient && patient.id === patientId ? [patient] : []),
@@ -364,6 +367,10 @@ export function PatientDocumentGenerateDialog({
     setValidationError("");
     setBusy(true);
     try {
+      // The changed consent choice is saved first; the form then prints it.
+      if (printsConsentChoice(selectedTemplate.id) && consentEditor.current && !(await consentEditor.current.commit())) {
+        return;
+      }
       const response = await generateDocument(
         buildGenerateDocumentPayload({
           template: selectedTemplate,
@@ -637,6 +644,10 @@ export function PatientDocumentGenerateDialog({
                 </p>
               ) : null}
             </div>
+          ) : null}
+
+          {selectedTemplate && printsConsentChoice(selectedTemplate.id) && patientId ? (
+            <PatientConsentEmbeddedEditor key={patientId} patientId={patientId} handle={consentEditor} />
           ) : null}
 
           {bindingFields.length > 0 ? (

@@ -4078,6 +4078,10 @@ pub(crate) async fn anonymize_patient_identity(
            ), removed_custom_values AS (
                DELETE FROM custom_field_values WHERE entity_id = $1
                   AND field_id IN (SELECT id FROM custom_fields WHERE entity_type = 'patient')
+           ), removed_consent_choices AS (
+               -- The patient's own consent changes name trusted persons.
+               DELETE FROM consent_form_choices WHERE patient_id = $1
+                  AND source IN ('patient_staff', 'patient_portal')
            )
            UPDATE patients
            SET patient_id = $2,

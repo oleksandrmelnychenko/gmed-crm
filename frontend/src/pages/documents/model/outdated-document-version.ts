@@ -31,7 +31,11 @@ export function outdatedDocumentIds(documents: ReadonlyArray<VersionState & { id
  * needs no manual input, so it is made with one click. Any other template
  * opens the replacement form on the documents screen.
  */
-const ONE_CLICK_TEMPLATES = new Set(["single_order", "order_cost_estimate", "framework_contract"]);
+const ONE_CLICK_TEMPLATES = new Set([
+  "single_order", "order_cost_estimate", "framework_contract",
+  // The consent forms print the newest consent choice (owner 2026-11-16).
+  "privacy_consents", "consent_data_release_child", "consent_data_release_single",
+]);
 
 export function regeneratesInOneClick(templateId: string | null | undefined): boolean {
   return ONE_CLICK_TEMPLATES.has(templateId ?? "");

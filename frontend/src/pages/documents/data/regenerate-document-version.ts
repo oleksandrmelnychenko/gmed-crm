@@ -32,13 +32,17 @@ export async function regenerateOutdatedDocument(
    * document whose «Gültig bis» passed or is near (owner 2026-11-15). The new
    * version starts without a date unless the records know it.
    */
-  reason: "outdated" | "expired" = "outdated",
+  reason: "outdated" | "expired" | "consent_changed" = "outdated",
 ): Promise<RegeneratedDocument> {
   const [document, catalog] = await Promise.all([
     apiFetch<DocumentItem>(`/documents/${documentId}`, { forceFresh: true }),
     apiFetch<TemplateCatalogResponse>("/documents/templates", { cacheTtlMs: 300_000 }),
   ]);
-  const renewable = reason === "expired" ? needsValidityAttention(document) : isOutdatedCurrentVersion(document);
+  // `consent_changed`: the patient's consent choice changed since the form was made (owner
+  // 2026-11-16); the server named it (`needs_new_version`) and checks the replace again.
+  const renewable = reason === "consent_changed"
+    ? document.is_latest_version !== false && document.status !== "archived"
+    : reason === "expired" ? needsValidityAttention(document) : isOutdatedCurrentVersion(document);
   if (!renewable) {
     throw new RegenerateDocumentError("not_outdated", "document_not_outdated");
   }

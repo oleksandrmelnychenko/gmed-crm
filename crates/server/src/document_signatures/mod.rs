@@ -904,6 +904,46 @@ pub(crate) async fn invalidate_consent_choices(
     Ok((count, remote))
 }
 
+/// An existing patient changed the consent choice (owner request
+/// 2026-11-16): the still-open invitations of the patient's consent forms
+/// stop, as [`invalidate_consent_choices`] does for a lead.
+pub(crate) async fn invalidate_patient_consent_choices(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    actor: Uuid,
+) -> Result<(usize, Vec<(Uuid, String)>), sqlx::Error> {
+    let rows = sqlx::query(r#"UPDATE document_signature_requests r
+        SET status = 'error', last_error = 'consent_choice_changed', closed_kind = 'abandoned',
+            close_reason = 'consent_choice_changed', closed_by = $2, closed_at = now(),
+            lease_token = NULL, lease_until = NULL, updated_at = now()
+        WHERE r.status IN ('pending','submitting','submission_unknown','needs_review')
+          AND EXISTS (SELECT 1 FROM documents d
+              WHERE (d.id = r.source_document_id OR EXISTS (SELECT 1 FROM document_signature_members m WHERE m.request_id = r.id AND m.document_id = d.id))
+                AND d.patient_id = $1
+                AND d.generated_template_id IN ('privacy_consents','consent_data_release_child','consent_data_release_single'))
+        RETURNING r.id, r.source_document_id, r.provider_request_id, r.provider_account"#)
+        .bind(patient_id).bind(actor).fetch_all(&mut **tx).await?;
+    let count = rows.len();
+    let mut remote = Vec::new();
+    for row in rows {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "document_signature_consent_invalidated",
+                Some(actor),
+                "document",
+                Some(row.get("source_document_id")),
+                json!({"request_id":row.get::<Uuid,_>("id"),"reason":"consent_choice_changed"}),
+            ),
+        )
+        .await?;
+        if let Some(id) = row.get::<Option<Uuid>, _>("provider_request_id") {
+            remote.push((id, row.get("provider_account")));
+        }
+    }
+    Ok((count, remote))
+}
+
 /// The people entitled to sign changed. Stop every still-open invitation for
 /// this inquiry, including order packages; signed evidence stays immutable.
 pub(crate) async fn invalidate_representative_identity(

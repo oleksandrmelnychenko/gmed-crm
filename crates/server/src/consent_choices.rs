@@ -45,6 +45,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+pub mod patient;
+
 /// The consent form whose options the person chooses; also the key of the
 /// option set in `consent_form_choices.template_id` (the minor's forms use
 /// the same options).

@@ -82,6 +82,7 @@ import {
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { PatientFormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 import { PatientPayerSummaryCard } from "./patient-payer-summary";
+import { PatientConsentChoicesCard, canReadPatientConsentChoices } from "./patient-consent-choices";
 import { localizeRelationNotes, relationCitizenshipsLabel } from "./patient-relations-tab";
 
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
@@ -908,6 +909,8 @@ function usePatientProfileTabContent({
         {canViewInvoices && id ? (
           <PatientPayerSummaryCard patientId={id} staffGo={staffGo} reloadKey={detail} />
         ) : null}
+
+        {id && canReadPatientConsentChoices(user?.role) ? <PatientConsentChoicesCard patientId={id} /> : null}
 
         <ProfileSummaryCard
           icon={MapPin}
