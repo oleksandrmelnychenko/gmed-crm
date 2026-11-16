@@ -2330,6 +2330,8 @@ function usePatientDetailPageContent() {
             onDunningNoteChange={setDunningNote}
             onError={setTabActionError}
             onInvoiceDueDateChange={(value) => setInvoiceStatusForm((current) => ({ ...current, dueDate: value }))}
+            invoiceReleasingDraft={managedInvoice?.status === "draft" && invoiceStatusForm.status === "sent"}
+            invoicePaymentTermDays={managedInvoice?.payment_term_days}
             onInvoiceManageOpenChange={(open) => { if (!open) setInvoiceManageId(""); }}
             onInvoiceNotesChange={(value) => setInvoiceStatusForm((current) => ({ ...current, notes: value }))}
             onInvoicePaidAmountChange={(value) => setInvoiceStatusForm((current) => ({ ...current, paidAmount: value }))}

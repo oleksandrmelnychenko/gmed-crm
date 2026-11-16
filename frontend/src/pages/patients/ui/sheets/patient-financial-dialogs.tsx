@@ -23,6 +23,7 @@ import {
 import type { DunningEvent } from "../../model/detail-tab-types";
 import { FormSection, PatientFormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+import { ReleaseDueDateField } from "@/pages/invoices/ui/release-due-date-field";
 
 /** Dunning levels read as on the invoices page, never as raw keys. */
 function dunningLevelLabel(level: string, lang: Lang) {
@@ -93,6 +94,9 @@ type PatientFinancialDialogsProps = {
   onCreateDunning: () => void | Promise<void>;
   onDunningNoteChange: (value: string) => void;
   onInvoiceDueDateChange: (value: string) => void;
+  /** The status change releases a draft: due date from the release, named button. */
+  invoiceReleasingDraft?: boolean;
+  invoicePaymentTermDays?: number;
   onInvoiceManageOpenChange: (open: boolean) => void;
   onInvoiceNotesChange: (value: string) => void;
   onInvoicePaidAmountChange: (value: string) => void;
@@ -381,6 +385,8 @@ type InvoiceManagerDialogProps = Pick<
   | "onCreateDunning"
   | "onDunningNoteChange"
   | "onInvoiceDueDateChange"
+  | "invoiceReleasingDraft"
+  | "invoicePaymentTermDays"
   | "onInvoiceManageOpenChange"
   | "onInvoiceNotesChange"
   | "onInvoicePaidAmountChange"
@@ -409,6 +415,8 @@ function InvoiceManagerDialog({
   onCreateDunning,
   onDunningNoteChange,
   onInvoiceDueDateChange,
+  invoiceReleasingDraft,
+  invoicePaymentTermDays,
   onInvoiceManageOpenChange,
   onInvoiceNotesChange,
   onInvoicePaidAmountChange,
@@ -443,7 +451,7 @@ function InvoiceManagerDialog({
           </Button>
           <Button type="submit" size="sm" className="h-8 rounded-lg gap-1.5" disabled={invoiceBusy}>
             {invoiceBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-            {l("patients_save_invoice")}
+            {invoiceReleasingDraft ? (lang === "de" ? "Rechnung ausstellen" : "Выставить счёт") : l("patients_save_invoice")}
           </Button>
         </>
       }
@@ -465,13 +473,22 @@ function InvoiceManagerDialog({
             </NativeComboboxSelect>
           </FormField>
           <FormField label={l("patients_due_date")} htmlFor="invoice-due-date-edit">
-            <Input
-              id="invoice-due-date-edit"
-              type="date"
-              value={invoiceStatusForm.dueDate}
-              onChange={(event) => onInvoiceDueDateChange(event.target.value)}
-              className={inputClass}
-            />
+            {invoiceReleasingDraft ? (
+              <ReleaseDueDateField
+                value={invoiceStatusForm.dueDate}
+                termDays={invoicePaymentTermDays}
+                onChange={onInvoiceDueDateChange}
+                className={inputClass}
+              />
+            ) : (
+              <Input
+                id="invoice-due-date-edit"
+                type="date"
+                value={invoiceStatusForm.dueDate}
+                onChange={(event) => onInvoiceDueDateChange(event.target.value)}
+                className={inputClass}
+              />
+            )}
           </FormField>
           <FormField label={l("patients_paid_amount")} htmlFor="invoice-paid-amount-edit">
             {/* Payments are recorded in the invoice payment journal (invoices

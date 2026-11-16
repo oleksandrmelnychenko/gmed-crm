@@ -184,6 +184,8 @@ export type ContractItem = {
 };
 
 export type InvoiceItem = {
+  /** Days a release without a due date adds to the invoice date. */
+  payment_term_days?: number;
   id: string;
   patient_id?: string;
   invoice_number: string;

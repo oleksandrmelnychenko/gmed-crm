@@ -913,7 +913,8 @@ async fn money_received_before_the_invoice_is_recorded_with_its_day_on_issue() {
     assert!(text.contains("Zahlung erhalten am"), "{text}");
     assert!(text.contains(&day_text(received_on)), "{text}");
     assert!(text.contains("Bereits bezahlt"), "{text}");
-    assert!(!text.contains("Fällig am"), "{text}");
+    let due = day_text(berlin_today() + chrono::Days::new(14));
+    assert!(!text.contains(&due), "{text}");
     assert!(text.contains("Voraussichtlicher"), "{text}");
     assert!(
         text.contains("20.11.2026") && text.contains("25.11.2026"),
@@ -960,7 +961,10 @@ async fn a_part_payment_before_the_invoice_leaves_it_partly_paid() {
     let text = pdf_text(&fixture, &invoice_id).await;
     assert!(text.contains("Zahlung erhalten am"), "{text}");
     assert!(text.contains("100,00"), "{text}");
-    assert!(text.contains("Fällig am"), "{text}");
+    assert!(
+        text.contains(&day_text(berlin_today() + chrono::Days::new(14))),
+        "{text}"
+    );
     assert!(!text.contains("Bereits bezahlt"), "{text}");
 }
 
@@ -1231,4 +1235,35 @@ async fn the_service_period_comes_from_the_order_and_can_be_set_on_the_draft() {
     let text = pdf_text(&fixture, &invoice_id).await;
     assert!(text.contains("bis 12.2026"), "{text}");
     assert!(!text.contains("20.11.2026"), "{text}");
+}
+
+#[tokio::test]
+async fn an_invoice_before_the_services_states_the_order_period_as_expected() {
+    let Some(fixture) = fixture("expected-period", SERVICES).await else {
+        return;
+    };
+    // The owner's flow: the order runs 20.11.–25.11., nothing is rendered yet.
+    set_order_period(&fixture, "2026-11-20", "2026-11-25").await;
+    sqlx::query("UPDATE order_leistungen SET status = 'planned' WHERE order_id = $1")
+        .bind(fixture.order_id)
+        .execute(&fixture.pool)
+        .await
+        .unwrap();
+    let (status, draft) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({ "invoice_type": "final" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+    assert!(text.contains("Voraussichtlicher"), "{text}");
+    assert!(
+        text.contains("20.11.2026") && text.contains("25.11.2026"),
+        "{text}"
+    );
 }

@@ -909,6 +909,9 @@ struct InvoicePdfContext {
     /// next to the period of the rendered ones. Without either and without a
     /// period the service date is the invoice date.
     services_not_rendered: document::ServicesNotRendered,
+    /// The order's planned period of an invoice whose services are all
+    /// still ahead: printed as the expected period (owner 2026-11-17).
+    expected_service_period: Option<(NaiveDate, NaiveDate)>,
     /// The period staff set on the invoice; it replaces `service_period`.
     stated_service_period: Option<document::StatedServicePeriod>,
     /// Money received before the invoice was issued (owner 2026-11-17).
@@ -6405,6 +6408,18 @@ async fn load_invoice_pdf_context_on(
         &line_items,
     )
     .await?;
+    // Nothing rendered yet: the order's planned period is printed as the
+    // expected one, next to the statement (owner 2026-11-17).
+    let expected_service_period = match (
+        services_not_rendered,
+        row.try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+    ) {
+        (document::ServicesNotRendered::All, Some(order_id)) => {
+            document::order_planned_period(conn, order_id).await?
+        }
+        _ => None,
+    };
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     let payment_term_days = if row.try_get::<bool, _>("released").unwrap_or(false) {
         release::DEFAULT_INVOICE_PAYMENT_TERM_DAYS
@@ -6505,6 +6520,7 @@ async fn load_invoice_pdf_context_on(
         recipient,
         service_period,
         services_not_rendered,
+        expected_service_period,
         stated_service_period: document::StatedServicePeriod::from_columns(
             row.try_get("service_period_from").unwrap_or_default(),
             row.try_get("service_period_to").unwrap_or_default(),
@@ -6954,7 +6970,8 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             invoice_pdf_label(language, "service_date"),
             invoice_pdf_label(language, "service_not_rendered").to_string(),
         ));
-        // A period staff set for these services is when they are expected.
+        // When these services are expected: the period staff set, else the
+        // order's planned one (owner 2026-11-17).
         if let Some(stated) = context.stated_service_period {
             meta_cells.push(format_invoice_pdf_period(
                 language,
@@ -6962,6 +6979,8 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
                 stated.to,
                 true,
             ));
+        } else if let Some((first, last)) = context.expected_service_period {
+            meta_cells.push(format_invoice_pdf_period(language, Some(first), last, true));
         }
     } else {
         if let Some(stated) = context.stated_service_period {
@@ -17210,6 +17229,7 @@ mod tests {
             service_period: None,
             services_not_rendered: document::ServicesNotRendered::None,
             stated_service_period: None,
+            expected_service_period: None,
             received_payment: None,
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
@@ -17610,7 +17630,6 @@ mod tests {
         assert!(text.contains("Zahlung erhalten am"), "{text}");
         assert!(text.contains("15.11.2026"), "{text}");
         assert!(text.contains("Bereits bezahlt"), "{text}");
-        assert!(!text.contains("Fällig am"), "{text}");
         assert!(!text.contains("30.06.2026"), "{text}");
 
         // A part payment: its amount, what is left and the due date.
@@ -17621,7 +17640,7 @@ mod tests {
         let text = pdf_text(&context);
         assert!(text.contains("100,00 €"), "{text}");
         assert!(text.contains("45,00 €"), "{text}");
-        assert!(text.contains("Fällig am"), "{text}");
+        assert!(text.contains("30.06.2026"), "{text}");
         assert!(!text.contains("Bereits bezahlt"), "{text}");
 
         // Staff set the period: only its end known on a final invoice.
@@ -17636,6 +17655,22 @@ mod tests {
         assert!(text.contains("bis 12.2026"), "{text}");
         assert!(!text.contains("Voraussichtlicher"), "{text}");
         assert!(!text.contains("Zahlung erhalten am"), "{text}");
+
+        // Nothing rendered yet: the statement, and the order's planned
+        // period as the expected one.
+        context.stated_service_period = None;
+        context.service_period = None;
+        context.services_not_rendered = document::ServicesNotRendered::All;
+        context.expected_service_period = Some((day(11, 20), day(11, 25)));
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+        assert!(
+            text.contains("Voraussichtlicher Leistungszeitraum"),
+            "{text}"
+        );
+        assert!(text.contains("20.11.2026 – 25.11.2026"), "{text}");
+        context.services_not_rendered = document::ServicesNotRendered::None;
+        context.expected_service_period = None;
 
         // The same rows in the patient's languages.
         context.invoice_type = "advance".to_string();

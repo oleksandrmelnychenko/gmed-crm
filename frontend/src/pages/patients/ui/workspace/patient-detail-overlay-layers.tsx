@@ -94,6 +94,8 @@ type PatientDetailOverlayLayersProps = {
   onDunningNoteChange: (value: string) => void;
   onError: (message: string) => void;
   onInvoiceDueDateChange: (value: string) => void;
+  invoiceReleasingDraft?: boolean;
+  invoicePaymentTermDays?: number;
   onInvoiceManageOpenChange: (open: boolean) => void;
   onInvoiceNotesChange: (value: string) => void;
   onInvoicePaidAmountChange: (value: string) => void;
@@ -155,6 +157,8 @@ export function PatientDetailOverlayLayers({
   onDunningNoteChange,
   onError,
   onInvoiceDueDateChange,
+  invoiceReleasingDraft,
+  invoicePaymentTermDays,
   onInvoiceManageOpenChange,
   onInvoiceNotesChange,
   onInvoicePaidAmountChange,
@@ -266,6 +270,8 @@ export function PatientDetailOverlayLayers({
             onCreateDunning={onCreateDunning}
             onDunningNoteChange={onDunningNoteChange}
             onInvoiceDueDateChange={onInvoiceDueDateChange}
+            invoiceReleasingDraft={invoiceReleasingDraft}
+            invoicePaymentTermDays={invoicePaymentTermDays}
             onInvoiceManageOpenChange={onInvoiceManageOpenChange}
             onInvoiceNotesChange={onInvoiceNotesChange}
             onInvoicePaidAmountChange={onInvoicePaidAmountChange}

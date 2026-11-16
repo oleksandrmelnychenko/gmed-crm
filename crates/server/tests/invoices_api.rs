@@ -6538,7 +6538,10 @@ async fn an_invoice_for_services_not_rendered_says_so_as_its_release_check_does(
     assert_eq!(status, StatusCode::OK);
     let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
     assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
-    assert!(!text.contains("15.03.2027"), "{text}");
+    // The planned appointment is no service date; it is printed as the
+    // expected one (owner 2026-11-17).
+    assert!(text.contains("Voraussichtliches Leistungsdatum"), "{text}");
+    assert!(text.contains("15.03.2027"), "{text}");
     assert!(!text.contains("Leistungszeitraum"), "{text}");
     let xml = einvoice_xml(
         &app,

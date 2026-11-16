@@ -1,3 +1,4 @@
+import { ReleaseDueDateField } from "@/pages/invoices/ui/release-due-date-field";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Ban, BriefcaseMedical, CheckCircle2, ConciergeBell, Eye, FilePlus2, LoaderCircle, ReceiptText, RefreshCw, Undo2, Wallet } from "lucide-react";
 
@@ -583,7 +584,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           <Field label={copy.currency}><NativeComboboxSelect value={activeCurrency} disabled={Boolean(order) || busy || saving} onChange={event => { setBillingCurrency(event.target.value); setSelectedExpenses([]); setCreated(null); }}>{currencyOptions.map(currency => <option key={currency} value={currency}>{currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.quote}><NativeComboboxSelect value={quoteId || "__empty__"} disabled={!order || busy || saving} onChange={event => selectQuote(event.target.value === "__empty__" ? "" : event.target.value)}><option value="__empty__">{copy.noQuote}</option>{orderQuotes.map(item => <option key={item.id} value={item.id}>{item.quote_number}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
-          <Field label={copy.due}><Input type="date" disabled={saving} value={dueDate} onChange={event => setDueDate(event.target.value)} /></Field>
+          <Field label={copy.due}><ReleaseDueDateField ariaLabel={copy.due} disabled={saving} value={dueDate} onChange={setDueDate} /></Field>
         </div>
         {error ? <Banner tone="error">{error}</Banner> : null}
         {proposedOrderId && proposedOrderId === orderId && order ? <p className="text-xs text-muted-foreground" data-testid="patient-billing-proposed-order">{copy.proposedOrder(order.order_number)}</p> : null}
