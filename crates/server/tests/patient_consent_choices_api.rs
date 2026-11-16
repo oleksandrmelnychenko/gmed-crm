@@ -214,12 +214,30 @@ async fn staff_remove_at_once_and_add_after_the_signed_new_version() {
     assign(&pool, patient_id, pm_id, ctx.admin_id).await;
     let path = format!("/api/v1/patients/{patient_id}/consent-choices");
 
-    // The consent form made from the lead's choice.
-    let first = generate_consent(&app, &ceo, patient_id, None).await;
+    // The consent form made from the lead's choice, signed on paper.
+    let unsigned = generate_consent(&app, &ceo, patient_id, None).await;
     assert_eq!(
-        recorded_choice(&pool, &first).await,
+        recorded_choice(&pool, &unsigned).await,
         Some(fixture.lead_choice_id.to_string())
     );
+    let (status, signed_first) = support::paper_signature(&app, &ceo, &unsigned).await;
+    assert!(status.is_success(), "{status} {signed_first}");
+    let first: String =
+        sqlx::query_scalar("SELECT id::text FROM documents WHERE replaces_document_id = $1::uuid")
+            .bind(&unsigned)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let dsgvo_signed = || async {
+        sqlx::query_scalar::<_, Option<bool>>(
+            "SELECT (legal_status ->> 'dsgvo_signed')::boolean FROM patients WHERE id = $1",
+        )
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let signed_before = dsgvo_signed().await;
 
     let (status, state) = json_request(&app, "GET", &path, &pm, None).await;
     assert_eq!(status, StatusCode::OK, "{state}");
@@ -331,6 +349,15 @@ async fn staff_remove_at_once_and_add_after_the_signed_new_version() {
             .await
             .unwrap();
     assert_eq!(replaced.map(|id| id.to_string()), Some(first.clone()));
+    // The signed version keeps its signature; the legal status stays as it was.
+    let first_signed: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT signed_at FROM documents WHERE id = $1::uuid")
+            .bind(&first)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(first_signed.is_some());
+    assert_eq!(dsgvo_signed().await, signed_before);
     let (_, state) = json_request(&app, "GET", &path, &pm, None).await;
     assert_eq!(state["documents"][0]["id"], json!(second));
     assert_eq!(state["documents"][0]["needs_new_version"], false);
@@ -658,6 +685,57 @@ async fn an_open_order_locks_manual_new_versions_of_its_documents_but_not_the_co
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"], "document_locked_by_active_order");
 
+    // The framework contract of the patient is locked too; a lead's document is not.
+    let contract_doc: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (id, version_root_document_id, patient_id, auto_name, art, category,
+                                  status, visibility, is_medical, uploaded_by, generated_template_id)
+           SELECT g, g, $1, 'Rahmenvertrag', 'framework_contract', 'contract', 'active', 'internal',
+                  false, $2, 'framework_contract'
+           FROM gen_random_uuid() g RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let lead_doc: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (id, version_root_document_id, lead_id, auto_name, art, category,
+                                  status, visibility, is_medical, uploaded_by, generated_template_id)
+           SELECT g, g, $1, 'Einzelauftrag', 'single_order', 'contract', 'active', 'internal',
+                  false, $2, 'single_order'
+           FROM gen_random_uuid() g RETURNING id"#,
+    )
+    .bind(fixture.lead_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let locked_now = |id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>("SELECT document_manual_version_locked($1)")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert!(locked_now(contract_doc).await);
+    assert!(!locked_now(lead_doc).await);
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(
+            json!({ "template_id": "framework_contract", "patient_id": patient_id,
+                     "language": "de", "replace_document_id": contract_doc }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "document_locked_by_active_order");
+
     // The consent form stays open.
     let consent = generate_consent(&app, &ceo, patient_id, None).await;
     sqlx::query("UPDATE patients SET first_name = 'Erika Maria', updated_at = now() WHERE id = $1")
@@ -703,6 +781,7 @@ async fn an_open_order_locks_manual_new_versions_of_its_documents_but_not_the_co
         .await
         .unwrap();
     assert!(!locked);
+    assert!(!locked_now(contract_doc).await);
     let (_, after) = estimate(Some(&current)).await;
     assert_ne!(after["error"], "document_locked_by_active_order", "{after}");
 }

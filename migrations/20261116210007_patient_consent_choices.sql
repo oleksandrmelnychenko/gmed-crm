@@ -41,8 +41,8 @@ COMMENT ON COLUMN consent_form_choices.source IS
 -- open order (orders.status 'active' or 'paused'; 'completed' and
 -- 'cancelled' are closed), a generated order or contract document gets no
 -- MANUAL new version — framework contract, Einzelauftrag, Kostenvoranschlag,
--- VKS, Kostenübernahmeerklärung, the payer's papers and any document of an
--- order. The consent forms (Einverständniserklärung, the minor's forms) stay
+-- VKS, Kostenübernahmeerklärung and the payer's papers (a provider's letter of
+-- an order is no such document). The consent forms (Einverständniserklärung, the minor's forms) stay
 -- open. A new version the order logic asks for stays possible: a document
 -- whose terms no longer hold (document_terms_current = false) or whose
 -- «Gültig bis» has passed or ends within 30 days.
@@ -55,10 +55,9 @@ AS $$
         SELECT d.generated_template_id IS NOT NULL
            AND d.generated_template_id NOT IN (
                'privacy_consents', 'consent_data_release_child', 'consent_data_release_single')
-           AND (d.order_id IS NOT NULL
-                OR d.generated_template_id IN (
+           AND d.generated_template_id IN (
                     'framework_contract', 'single_order', 'order_cost_estimate', 'cost_estimate',
-                    'cost_coverage_declaration', 'payer_cost_estimate', 'patient_payer_statement'))
+                    'cost_coverage_declaration', 'payer_cost_estimate', 'patient_payer_statement')
            AND document_terms_current(d.id) IS NOT FALSE
            -- A Kostenvoranschlag printing an earlier quote of its order is
            -- renewed for the current quote.
@@ -71,11 +70,13 @@ AS $$
                         LIMIT 1))
            AND (d.valid_until IS NULL
                 OR d.valid_until > (now() AT TIME ZONE 'Europe/Berlin')::date + 30)
+           -- A patient's document: a lead's documents follow the lead's own rules.
+           AND d.lead_id IS NULL
+           AND d.patient_id IS NOT NULL
            AND EXISTS (
                SELECT 1 FROM orders o
                WHERE o.status IN ('active', 'paused')
-                 AND (o.id = d.order_id
-                      OR (d.patient_id IS NOT NULL AND o.patient_id = d.patient_id)))
+                 AND o.patient_id = d.patient_id)
         FROM documents d
         WHERE d.id = target
     ), false)

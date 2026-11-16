@@ -67,7 +67,7 @@ export function PatientConsentEmbeddedEditor({ patientId, handle }: { patientId:
         return false;
       }
       if (!how) {
-        setError(staffText.consentHow);
+        setError(staffText.recordFirst);
         return false;
       }
       try {
@@ -87,7 +87,7 @@ export function PatientConsentEmbeddedEditor({ patientId, handle }: { patientId:
         return false;
       }
     },
-  }), [state, draft, changed, needsConsent, how, note, patientId, lang, text, staffText.consentHow]);
+  }), [state, draft, changed, needsConsent, how, note, patientId, lang, text, staffText.recordFirst]);
 
   if (!state || !draft || !state.can_edit) return null;
   const toggle = (key: keyof ConsentFormChoices) => setDraft((current) => current && ({ ...current, choices: { ...current.choices, [key]: !current.choices[key] } }));
