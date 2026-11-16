@@ -1325,6 +1325,10 @@ async fn einvoice_buyer(fx: &Fixture, invoice_id: &str) -> String {
     .await;
     let xml = String::from_utf8(xml).unwrap();
     assert_eq!(status, StatusCode::OK, "{xml}");
+    // A draft's live XML has no invoice number yet: not an e-invoice.
+    if !xml.contains("<rsm:ExchangedDocument><ram:ID></ram:ID>") {
+        support::export_einvoice_sample(&format!("payer-{invoice_id}.xml"), xml.as_bytes());
+    }
     xml.split("<ram:BuyerTradeParty>")
         .nth(1)
         .and_then(|rest| rest.split("</ram:BuyerTradeParty>").next())

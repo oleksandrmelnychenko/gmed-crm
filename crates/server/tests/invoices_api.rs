@@ -3599,15 +3599,25 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
     );
     assert!(text.contains("Verbleibender Zahlbetrag"), "{text}");
     assert!(text.contains("669,00 €"), "{text}");
-    let (status, _, xml) = binary_request(
-        &app,
-        "GET",
-        &format!("/api/v1/invoices/{final_id}/zugferd.xml"),
-        &billing_bearer,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
-    let xml = String::from_utf8(xml).unwrap();
+    // The advance (386) and the interim invoice (380) as e-invoices too.
+    let advance_xml = einvoice_xml(&app, &billing_bearer, &advance_id, "advance").await;
+    assert!(
+        advance_xml.contains("<ram:TypeCode>386</ram:TypeCode>"),
+        "{advance_xml}"
+    );
+    // The 19 % breakdown states the VAT the advance invoice stores and prints.
+    assert!(
+        advance_xml.contains(&format!(
+            "<ram:CalculatedAmount>{advance_vat}</ram:CalculatedAmount>"
+        )),
+        "{advance_vat}: {advance_xml}"
+    );
+    let interim_xml = einvoice_xml(&app, &billing_bearer, &interim_id, "interim").await;
+    assert!(
+        interim_xml.contains("<ram:TypeCode>380</ram:TypeCode>"),
+        "{interim_xml}"
+    );
+    let xml = einvoice_xml(&app, &billing_bearer, &final_id, "final-with-advance").await;
     assert!(
         xml.contains(&format!(
             "<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>{advance_number}</ram:IssuerAssignedID>"
@@ -3615,6 +3625,34 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
         "{xml}"
     );
     assert!(xml.contains("<ram:GrandTotalAmount>969.00</ram:GrandTotalAmount><ram:TotalPrepaidAmount>300.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>669.00</ram:DuePayableAmount>"), "{xml}");
+    // BT-110 is the VAT the invoice stores (sum of its lines).
+    let total_vat = format!(
+        "{:.2}",
+        rust_decimal::Decimal::from_str_exact(released["total_vat"].as_str().unwrap()).unwrap()
+    );
+    assert!(
+        xml.contains(&format!(
+            r#"<ram:TaxTotalAmount currencyID="EUR">{total_vat}</ram:TaxTotalAmount>"#
+        )),
+        "{total_vat}: {xml}"
+    );
+    // BT-9 is the printed «Zahlbar bis».
+    let due_date = chrono::NaiveDate::parse_from_str(
+        released["due_date"].as_str().unwrap_or_default(),
+        "%Y-%m-%d",
+    )
+    .unwrap();
+    assert!(
+        text.contains(&due_date.format("%d.%m.%Y").to_string()),
+        "{text}"
+    );
+    assert!(
+        xml.contains(&format!(
+            "<ram:DueDateDateTime><udt:DateTimeString format=\"102\">{}</udt:DateTimeString></ram:DueDateDateTime>",
+            due_date.format("%Y%m%d")
+        )),
+        "{xml}"
+    );
     assert!(
         xml.contains("Abzüglich geleisteter Anzahlungen (§ 14 Abs. 5 Satz 2 UStG)"),
         "{xml}"
@@ -6244,6 +6282,22 @@ async fn staff_can_download_invoice_pdf_document() {
     assert!(pdf_text.contains("Approved PDF line"));
 }
 
+/// The e-invoice of a released invoice, exported as sample `name` when
+/// `EINVOICE_SAMPLE_DIR` is set.
+async fn einvoice_xml(app: &axum::Router, bearer: &str, invoice_id: &str, name: &str) -> String {
+    let (status, _, xml) = binary_request(
+        app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/zugferd.xml"),
+        bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    support::export_einvoice_sample(&format!("{name}.xml"), xml.as_bytes());
+    xml
+}
+
 async fn seed_agency_invoice_settings(pool: &PgPool, admin_id: Uuid) {
     for (key, value) in [
         ("agency_name", "GMED Test Agentur"),
@@ -6363,15 +6417,7 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
     identify_invoice_payer(&pool, &invoice_id).await;
     release_invoice(&app, &billing_bearer, &invoice_id).await;
 
-    let (status, _, xml) = binary_request(
-        &app,
-        "GET",
-        &format!("/api/v1/invoices/{invoice_id}/zugferd.xml"),
-        &billing_bearer,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
-    let xml = String::from_utf8(xml).unwrap();
+    let xml = einvoice_xml(&app, &billing_bearer, &invoice_id, "payer-final").await;
     let buyer = xml
         .split("<ram:BuyerTradeParty>")
         .nth(1)
@@ -6494,15 +6540,13 @@ async fn an_invoice_for_services_not_rendered_says_so_as_its_release_check_does(
     assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
     assert!(!text.contains("15.03.2027"), "{text}");
     assert!(!text.contains("Leistungszeitraum"), "{text}");
-    let (status, _, xml) = binary_request(
+    let xml = einvoice_xml(
         &app,
-        "GET",
-        &format!("/api/v1/invoices/{planned_invoice}/zugferd.xml"),
         &billing_bearer,
+        &planned_invoice,
+        "final-not-rendered",
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
-    let xml = String::from_utf8(xml).unwrap();
     assert!(
         xml.contains("Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)"),
         "{xml}"
@@ -6810,6 +6854,8 @@ async fn released_invoice_document_is_stored_once_and_served_unchanged() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(document_source(&headers), "stored");
     assert_eq!(sha256_hex(&staff_bytes), stored_sha);
+    // The archived hybrid (PDF/A-3 + factur-x.xml) for the external check.
+    support::export_einvoice_sample("stored-hybrid.pdf", &staff_bytes);
     let text = pdf_extract::extract_text_from_mem(&staff_bytes).unwrap();
     assert!(text.contains(&invoice_number));
     assert!(text.contains("Hauptstraße 1"), "{text}");

@@ -8,8 +8,9 @@ use chrono::NaiveDate;
 use lopdf::{Dictionary, Object, Stream, StringFormat, dictionary};
 use rust_decimal::Decimal;
 
-// VAT per breakdown is round(basis × rate / 100), half away from zero, the
-// same rule as the stored invoice lines (see `crate::money`).
+// VAT per breakdown is the sum of the per-line VAT the invoice stores and
+// prints (see `crate::money` and `TaxGroup::vat`); round(basis × rate / 100)
+// only for lines without stored VAT.
 use crate::money::{cents_string, round_cents, vat_amount};
 
 pub(super) const ZUGFERD_XML_FILENAME: &str = "factur-x.xml";
@@ -43,6 +44,9 @@ pub(super) struct EInvoiceLine {
     pub quantity: Decimal,
     pub unit_net: Decimal,
     pub line_net: Decimal,
+    /// The VAT of the line as stored and printed (per-line rounding, see
+    /// `crate::money`). `None` for lines stored without it.
+    pub line_vat: Option<Decimal>,
     pub vat_rate: Decimal,
     pub is_cost_passthrough: bool,
 }
@@ -182,9 +186,23 @@ struct TaxGroup {
     /// Every exemption that applies to lines of this group, in line order.
     exemptions: Vec<&'static str>,
     basis: Decimal,
+    /// Sum of the stored line VAT, `None` once a line comes without it.
+    line_vat: Option<Decimal>,
 }
 
 impl TaxGroup {
+    /// VAT of the breakdown (BT-117): the sum of the line VAT, the amount the
+    /// printed invoice states per rate and the books carry. Per-line rounding
+    /// can differ from round(basis × rate) by a few cents, which BR-CO-17
+    /// tolerates (up to one currency unit); beyond that, or without stored
+    /// line VAT, the standard formula applies.
+    fn vat(&self) -> Decimal {
+        let standard = vat_amount(self.basis, self.rate);
+        match self.line_vat {
+            Some(sum) if (sum - standard).abs() < Decimal::ONE => sum,
+            _ => standard,
+        }
+    }
     fn exemption_reason(&self) -> Option<String> {
         (!self.exemptions.is_empty()).then(|| self.exemptions.join("; "))
     }
@@ -207,6 +225,12 @@ pub(crate) fn line_exemption_reason(
     } else {
         Some(ZERO_RATE_EXEMPTION)
     }
+}
+
+/// The line net amount (BT-131) in cents, as written: the sums (BT-106,
+/// BT-116) add exactly these amounts (BR-CO-10).
+fn line_net(line: &EInvoiceLine) -> Decimal {
+    round_cents(line.line_net)
 }
 
 fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
@@ -233,11 +257,16 @@ fn tax_groups(lines: &[EInvoiceLine]) -> Vec<TaxGroup> {
                     rate: line.vat_rate,
                     exemptions: Vec::new(),
                     basis: Decimal::ZERO,
+                    line_vat: Some(Decimal::ZERO),
                 });
                 groups.last_mut().expect("just pushed")
             }
         };
-        group.basis += line.line_net;
+        group.basis += line_net(line);
+        group.line_vat = group
+            .line_vat
+            .zip(line.line_vat)
+            .map(|(sum, vat)| sum + round_cents(vat));
         if let Some(exemption) = exemption
             && !group.exemptions.contains(&exemption)
         {
@@ -321,14 +350,11 @@ fn party_xml(tag: &str, party: &EInvoiceParty) -> String {
 pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
     let currency = escape(invoice.currency.trim());
     let groups = tax_groups(&invoice.lines);
-    let line_total: Decimal = invoice.lines.iter().map(|line| line.line_net).sum();
-    let tax_total: Decimal = groups
-        .iter()
-        .map(|group| vat_amount(group.basis, group.rate))
-        .sum();
+    let line_total: Decimal = invoice.lines.iter().map(line_net).sum();
+    let tax_total: Decimal = groups.iter().map(TaxGroup::vat).sum();
     let grand_total = line_total + tax_total;
-    // Per-line VAT rounding on the stored invoice may differ by a cent from
-    // the per-category VAT the standard prescribes (BR-CO-17).
+    // The breakdowns carry the stored line VAT, so this is zero unless the
+    // stored total itself differs from its lines (or line VAT is missing).
     let rounding = invoice.total_gross - grand_total;
     let due = grand_total - invoice.prepaid_amount + rounding;
 
@@ -398,16 +424,18 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
             quantity = plain(line.quantity),
             category = category,
             rate = plain(line.vat_rate),
-            net = money(line.line_net),
+            net = money(line_net(line)),
         ));
     }
 
     xml.push_str("<ram:ApplicableHeaderTradeAgreement>");
     xml.push_str(&party_xml("SellerTradeParty", &invoice.seller));
     xml.push_str(&party_xml("BuyerTradeParty", &invoice.buyer));
+    // GMED's own order number: the sales order reference (BT-14), issued by
+    // the seller, not a purchase order of the buyer (BT-13).
     if let Some(order_number) = text(&invoice.order_number) {
         xml.push_str(&format!(
-            "<ram:BuyerOrderReferencedDocument><ram:IssuerAssignedID>{}</ram:IssuerAssignedID></ram:BuyerOrderReferencedDocument>",
+            "<ram:SellerOrderReferencedDocument><ram:IssuerAssignedID>{}</ram:IssuerAssignedID></ram:SellerOrderReferencedDocument>",
             escape(order_number)
         ));
     }
@@ -458,7 +486,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
     for group in &groups {
         xml.push_str(&format!(
             "<ram:ApplicableTradeTax><ram:CalculatedAmount>{}</ram:CalculatedAmount><ram:TypeCode>VAT</ram:TypeCode>",
-            money(vat_amount(group.basis, group.rate))
+            money(group.vat())
         ));
         if let Some(reason) = group.exemption_reason() {
             xml.push_str(&format!(
@@ -776,6 +804,7 @@ mod tests {
                     quantity: dec("2"),
                     unit_net: dec("50"),
                     line_net: dec("100"),
+                    line_vat: Some(dec("19")),
                     vat_rate: dec("19"),
                     is_cost_passthrough: false,
                     note: Some("2. & 3. Quartal 2026".to_string()),
@@ -785,6 +814,7 @@ mod tests {
                     quantity: dec("1"),
                     unit_net: dec("200"),
                     line_net: dec("200"),
+                    line_vat: Some(Decimal::ZERO),
                     vat_rate: dec("0"),
                     is_cost_passthrough: true,
                     note: None,
@@ -836,13 +866,93 @@ mod tests {
     }
 
     #[test]
-    fn cent_differences_from_per_line_vat_go_into_rounding() {
+    fn a_stored_total_off_its_lines_goes_into_rounding() {
         let mut invoice = sample();
         invoice.total_gross = dec("319.01");
         invoice.prepaid_amount = Decimal::ZERO;
         let xml = build_cii_xml(&invoice);
         assert!(xml.contains("<ram:RoundingAmount>0.01</ram:RoundingAmount>"));
         assert!(xml.contains("<ram:DuePayableAmount>319.01</ram:DuePayableAmount>"));
+    }
+
+    /// Three concierge services of 10.03 net at 19 %: 1.91 VAT each, 5.73 on
+    /// the printed invoice and in the books, where round(30.09 × 19 %) would
+    /// be 5.72. The breakdown states the 5.73 the invoice charges; no rounding
+    /// amount is needed.
+    fn sample_concierge_cents() -> EInvoice {
+        let mut invoice = sample();
+        invoice.number = "INV-2026-0007".to_string();
+        invoice.note = None;
+        invoice.prepaid_amount = Decimal::ZERO;
+        invoice.prepaid_invoices.clear();
+        invoice.prepayment_note = None;
+        invoice.lines = ["Transfer Flughafen", "Hotelbuchung", "SIM-Karte"]
+            .into_iter()
+            .map(|name| EInvoiceLine {
+                name: name.to_string(),
+                note: None,
+                quantity: Decimal::ONE,
+                unit_net: dec("10.03"),
+                line_net: dec("10.03"),
+                line_vat: Some(dec("1.91")),
+                vat_rate: dec("19"),
+                is_cost_passthrough: false,
+            })
+            .collect();
+        invoice.total_gross = dec("35.82");
+        invoice
+    }
+
+    /// The same invoice with lines stored without VAT: the breakdown takes
+    /// round(basis × rate) and the cent to the stored total is the rounding
+    /// amount (BT-114).
+    fn sample_concierge_without_line_vat() -> EInvoice {
+        let mut invoice = sample_concierge_cents();
+        invoice.number = "INV-2026-0009".to_string();
+        for line in &mut invoice.lines {
+            line.line_vat = None;
+        }
+        invoice
+    }
+
+    #[test]
+    fn the_vat_breakdown_states_the_line_vat_the_invoice_prints() {
+        let xml = build_cii_xml(&sample_concierge_cents());
+        assert!(xml.contains("<ram:CalculatedAmount>5.73</ram:CalculatedAmount>"));
+        assert!(xml.contains(r#"<ram:TaxTotalAmount currencyID="EUR">5.73</ram:TaxTotalAmount>"#));
+        assert!(xml.contains("<ram:GrandTotalAmount>35.82</ram:GrandTotalAmount><ram:TotalPrepaidAmount>0.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>35.82</ram:DuePayableAmount>"));
+        assert!(!xml.contains("RoundingAmount"));
+        assert_eq!(
+            xml.matches("<ram:CategoryCode>S</ram:CategoryCode>")
+                .count(),
+            4
+        );
+
+        // Lines stored without VAT fall back to round(basis × rate).
+        let xml = build_cii_xml(&sample_concierge_without_line_vat());
+        assert!(xml.contains("<ram:CalculatedAmount>5.72</ram:CalculatedAmount>"));
+        assert!(xml.contains("<ram:RoundingAmount>0.01</ram:RoundingAmount>"));
+        assert!(xml.contains("<ram:DuePayableAmount>35.82</ram:DuePayableAmount>"));
+
+        // An unrounded stored line net is written and summed in cents.
+        let mut unrounded = sample_concierge_cents();
+        unrounded.lines[0].quantity = dec("1.5");
+        unrounded.lines[0].unit_net = dec("6.685");
+        unrounded.lines[0].line_net = dec("10.0275");
+        let xml = build_cii_xml(&unrounded);
+        assert!(xml.contains("<ram:LineTotalAmount>30.09</ram:LineTotalAmount><ram:TaxBasisTotalAmount>30.09</ram:TaxBasisTotalAmount>"));
+    }
+
+    /// GMED's order number is the seller's order reference (BT-14).
+    #[test]
+    fn the_order_number_is_the_sales_order_reference() {
+        let xml = build_cii_xml(&sample());
+        assert!(xml.contains(concat!(
+            "</ram:BuyerTradeParty><ram:SellerOrderReferencedDocument>",
+            "<ram:IssuerAssignedID>ORD-1</ram:IssuerAssignedID>",
+            "</ram:SellerOrderReferencedDocument></ram:ApplicableHeaderTradeAgreement>"
+        )));
+        assert!(!xml.contains("BuyerOrderReferencedDocument"));
     }
 
     #[test]
@@ -855,6 +965,7 @@ mod tests {
             quantity: dec("2.5"),
             unit_net: dec("95"),
             line_net: dec("237.50"),
+            line_vat: Some(dec("45.13")),
             vat_rate: dec("19"),
             is_cost_passthrough: false,
             note: None,
@@ -986,6 +1097,7 @@ mod tests {
                 quantity: dec("1"),
                 unit_net: dec("145"),
                 line_net: dec("145"),
+                line_vat: None,
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
                 note: None,
@@ -995,6 +1107,7 @@ mod tests {
                 quantity: dec("1"),
                 unit_net: dec("1000"),
                 line_net: dec("1000"),
+                line_vat: None,
                 vat_rate: dec("0"),
                 is_cost_passthrough: true,
                 note: None,
@@ -1039,6 +1152,7 @@ mod tests {
                 quantity: dec("13.1"),
                 unit_net: dec("100"),
                 line_net: dec("1310"),
+                line_vat: Some(dec("248.90")),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
                 note: None,
@@ -1048,6 +1162,7 @@ mod tests {
                 quantity: dec("1"),
                 unit_net: dec("2050"),
                 line_net: dec("2050"),
+                line_vat: Some(Decimal::ZERO),
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
                 note: None,
@@ -1063,6 +1178,119 @@ mod tests {
             "Abzüglich geleisteter Anzahlungen (§ 14 Abs. 5 Satz 2 UStG): Anzahlungsrechnung INV-2026-0002 vom 20.09.2026: 19 %: Netto 314,98 €, MwSt. 59,85 €, Brutto 374,83 €; 0 % (steuerbefreit): Netto 625,17 €, MwSt. 0,00 €, Brutto 625,17 €".to_string(),
         );
         invoice
+    }
+
+    /// Anzahlungsrechnung (386) for the 1,000 the final above deducts: split
+    /// over the quote's VAT groups, services billed ahead of their delivery
+    /// over a period.
+    fn sample_advance() -> EInvoice {
+        let mut invoice = sample_final_with_advances();
+        invoice.number = "INV-2026-0004".to_string();
+        invoice.invoice_type = "advance".to_string();
+        invoice.issue_date = NaiveDate::from_ymd_opt(2026, 9, 20).unwrap();
+        invoice.due_date = NaiveDate::from_ymd_opt(2026, 10, 4);
+        invoice.service_note =
+            Some("Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)".to_string());
+        invoice.lines = vec![
+            EInvoiceLine {
+                name: "Anzahlung Dolmetscherleistung".to_string(),
+                note: None,
+                quantity: Decimal::ONE,
+                unit_net: dec("314.98"),
+                line_net: dec("314.98"),
+                line_vat: Some(dec("59.85")),
+                vat_rate: dec("19"),
+                is_cost_passthrough: false,
+            },
+            EInvoiceLine {
+                name: "Anzahlung Organisation der Behandlung".to_string(),
+                note: None,
+                quantity: Decimal::ONE,
+                unit_net: dec("625.17"),
+                line_net: dec("625.17"),
+                line_vat: Some(Decimal::ZERO),
+                vat_rate: dec("0"),
+                is_cost_passthrough: false,
+            },
+        ];
+        invoice.total_gross = dec("1000");
+        invoice.prepaid_amount = Decimal::ZERO;
+        invoice.prepaid_invoices.clear();
+        invoice.prepayment_note = None;
+        invoice
+    }
+
+    /// Zwischenrechnung for one interpreter day, with a clinic invoice passed
+    /// through.
+    fn sample_interim() -> EInvoice {
+        let mut invoice = sample();
+        invoice.number = "INV-2026-0005".to_string();
+        invoice.invoice_type = "interim".to_string();
+        invoice.note = None;
+        invoice.lines[0].note = None;
+        invoice.prepaid_amount = Decimal::ZERO;
+        invoice.prepaid_invoices.clear();
+        invoice.prepayment_note = None;
+        invoice
+    }
+
+    /// Invoice to a third party who pays (buyer = payer, abroad, without
+    /// e-mail or VAT id); the lines name the type of service only.
+    fn sample_payer() -> EInvoice {
+        let mut invoice = sample_interim();
+        invoice.number = "INV-2026-0006".to_string();
+        invoice.invoice_type = "final".to_string();
+        invoice.buyer = EInvoiceParty {
+            name: "Ivan Zahler".to_string(),
+            address_line: Some("Kyivska 5".to_string()),
+            postcode: Some("01001".to_string()),
+            city: Some("Kyiv".to_string()),
+            country_code: Some("UA".to_string()),
+            ..EInvoiceParty::default()
+        };
+        invoice.seller.vat_id = None;
+        invoice.seller.tax_number = Some("143/999/00001".to_string());
+        invoice.lines[0].name = "Dolmetscherleistung".to_string();
+        invoice.lines[1].name = "Durchlaufender Posten".to_string();
+        invoice
+    }
+
+    /// Schlussrechnung entirely covered by two advance invoices: nothing is
+    /// left to pay.
+    fn sample_final_fully_prepaid() -> EInvoice {
+        let mut invoice = sample_final_with_advances();
+        invoice.number = "INV-2026-0008".to_string();
+        invoice.prepaid_amount = invoice.total_gross;
+        invoice.prepaid_invoices.push(EInvoiceReference {
+            number: "INV-2026-0005".to_string(),
+            issue_date: NaiveDate::from_ymd_opt(2026, 9, 25).unwrap(),
+        });
+        invoice
+    }
+
+    #[test]
+    fn every_invoice_kind_adds_up() {
+        let advance = build_cii_xml(&sample_advance());
+        assert!(advance.contains("<ram:TypeCode>386</ram:TypeCode>"));
+        assert!(advance.contains("<ram:GrandTotalAmount>1000.00</ram:GrandTotalAmount><ram:TotalPrepaidAmount>0.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>1000.00</ram:DuePayableAmount>"));
+        assert!(advance.contains("<ram:CalculatedAmount>59.85</ram:CalculatedAmount>"));
+        assert!(advance.contains("<ram:BillingSpecifiedPeriod>"));
+        assert!(!advance.contains("InvoiceReferencedDocument"));
+
+        let interim = build_cii_xml(&sample_interim());
+        assert!(interim.contains("<ram:TypeCode>380</ram:TypeCode>"));
+        assert!(interim.contains("<ram:DuePayableAmount>319.00</ram:DuePayableAmount>"));
+
+        let payer = build_cii_xml(&sample_payer());
+        assert!(payer.contains("<ram:Name>Ivan Zahler</ram:Name>"));
+        assert!(payer.contains("<ram:CountryID>UA</ram:CountryID>"));
+
+        let prepaid = build_cii_xml(&sample_final_fully_prepaid());
+        assert!(prepaid.contains("<ram:GrandTotalAmount>3608.90</ram:GrandTotalAmount><ram:TotalPrepaidAmount>3608.90</ram:TotalPrepaidAmount><ram:DuePayableAmount>0.00</ram:DuePayableAmount>"));
+        assert_eq!(
+            prepaid.matches("<ram:InvoiceReferencedDocument>").count(),
+            2
+        );
     }
 
     #[test]
@@ -1244,7 +1472,17 @@ mod tests {
             return;
         };
         std::fs::create_dir_all(&dir).unwrap();
-        for invoice in [sample(), sample_exempt_only(), sample_final_with_advances()] {
+        for invoice in [
+            sample(),
+            sample_exempt_only(),
+            sample_final_with_advances(),
+            sample_advance(),
+            sample_interim(),
+            sample_payer(),
+            sample_concierge_cents(),
+            sample_concierge_without_line_vat(),
+            sample_final_fully_prepaid(),
+        ] {
             assert!(missing_requirements(&invoice).is_empty());
             let path = std::path::Path::new(&dir).join(format!("{}.xml", invoice.number));
             std::fs::write(path, build_cii_xml(&invoice)).unwrap();

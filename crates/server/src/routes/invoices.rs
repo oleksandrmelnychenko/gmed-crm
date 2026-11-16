@@ -14236,6 +14236,9 @@ async fn load_einvoice(
                 .get("description")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            // The amounts the printed invoice shows: stored, or derived per
+            // line for legacy lines (`invoice_pdf_line_items`).
+            let (net, vat, _) = compute_invoice_line_parts(quantity, unit_net, vat_rate);
             zugferd::EInvoiceLine {
                 name: if third_party_payer {
                     crate::routes::documents::payer_invoice_line_label(
@@ -14250,7 +14253,8 @@ async fn load_einvoice(
                 note: line_comments::line_comment(line).filter(|_| !third_party_payer),
                 quantity,
                 unit_net,
-                line_net: decimal(line.get("line_net")).unwrap_or(quantity * unit_net),
+                line_net: decimal(line.get("line_net")).unwrap_or(net),
+                line_vat: Some(decimal(line.get("line_vat")).unwrap_or(vat)),
                 vat_rate,
                 is_cost_passthrough,
             }

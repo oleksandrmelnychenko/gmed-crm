@@ -378,6 +378,23 @@ where
     panic!("timed out waiting for condition: {description}");
 }
 
+/// Writes an e-invoice (XML or hybrid PDF) a DB test downloaded to
+/// `EINVOICE_SAMPLE_DIR`, when set, as `db-<file_name>`, so real invoices of
+/// every kind can be checked against the official EN 16931 rules (Mustang,
+/// as the CI job `einvoice-validation` does).
+#[allow(dead_code)]
+pub fn export_einvoice_sample(file_name: &str, bytes: &[u8]) {
+    let Ok(dir) = std::env::var("EINVOICE_SAMPLE_DIR") else {
+        return;
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        std::path::Path::new(&dir).join(format!("db-{file_name}")),
+        bytes,
+    )
+    .unwrap();
+}
+
 async fn get_or_create_test_backend() -> Result<Arc<TestDatabaseBackend>, String> {
     let _init = TEST_BACKEND_INIT.lock().await;
     if let Some(existing) = TEST_BACKEND
