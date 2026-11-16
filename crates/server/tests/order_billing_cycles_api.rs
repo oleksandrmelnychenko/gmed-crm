@@ -1304,3 +1304,139 @@ async fn a_credited_final_above_the_quote_gives_back_its_lines_and_services() {
     assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
     assert_eq!(refused["error"], "credit_note_rebilled");
 }
+
+/// Owner decision 2026-11-17: the release of the final invoice cancels the
+/// planned estimate lines it leaves out and waives the delivered services it
+/// bills at 0, so the order can close; its Storno gives both back.
+#[tokio::test]
+async fn a_released_final_cancels_lines_left_out_and_waives_services_billed_at_zero() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let mut case = interpreter_case(&ctx, &ceo, 3).await;
+    let transfer_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate
+           ) VALUES ($1, $2, 'Flughafentransfer', 2, 50, 'EUR', 19)
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    // The estimate now names both services.
+    let (status, quote) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/orders/{}/quotes", case.order_id),
+        &ceo,
+        Some(json!({ "notes": "Angebot 2" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote:?}");
+    case.quote_id = quote["id"].as_str().unwrap().to_string();
+    let transfer_line = quote["line_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|line| line["source_order_leistung_id"] == transfer_id.to_string())
+        .unwrap();
+    let hours_line = 1 - transfer_line;
+    report_hours(&ctx, &ceo, &case, 2.0, 1).await;
+    // Delivered beyond the estimate, given for free.
+    let goodwill_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               status, delivered_at, approved_at
+           ) VALUES ($1, $2, 'Zusätzliche Begleitung', 1, 40, 'EUR', 19, 'approved', now(), now())
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [
+                { "line_index": hours_line, "quantity": 2 },
+                { "line_index": transfer_line, "quantity": 0 },
+            ],
+            "order_services": [{ "order_leistung_id": goodwill_id, "quantity": 0 }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    assert_eq!(
+        invoice["line_items"].as_array().unwrap().len(),
+        1,
+        "{invoice:?}"
+    );
+    let invoice_id = invoice["id"].as_str().unwrap().to_string();
+    release_invoice(&ctx, &ceo, &invoice_id).await;
+
+    let (status, reason, settled_by): (String, Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT status, cancellation_reason, final_settlement_invoice_id FROM order_leistungen WHERE id = $1",
+    )
+    .bind(transfer_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "cancelled");
+    assert!(reason.is_some_and(|reason| reason.contains("Schlussrechnung")));
+    assert_eq!(settled_by, Uuid::parse_str(&invoice_id).ok());
+    let (status, waived): (String, bool) = sqlx::query_as(
+        "SELECT status, billing_waived_at IS NOT NULL FROM order_leistungen WHERE id = $1",
+    )
+    .bind(goodwill_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!((status.as_str(), waived), ("approved", true));
+    // Nothing approved is left unbilled: the order can close.
+    let open: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM order_leistungen
+           WHERE order_id = $1 AND status = 'approved' AND billing_waived_at IS NULL"#,
+    )
+    .bind(case.order_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(open, 0);
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_log WHERE action = 'settle_final_invoice_leftovers' AND entity_id = $1",
+    )
+    .bind(Uuid::parse_str(&invoice_id).unwrap())
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // The Storno gives both back.
+    let (status, cancelled) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &ceo,
+        Some(json!({ "status": "cancelled", "reason": "Neu ausstellen" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    assert_eq!(service_status(&ctx.pool, transfer_id).await, "planned");
+    let waived: bool = sqlx::query_scalar(
+        "SELECT billing_waived_at IS NOT NULL FROM order_leistungen WHERE id = $1",
+    )
+    .bind(goodwill_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(!waived);
+}

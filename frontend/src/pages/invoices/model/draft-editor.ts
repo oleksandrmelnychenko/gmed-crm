@@ -7,7 +7,7 @@
  * (`PUT /invoices/{id}/draft`) checks everything again.
  */
 
-import { moneyFinalLinePartAmounts, moneyLinePartAmounts, normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
+import { moneyFinalLinePartAmounts, moneyLineAmounts, moneyLinePartAmounts, normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
 
 import {
   receivedPaymentFormFrom,
@@ -68,7 +68,14 @@ export type DraftEditorPayload = {
   service_period_default?: { from: string; to: string } | null;
   quote_lines: DraftEditorQuoteLine[];
   /** Final drafts: delivered services outside the quote (kept unless sent). */
-  order_service_lines?: { order_leistung_id: string; selected_quantity: string | null }[];
+  order_service_lines?: {
+    order_leistung_id: string;
+    selected_quantity: string | null;
+    description?: string;
+    unit_price?: string;
+    vat_rate?: string;
+    quote_line_index?: number | null;
+  }[];
   advance: {
     amount_gross: string;
     allocation: "manual" | "own_services_first";
@@ -318,4 +325,45 @@ export function draftFormDirty(payload: DraftEditorPayload, form: DraftForm): bo
     draftReceivedPaymentChanged(payload, form) ||
     draftPeriodChanged(payload, form)
   );
+}
+
+/** A final invoice draft: it bills the delivered quantities (owner 2026-11-17). */
+export function isFinalDraft(payload: DraftEditorPayload): boolean {
+  return payload.invoice_type === "final" && payload.quote_lines.some((line) => line.quantity_capped === false);
+}
+
+function keptServiceQuantity(payload: DraftEditorPayload, lineIndex: number): number {
+  return (payload.order_service_lines ?? [])
+    .filter((service) => service.selected_quantity !== null && service.quote_line_index === lineIndex)
+    .reduce((sum, service) => sum + Number(service.selected_quantity ?? 0), 0);
+}
+
+/** An estimate line against what the draft bills of it: «по смете X · фактически Y» and the difference. */
+export function draftFinalLineComparison(payload: DraftEditorPayload, line: DraftEditorQuoteLine, form: DraftForm) {
+  const entry = form.lines[line.line_index];
+  const own = entry?.selected ? readQuantity(entry.quantity) : 0;
+  const estimate = Number(line.quoted_quantity);
+  const actual = roundCents(Number(line.billed_quantity ?? 0) + (Number.isFinite(own) ? own : 0) + keptServiceQuantity(payload, line.line_index));
+  const difference = roundCents(actual - estimate);
+  const unitGross = moneyLineAmounts(1, Number(line.unit_price ?? 0), line.is_cost_passthrough ? 0 : Number(line.vat_rate ?? 0)).gross;
+  return {
+    estimate,
+    actual,
+    difference,
+    differenceGross: (difference < 0 ? -1 : 1) * roundCents(Math.abs(difference) * unitGross),
+    recorded: line.delivery_basis !== "estimate",
+    notDelivered: actual <= 0,
+    aboveEstimate: toCents(actual) > toCents(estimate),
+  };
+}
+
+/** «по смете X € · фактически Y €» of a final draft: estimate gross against billed before + this draft. */
+export function draftFinalSummary(payload: DraftEditorPayload, form: DraftForm) {
+  const estimate = roundCents(payload.quote_lines.reduce((sum, line) => sum + Number(line.line_gross ?? 0), 0));
+  const billedBefore = roundCents(payload.quote_lines.reduce((sum, line) => sum + Number(line.billed_gross ?? 0), 0));
+  const kept = (payload.order_service_lines ?? [])
+    .filter((service) => service.selected_quantity !== null)
+    .reduce((sum, service) => sum + moneyLineAmounts(Number(service.selected_quantity), Number(service.unit_price ?? 0), Number(service.vat_rate ?? 0)).gross, 0);
+  const actual = roundCents(billedBefore + (draftLinesTotal(payload, form)?.gross ?? 0) + kept);
+  return { estimate, actual, difference: roundCents(actual - estimate) };
 }

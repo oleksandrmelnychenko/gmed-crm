@@ -4,6 +4,25 @@
 -- quoted quantity as their limit. Issued invoices and allocations are not
 -- rewritten.
 
+-- Owner decision 2026-11-17: the release of a final invoice settles the
+-- order's leftovers. Planned estimate lines it does not bill are cancelled
+-- (not delivered); delivered services it does not bill are waived, so the
+-- order can close. A Storno of the final invoice reverses both.
+ALTER TABLE order_leistungen
+    ADD COLUMN IF NOT EXISTS billing_waived_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS final_settlement_invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL;
+
+ALTER TABLE order_leistungen
+    DROP CONSTRAINT IF EXISTS order_leistungen_billing_waiver_consistent;
+ALTER TABLE order_leistungen
+    ADD CONSTRAINT order_leistungen_billing_waiver_consistent
+    CHECK (billing_waived_at IS NULL OR final_settlement_invoice_id IS NOT NULL);
+
+COMMENT ON COLUMN order_leistungen.billing_waived_at IS
+    'A delivered service the final invoice (final_settlement_invoice_id) did not bill: not owed, no closure blocker.';
+COMMENT ON COLUMN order_leistungen.final_settlement_invoice_id IS
+    'The final invoice whose release cancelled (not delivered) or waived (billed at 0) this service.';
+
 CREATE OR REPLACE FUNCTION validate_invoice_order_line_allocation()
 RETURNS trigger AS $$
 DECLARE
@@ -148,6 +167,7 @@ AS $$
                'unit_price', COALESCE(service.unit_price_snapshot, service.unit_price),
                'vat_rate', COALESCE(service.vat_rate_snapshot, service.vat_rate),
                'is_cost_passthrough', service.is_cost_passthrough,
+               'waived', service.billing_waived_at IS NOT NULL,
                'billing_invoice_ids', COALESCE((
                    SELECT jsonb_agg(DISTINCT invoice.id)
                    FROM invoices invoice

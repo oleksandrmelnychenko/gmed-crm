@@ -1672,7 +1672,8 @@ async fn load_order_billing_closure_blockers(
     let row = sqlx::query(
         r#"SELECT
                (SELECT COUNT(*) FROM order_leistungen
-                 WHERE order_id = $1 AND status = 'approved') AS approved_uninvoiced,
+                 WHERE order_id = $1 AND status = 'approved'
+                   AND billing_waived_at IS NULL) AS approved_uninvoiced,
                (SELECT COUNT(*) FROM invoices
                  WHERE order_id = $1 AND status = 'draft') AS draft_invoices,
                COALESCE((

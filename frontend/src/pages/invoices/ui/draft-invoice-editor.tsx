@@ -24,9 +24,13 @@ import {
   draftLinesProblem,
   draftLinesTotal,
   draftUpdatePayload,
+  draftFinalLineComparison,
+  draftFinalSummary,
+  isFinalDraft,
   type DraftEditorPayload,
   type DraftForm,
 } from "../model/draft-editor";
+import { formatFinalDifference, formatQuantity } from "../model/final-invoice";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import {
   paymentMethodLabel,
@@ -63,6 +67,10 @@ const COPY: Record<"ru" | "de", Copy> = {
     recipient: "Получатель счёта…",
     lines: "Позиции из сметы",
     open: "открыто",
+    estimate: "по смете",
+    actual: "фактически",
+    notDelivered: "не оказано",
+    aboveEstimate: "больше сметы",
     quantity: "Кол-во",
     comment: "Примечание к позиции",
     split: "Распределение аванса",
@@ -107,6 +115,10 @@ const COPY: Record<"ru" | "de", Copy> = {
     recipient: "Rechnungsempfänger…",
     lines: "Positionen aus dem Angebot",
     open: "offen",
+    estimate: "laut Angebot",
+    actual: "erbracht",
+    notDelivered: "nicht erbracht",
+    aboveEstimate: "über Angebot",
     quantity: "Menge",
     comment: "Anmerkung zur Position",
     split: "Aufteilung der Anzahlung",
@@ -209,6 +221,9 @@ export function DraftInvoiceEditorDialog({
     (receivedDateRefused ? receivedPaymentProblemText("future_date", lang === "de") : null);
   const preview = payload && form && payload.advance ? advanceSplitPreview(payload, form.split) : null;
   const linesTotal = payload && form ? draftLinesTotal(payload, form) : null;
+  // A final draft bills the delivered quantities: estimate against actual (owner 2026-11-17).
+  const finalDraft = Boolean(payload && isFinalDraft(payload));
+  const finalSummary = payload && form && finalDraft ? draftFinalSummary(payload, form) : null;
   const ownLinesTotal = payload && form
     ? draftLinesTotal({ ...payload, quote_lines: payload.quote_lines.filter((line) => !line.is_cost_passthrough) }, form)
     : null;
@@ -354,6 +369,7 @@ export function DraftInvoiceEditorDialog({
                   <div className="divide-y divide-border rounded-lg border border-border">
                     {payload.quote_lines.map((line) => {
                       const entry = form.lines[line.line_index];
+                      const comparison = finalDraft ? draftFinalLineComparison(payload, line, form) : null;
                       return (
                         <div
                           key={line.line_index}
@@ -371,9 +387,24 @@ export function DraftInvoiceEditorDialog({
                               <span className="block break-words text-foreground">{line.description}</span>
                               <span className="block text-xs text-muted-foreground">
                                 {money(line.unit_price)} · {line.is_cost_passthrough ? copy.passthroughGroup : `${line.vat_rate ?? "0"} %`}
-                                {" · "}
-                                {copy.open}: {line.open_quantity.replace(".", ",")} / {line.quoted_quantity.replace(".", ",")}
+                                {comparison ? null : <>{" · "}{copy.open}: {line.open_quantity.replace(".", ",")} / {line.quoted_quantity.replace(".", ",")}</>}
                               </span>
+                              {comparison ? (
+                                <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs" data-testid="invoice-draft-final-comparison">
+                                  <span className="text-muted-foreground">
+                                    {copy.estimate} {formatQuantity(comparison.estimate)}
+                                    {comparison.recorded ? ` · ${copy.actual} ${formatQuantity(comparison.actual)}` : ""}
+                                  </span>
+                                  {!comparison.recorded ? <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{copy.estimate}</span> : null}
+                                  {comparison.notDelivered ? <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{copy.notDelivered}</span> : null}
+                                  {comparison.aboveEstimate ? <span className="rounded-sm bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{copy.aboveEstimate}</span> : null}
+                                  {comparison.difference !== 0 ? (
+                                    <span className={comparison.difference > 0 ? "font-mono tabular-nums text-amber-700 dark:text-amber-300" : "font-mono tabular-nums text-muted-foreground"}>
+                                      {formatFinalDifference(comparison.difference, comparison.differenceGross, (value) => value, (value) => money(value))}
+                                    </span>
+                                  ) : null}
+                                </span>
+                              ) : null}
                             </span>
                           </label>
                           <Input
@@ -406,6 +437,17 @@ export function DraftInvoiceEditorDialog({
                       <span className="text-muted-foreground">{copy.net}: {money(linesTotal.net)}</span>
                       <span className="text-muted-foreground">{copy.vat}: {money(linesTotal.vat)}</span>
                       <span className="font-medium text-foreground">{copy.total}: {money(linesTotal.gross)}</span>
+                    </div>
+                  ) : null}
+                  {finalSummary ? (
+                    <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-sm tabular-nums" data-testid="invoice-draft-final-summary">
+                      <span className="text-muted-foreground">{copy.estimate}: {money(finalSummary.estimate)}</span>
+                      <span className="text-muted-foreground">{copy.actual}: {money(finalSummary.actual)}</span>
+                      {finalSummary.difference !== 0 ? (
+                        <span className={finalSummary.difference > 0 ? "text-amber-700 dark:text-amber-300" : "text-foreground"}>
+                          {finalSummary.difference > 0 ? "+" : "−"}{money(Math.abs(finalSummary.difference))}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </section>

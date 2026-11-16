@@ -50,6 +50,8 @@ pub(crate) struct OrderServiceFact {
     pub billing_invoice_ids: Vec<Uuid>,
     /// Invoices that billed the service and are credited in full.
     pub credited_invoice_ids: Vec<Uuid>,
+    /// Waived by the release of a final invoice that did not bill it.
+    pub waived: bool,
 }
 
 impl OrderServiceFact {
@@ -61,7 +63,8 @@ impl OrderServiceFact {
     /// Billed by an active invoice other than `editing`. An `invoiced`
     /// service whose invoices are all credited in full is billable again.
     pub fn billed_besides(&self, editing: Option<Uuid>) -> bool {
-        (self.status == "invoiced" && self.credited_invoice_ids.is_empty())
+        self.waived
+            || (self.status == "invoiced" && self.credited_invoice_ids.is_empty())
             || self
                 .billing_invoice_ids
                 .iter()
@@ -129,6 +132,7 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                     .unwrap_or(false),
                 billing_invoice_ids: ids("billing_invoice_ids"),
                 credited_invoice_ids: ids("credited_invoice_ids"),
+                waived: item.get("waived").and_then(Value::as_bool).unwrap_or(false),
             })
         })
         .collect()
@@ -515,6 +519,131 @@ pub(super) async fn ensure_order_services_unbilled_tx(
     Ok(())
 }
 
+/// Billed by an active settlement invoice (SQL over `service`): a quote line
+/// allocation or a line naming the service.
+const SERVICE_BILLED_SQL: &str = r#"EXISTS (
+    SELECT 1
+    FROM invoices billing
+    WHERE billing.order_id = service.order_id
+      AND billing.status <> 'cancelled'
+      AND billing.invoice_type <> 'advance'
+      AND (billing.total_gross <= 0 OR billing.credited_amount < billing.total_gross)
+      AND (
+          EXISTS (
+              SELECT 1 FROM invoice_order_line_allocations allocation
+              WHERE allocation.invoice_id = billing.id
+                AND allocation.order_leistung_id = service.id
+          )
+          OR billing.line_items @> jsonb_build_array(
+              jsonb_build_object('source_order_leistung_id', service.id::text)
+          )
+      )
+)"#;
+
+/// Reason stored on a planned estimate line the final invoice did not bill.
+const NOT_DELIVERED_REASON: &str = "Nicht erbracht – nicht in der Schlussrechnung";
+
+/// What the release of a final invoice settled: planned estimate lines it
+/// did not bill (cancelled) and delivered services it did not bill (waived).
+#[derive(Debug, Default)]
+pub(super) struct SettledLeftovers {
+    pub cancelled: Vec<Uuid>,
+    pub waived: Vec<Uuid>,
+}
+
+/// Owner decision 2026-11-17: the release of a final invoice (not a
+/// termination settlement) closes the order's leftovers. Planned services
+/// its quote names and no active invoice bills are cancelled as not
+/// delivered; delivered or approved services no active invoice bills are
+/// waived, so they are neither owed nor block closing the order.
+pub(super) async fn settle_leftovers_tx(
+    conn: &mut sqlx::PgConnection,
+    invoice_id: Uuid,
+    actor_id: Uuid,
+) -> Result<SettledLeftovers, sqlx::Error> {
+    let applies = sqlx::query_scalar::<_, bool>(
+        r#"SELECT invoice.invoice_type = 'final'
+                  AND invoice.quote_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM order_termination_settlements settlement
+                      WHERE settlement.final_invoice_id = invoice.id
+                  )
+           FROM invoices invoice WHERE invoice.id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .unwrap_or(false);
+    if !applies {
+        return Ok(SettledLeftovers::default());
+    }
+    let cancelled = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
+        r#"UPDATE order_leistungen service
+           SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2,
+               cancellation_reason = $3, final_settlement_invoice_id = $1
+           FROM invoices final_invoice
+           JOIN quotes quote ON quote.id = final_invoice.quote_id
+           WHERE final_invoice.id = $1
+             AND service.order_id = final_invoice.order_id
+             AND service.status = 'planned'
+             AND quote.line_items @> jsonb_build_array(
+                 jsonb_build_object('source_order_leistung_id', service.id::text)
+             )
+             AND NOT {billed}
+           RETURNING service.id"#,
+        billed = SERVICE_BILLED_SQL,
+    )))
+    .bind(invoice_id)
+    .bind(actor_id)
+    .bind(NOT_DELIVERED_REASON)
+    .fetch_all(&mut *conn)
+    .await?;
+    let waived = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
+        r#"UPDATE order_leistungen service
+           SET billing_waived_at = now(), final_settlement_invoice_id = $1
+           FROM invoices final_invoice
+           WHERE final_invoice.id = $1
+             AND service.order_id = final_invoice.order_id
+             AND service.status IN ('delivered', 'approved')
+             AND service.billing_waived_at IS NULL
+             AND NOT {billed}
+           RETURNING service.id"#,
+        billed = SERVICE_BILLED_SQL,
+    )))
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(SettledLeftovers { cancelled, waived })
+}
+
+/// The Storno of a released final invoice gives back what its release
+/// settled: cancelled estimate lines are planned again, waivers are lifted.
+pub(super) async fn reopen_leftovers_tx(
+    conn: &mut sqlx::PgConnection,
+    invoice_id: Uuid,
+) -> Result<SettledLeftovers, sqlx::Error> {
+    let cancelled = sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE order_leistungen
+           SET status = 'planned', cancelled_at = NULL, cancelled_by = NULL,
+               cancellation_reason = NULL, final_settlement_invoice_id = NULL
+           WHERE final_settlement_invoice_id = $1 AND status = 'cancelled'
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let waived = sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE order_leistungen
+           SET billing_waived_at = NULL, final_settlement_invoice_id = NULL
+           WHERE final_settlement_invoice_id = $1 AND billing_waived_at IS NOT NULL
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(SettledLeftovers { cancelled, waived })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +662,7 @@ mod tests {
             is_cost_passthrough: false,
             billing_invoice_ids: Vec::new(),
             credited_invoice_ids: Vec::new(),
+            waived: false,
         }
     }
 

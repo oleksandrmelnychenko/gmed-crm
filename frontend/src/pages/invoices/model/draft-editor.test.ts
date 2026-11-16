@@ -9,6 +9,9 @@ import {
   draftLinesProblem,
   draftLinesTotal,
   draftUpdatePayload,
+  draftFinalLineComparison,
+  draftFinalSummary,
+  isFinalDraft,
   linePartAmounts,
   type DraftEditorPayload,
 } from "./draft-editor";
@@ -150,5 +153,51 @@ describe("running total of the draft lines (QA 2026-11-15, A-1/A-5)", () => {
     expect(draftLinesTotal(payload, form)).toEqual({ net: 66.66, vat: 12.67, gross: 79.33 });
     form.lines[1] = { selected: true, quantity: "x", comment: "" };
     expect(draftLinesTotal(payload, form)).toBeNull();
+  });
+});
+
+// Owner 2026-11-17: a final draft bills the delivered quantity and shows it against the estimate.
+describe("final draft against the estimate", () => {
+  const finalDraft: DraftEditorPayload = {
+    ...positions,
+    invoice_type: "final",
+    quote_lines: [
+      {
+        ...positions.quote_lines[0],
+        description: "Dolmetscherstunden",
+        unit_price: "60",
+        quoted_quantity: "3",
+        open_quantity: "5",
+        selected_quantity: "5",
+        line_net: "180",
+        line_gross: "214.2",
+        billed_quantity: "0",
+        billed_net: "0",
+        billed_gross: "0",
+        quantity_capped: false,
+        delivery_basis: "actual",
+      },
+    ],
+    order_service_lines: [
+      { order_leistung_id: "svc-1", selected_quantity: "1", unit_price: "80", vat_rate: "19", quote_line_index: null },
+    ],
+  };
+
+  it("lets the quantity pass the estimate and shows the difference", () => {
+    const form = draftFormFrom(finalDraft);
+    expect(isFinalDraft(finalDraft)).toBe(true);
+    expect(draftLinesProblem(finalDraft, form)).toBeNull();
+    expect(draftFinalLineComparison(finalDraft, finalDraft.quote_lines[0], form)).toMatchObject({
+      estimate: 3, actual: 5, difference: 2, differenceGross: 142.8, aboveEstimate: true, recorded: true,
+    });
+    // 5 h = 357,00 and the kept service 95,20 against the estimate 214,20.
+    expect(draftFinalSummary(finalDraft, form)).toEqual({ estimate: 214.2, actual: 452.2, difference: 238 });
+  });
+
+  it("marks a line left out as not delivered", () => {
+    const form = draftFormFrom(finalDraft);
+    form.lines[0] = { ...form.lines[0], selected: false };
+    expect(draftFinalLineComparison(finalDraft, finalDraft.quote_lines[0], form)).toMatchObject({ actual: 0, notDelivered: true, difference: -3 });
+    expect(isFinalDraft(positions)).toBe(false);
   });
 });

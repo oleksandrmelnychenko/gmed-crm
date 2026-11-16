@@ -16991,6 +16991,82 @@ async fn update_invoice_status(
                     "Failed to update invoice",
                 );
             }
+            // A released final invoice settles the order's leftovers: not
+            // billed planned estimate lines are cancelled, not billed
+            // delivered services are waived (owner 2026-11-17).
+            if releasing && locked_invoice_type == "final" {
+                let settled = match final_delivery::settle_leftovers_tx(
+                    &mut transaction,
+                    invoice_id,
+                    auth.user_id,
+                )
+                .await
+                {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, invoice_id = %invoice_id, "settle final invoice leftovers");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to update invoice",
+                        );
+                    }
+                };
+                if (!settled.cancelled.is_empty() || !settled.waived.is_empty())
+                    && let Err(e) = write_invoice_audit_tx(
+                        &mut transaction,
+                        auth.user_id,
+                        "settle_final_invoice_leftovers",
+                        invoice_id,
+                        json!({
+                            "cancelled_order_leistung_ids": settled.cancelled,
+                            "waived_order_leistung_ids": settled.waived,
+                        }),
+                    )
+                    .await
+                {
+                    tracing::error!(error = %e, invoice_id = %invoice_id, "audit final invoice leftovers");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            }
+            if requested_status == "cancelled" {
+                let reopened = match final_delivery::reopen_leftovers_tx(
+                    &mut transaction,
+                    invoice_id,
+                )
+                .await
+                {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, invoice_id = %invoice_id, "reopen final invoice leftovers");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to update invoice",
+                        );
+                    }
+                };
+                if (!reopened.cancelled.is_empty() || !reopened.waived.is_empty())
+                    && let Err(e) = write_invoice_audit_tx(
+                        &mut transaction,
+                        auth.user_id,
+                        "reopen_final_invoice_leftovers",
+                        invoice_id,
+                        json!({
+                            "replanned_order_leistung_ids": reopened.cancelled,
+                            "unwaived_order_leistung_ids": reopened.waived,
+                        }),
+                    )
+                    .await
+                {
+                    tracing::error!(error = %e, invoice_id = %invoice_id, "audit reopened final invoice leftovers");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            }
             // Concierge services move to `billed` with the release and back
             // to `ready` when a released invoice is cancelled (F-C8).
             if releasing
