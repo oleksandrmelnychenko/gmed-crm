@@ -1,4 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { conciergeSaleGross } from "@/components/order-budget/order-budget";
+import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-indicator";
 import {
   Fragment,
   Suspense,
@@ -2872,6 +2874,17 @@ function useStaffServicesPageContent() {
                           </option>
                         ))}
                       </NativeComboboxSelect>
+                      <OrderBudgetIndicator
+                        orderId={createForm.orderId || null}
+                        lang={lang}
+                        deltaGross={(budget) =>
+                          conciergeSaleGross(
+                            budget,
+                            (selectedProviderServiceUnitPrice ?? 0) * integerInputValue(createForm.quantity),
+                          )
+                        }
+                        testId="concierge-service-budget"
+                      />
                     </label>
 
                     <label className="space-y-1.5 text-sm">

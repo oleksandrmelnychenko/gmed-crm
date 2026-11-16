@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-indicator";
 import { LoaderCircle, PencilLine, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,8 @@ type Props = {
   invoiceId: string;
   currency: string;
   lang: string;
+  /** The invoice's order: its contract budget after this invoice is shown. */
+  orderId?: string | null;
   /** The recipient is changed in its own dialog (`/invoices/{id}/payer`). */
   canEditRecipient: boolean;
   onEditRecipient: () => void;
@@ -122,6 +125,7 @@ export function DraftInvoiceEditorDialog({
   invoiceId,
   currency,
   lang,
+  orderId,
   canEditRecipient,
   onEditRecipient,
   onSaved,
@@ -163,6 +167,9 @@ export function DraftInvoiceEditorDialog({
   const problem = dueProblem ?? (linesProblem ? copy[linesProblem] : null) ?? (splitProblem ? copy[splitProblem] : null);
   const preview = payload && form && payload.advance ? advanceSplitPreview(payload, form.split) : null;
   const linesTotal = payload && form ? draftLinesTotal(payload, form) : null;
+  const ownLinesTotal = payload && form
+    ? draftLinesTotal({ ...payload, quote_lines: payload.quote_lines.filter((line) => !line.is_cost_passthrough) }, form)
+    : null;
 
   async function save() {
     if (!payload || !form || busy || problem || !dirty) return;
@@ -378,6 +385,15 @@ export function DraftInvoiceEditorDialog({
                 </section>
               ) : null}
 
+              {payload.invoice_type !== "advance" && payload.lines_mode === "quote_positions" ? (
+                <OrderBudgetIndicator
+                  orderId={orderId}
+                  lang={lang === "de" ? "de" : "ru"}
+                  basis="invoiced"
+                  deltaGross={ownLinesTotal?.gross ?? 0}
+                  testId="invoice-draft-budget"
+                />
+              ) : null}
               {problem ? (
                 <p role="alert" className="text-xs text-destructive">
                   {problem}

@@ -35,6 +35,8 @@ import {
   quoteRequiredPrepayment,
 } from "../model/invoice-model";
 import { roundCents } from "@/lib/money";
+import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-indicator";
+import { ownServicesGrossOfSelection } from "@/components/order-budget/order-budget";
 import { partlyCreditedHint } from "../model/billing-release";
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
@@ -456,6 +458,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t.invoices_vat}</dt><dd>{money(totals.vat)}</dd></div>
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
+                  {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross)} testId="invoice-create-budget" /> : null}
                   {selectedQuote && !prepaymentMode && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>

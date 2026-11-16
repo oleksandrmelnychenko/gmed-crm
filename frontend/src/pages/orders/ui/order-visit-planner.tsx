@@ -8,6 +8,8 @@ import { Banner } from "@/components/ui-shell";
 import { ApiRequestError, apiFetch } from "@/lib/api";
 import { addDaysToDateKey, appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
+import { notifyOrderBudgetChanged, plannedVisitsDeltaGross } from "@/components/order-budget/order-budget";
+import { OrderBudgetLine, useOrderBudget } from "@/components/order-budget/order-budget-indicator";
 import { appointmentSelectControlClassName } from "@/pages/appointments/appearance/surface-appearance";
 import {
   assignableInterpreterOptions,
@@ -135,6 +137,8 @@ export function OrderVisitPlanner({
     () => restoredDrafts.map((draft) => draft.date).sort()[0] ?? firstDay ?? appDateKey(),
   );
   const [drafts, setDrafts] = useState<DraftVisit[]>(restoredDrafts);
+  // The contract budget after creating the grid visits (owner 2026-11-17).
+  const budget = useOrderBudget(draftMode ? null : orderId);
   const [popover, setPopover] = useState<Popover>(null);
   // An opened popover scrolls fully into the grid's view (a late-hour slot sits low).
   const popoverElement = useRef<HTMLDivElement | null>(null);
@@ -401,6 +405,7 @@ export function OrderVisitPlanner({
         );
         setBusyNonce((value) => value + 1);
         onCreated(count);
+        notifyOrderBudgetChanged(orderId);
       })
       .catch((reason: unknown) => {
         const failures = failuresOf(reason);
@@ -980,6 +985,14 @@ export function OrderVisitPlanner({
             <span className="ml-2 text-rose-700">{tx("У приёма нет названия", "Ein Termin hat keine Bezeichnung")}</span>
           ) : null}
         </div>
+        {!draftMode && drafts.length > 0 ? (
+          <OrderBudgetLine
+            budget={budget}
+            lang={de ? "de" : "ru"}
+            deltaGross={(loaded) => plannedVisitsDeltaGross(loaded, drafts.length)}
+            testId="order-visit-planner-budget"
+          />
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           {drafts.length > 0 ? (
             <Button

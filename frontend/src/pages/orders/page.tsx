@@ -6,6 +6,8 @@ import {
   OrderWorkspaceNav,
 } from "@/components/order-workspace-nav";
 import { StaffLink } from "@/components/staff-link";
+import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-indicator";
+import { serviceLineDeltaGross } from "@/components/order-budget/order-budget";
 import { parseMoneyInput } from "@/lib/money";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
@@ -4201,6 +4203,14 @@ function useOrdersPageContent() {
                               </span>
                             ) : null}
                           </p>
+                          {permissions.readsOnlyOrderPart ? null : (
+                            <OrderBudgetIndicator
+                              orderId={orderDetail.id}
+                              lang={lang}
+                              refreshKey={`${reloadNonce}:${orderDetail.updated_at}`}
+                              className="mt-0.5"
+                            />
+                          )}
                         </div>
 
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -9326,6 +9336,14 @@ function useOrdersPageContent() {
                   submitting={leistungSaving}
                   submitDisabled={leistungSaving}
                   onCancel={() => resetLeistungDialog(false)}
+                  secondaryAction={permissions.readsOnlyOrderPart ? null : (
+                    <OrderBudgetIndicator
+                      orderId={selectedOrderId}
+                      lang={lang}
+                      deltaGross={serviceLineDeltaGross(leistungForm)}
+                      testId="order-service-budget"
+                    />
+                  )}
                 />
               }
               headerClassName="px-4 py-3"

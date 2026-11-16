@@ -20,6 +20,7 @@ use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
+mod budget;
 pub(crate) mod client_terms;
 mod incoming_invoices;
 mod pipeline;
@@ -31,6 +32,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(incoming_invoices::router())
         .merge(unassigned_invoices::router())
+        .merge(budget::router())
         .merge(pipeline::router())
         .merge(visit_invoices::router())
         .merge(visit_drafts::router())

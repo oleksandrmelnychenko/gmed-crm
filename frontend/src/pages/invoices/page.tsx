@@ -5242,6 +5242,7 @@ function useStaffInvoicesPageContent() {
           invoiceId={detail.id}
           currency={detail.currency ?? "EUR"}
           lang={lang}
+          orderId={detail.order_id}
           canEditRecipient={access.canEditPayer}
           onEditRecipient={() => setPayerDialogOpen(true)}
           onSaved={() => {
