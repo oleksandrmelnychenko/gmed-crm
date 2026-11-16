@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { LoaderCircle, Mail } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   payerErrorKind,
   resendAllowedAt,
   secondsLeft,
+  startCodeStatusPoll,
   type CodeProblem,
   type FatalKind,
 } from "./payer-link-session";
@@ -59,6 +60,39 @@ export function PayerCodeStep({
   // Counts the codes sent from here: after each, the field takes the focus once it is shown.
   const [sentCount, setSentCount] = useState(0);
   const seconds = secondsLeft(resendAt, now);
+  const fatalRef = useRef(onFatal);
+  useEffect(() => {
+    fatalRef.current = onFatal;
+  }, [onFatal]);
+
+  // The field for a code that came another way (fix-84: the CEO issued it by hand and
+  // told it by phone): as after "send", with the minute counted from when it was made.
+  const showCodeField = useCallback((sentAt: string | null) => {
+    const at = Date.now();
+    if (sentAt) setResendAt(resendAllowedAt(sentAt, null, at));
+    setNow(at);
+    setCodeSent(true);
+    setCode("");
+    setProblem(null);
+    setSentCount((count) => count + 1);
+  }, []);
+
+  // While "send" is offered, ask every few seconds whether a code waits (fix-86): the
+  // field appears without a reload. Paused in a hidden tab, asked at once on return,
+  // stopped after a quarter of an hour; a failed ask stays silent.
+  useEffect(() => {
+    if (codeSent) return;
+    return startCodeStatusPoll({
+      ask: client.codeStatus,
+      onPending: showCodeField,
+      onFatal: (kind) => fatalRef.current(kind),
+      isHidden: () => document.visibilityState === "hidden",
+      onVisibilityChange: (listener) => {
+        document.addEventListener("visibilitychange", listener);
+        return () => document.removeEventListener("visibilitychange", listener);
+      },
+    });
+  }, [client, codeSent, showCodeField]);
 
   // The countdown of "send again" ticks while it runs.
   useEffect(() => {
@@ -197,11 +231,23 @@ export function PayerCodeStep({
           </Button>
         </form>
       ) : (
-        // A code mailed less than a minute ago and used since: the next one waits out the minute.
-        <Button type="button" className="h-10 gap-2 px-4" disabled={busy !== null || seconds > 0} onClick={() => void send()} data-testid="payer-link-send-code">
-          {busy === "send" ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
-          {busy === "send" ? text.sendingCode : seconds > 0 ? text.resendIn(seconds) : text.sendCode}
-        </Button>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {/* A code mailed less than a minute ago and used since: the next one waits out the minute. */}
+          <Button type="button" className="h-10 gap-2 px-4" disabled={busy !== null || seconds > 0} onClick={() => void send()} data-testid="payer-link-send-code">
+            {busy === "send" ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
+            {busy === "send" ? text.sendingCode : seconds > 0 ? text.resendIn(seconds) : text.sendCode}
+          </Button>
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto px-0 py-0 text-sm"
+            disabled={busy !== null}
+            onClick={() => showCodeField(null)}
+            data-testid="payer-link-have-code"
+          >
+            {text.haveCode}
+          </Button>
+        </div>
       )}
 
       {error ? (

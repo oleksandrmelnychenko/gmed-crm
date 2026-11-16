@@ -313,3 +313,96 @@ export function resendAllowedAt(sentAt: string | null, resendAfterSeconds: numbe
 export function codeDigits(value: string): string {
   return value.replace(/\D/g, "").slice(0, 6);
 }
+
+// ---------------------------------------------------------------------------
+// Waiting for a code that came another way (fix-86)
+// ---------------------------------------------------------------------------
+
+/** How often the code step asks whether a code waits while it offers to send one. */
+export const CODE_POLL_INTERVAL_MS = 5_000;
+/** The asking stops after this long; «I already have a code» stays. */
+export const CODE_POLL_LIMIT_MS = 15 * 60_000;
+
+export type CodePollOptions = {
+  /** The read-only status call (`GET /public/payer-link/code-status`). */
+  ask: () => Promise<{ code_pending?: boolean | null; code_sent_at?: string | null }>;
+  /** A code waits: show the field (`sentAt` counts the minute to "send again"). */
+  onPending: (sentAt: string | null) => void;
+  /** The link cannot be used any more. */
+  onFatal: (kind: FatalKind) => void;
+  isHidden: () => boolean;
+  /** Subscribes to visibility changes; answers the unsubscribe. */
+  onVisibilityChange: (listener: () => void) => () => void;
+  intervalMs?: number;
+  limitMs?: number;
+};
+
+/**
+ * Asks every few seconds whether a code waits (a code the CEO issued by hand,
+ * fix-84) until one does, the link fails, or the time is up. One ask at a time;
+ * none while the tab is hidden, one at once when it shows again. A failed ask
+ * stays silent (network, 429); 404 (an older server without the route) stops.
+ * Answers the stop.
+ */
+export function startCodeStatusPoll(options: CodePollOptions): () => void {
+  const interval = options.intervalMs ?? CODE_POLL_INTERVAL_MS;
+  const deadline = Date.now() + (options.limitMs ?? CODE_POLL_LIMIT_MS);
+  let stopped = false;
+  let asking = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clear = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+  const idle = () => stopped || options.isHidden() || Date.now() >= deadline;
+  const schedule = () => {
+    clear();
+    if (!idle()) timer = setTimeout(() => void ask(), interval);
+  };
+  async function ask() {
+    timer = undefined;
+    if (idle()) return;
+    asking = true;
+    try {
+      const status = await options.ask();
+      if (stopped) return;
+      if (status.code_pending) {
+        stop();
+        options.onPending(status.code_sent_at ?? null);
+        return;
+      }
+    } catch (cause) {
+      if (stopped) return;
+      const failure = cause && typeof cause === "object" ? (cause as { status?: unknown; code?: unknown }) : null;
+      if (failure && typeof failure.status === "number") {
+        const kind = payerErrorKind(failure.status, typeof failure.code === "string" ? failure.code : "");
+        if (isFatalKind(kind)) {
+          stop();
+          options.onFatal(kind);
+          return;
+        }
+        if (failure.status === 404) {
+          stop();
+          return;
+        }
+      }
+    } finally {
+      asking = false;
+    }
+    schedule();
+  }
+  const visibilityChanged = () => {
+    if (stopped) return;
+    if (options.isHidden()) clear();
+    else if (!asking && timer === undefined) void ask();
+  };
+  const unsubscribe = options.onVisibilityChange(visibilityChanged);
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    clear();
+    unsubscribe();
+  }
+  schedule();
+  return stop;
+}

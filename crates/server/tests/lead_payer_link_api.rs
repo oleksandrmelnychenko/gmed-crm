@@ -4487,3 +4487,90 @@ async fn no_manual_code_without_an_active_link() {
     .unwrap();
     assert_eq!(issued, 0);
 }
+
+const CODE_STATUS: &str = "/api/v1/public/payer-link/code-status";
+
+/// The page's poll whether a code waits (fix-86): a code the CEO issues by
+/// hand turns it true; it reads only — no `last_seen_at`, no audit — and
+/// refuses a revoked link like every other call.
+#[tokio::test]
+async fn the_code_status_poll_sees_a_manual_code_and_changes_nothing() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "code-status").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let link = [("X-Payer-Link", token.as_str())];
+
+    let (status, opened) = as_payer(&app, "GET", OPEN, &link, None).await;
+    assert_eq!(status, StatusCode::OK, "{opened}");
+    let seen_before: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT last_seen_at FROM lead_payer_links WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let audit_rows = |pool: &PgPool| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM audit_log WHERE user_id IS NULL AND (entity_id = $1 OR context->>'lead_id' = $1::text)",
+            )
+            .bind(lead_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let audited_before = audit_rows(pool).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(CODE_STATUS)
+        .header("X-Payer-Link", token.as_str())
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, body) = call(&app, request).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(headers.get("cache-control").unwrap(), "no-store");
+    assert_eq!(body, json!({ "code_pending": false, "code_sent_at": null }));
+
+    // No query string, as on the other payer routes.
+    let (status, _) = as_payer(&app, "GET", &format!("{CODE_STATUS}?x=1"), &link, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Without the link: refused.
+    let (status, body) = as_payer(&app, "GET", CODE_STATUS, &[], None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["code"], "link_invalid");
+
+    let (status, _, issued) = issue_manual_code(&app, lead_id, &app.staff("ceo")).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    let (status, body) = as_payer(&app, "GET", CODE_STATUS, &link, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["code_pending"], true, "{body}");
+    assert!(body["code_sent_at"].is_string(), "{body}");
+    assert_eq!(body.as_object().unwrap().len(), 2, "{body}");
+
+    // Read only: the visit and the payer's audit trail stay as they were
+    // (the manual code is the CEO's row).
+    let seen_after: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT last_seen_at FROM lead_payer_links WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(seen_before, seen_after);
+    assert_eq!(audit_rows(pool).await, audited_before);
+
+    let (status, _) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-link/revoke"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = as_payer(&app, "GET", CODE_STATUS, &link, None).await;
+    assert_eq!(status, StatusCode::GONE, "{body}");
+    assert_eq!(body["code"], "link_revoked");
+}

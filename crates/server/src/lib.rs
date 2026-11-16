@@ -67,8 +67,8 @@ async fn api_not_found() -> impl IntoResponse {
 /// 3. Other public endpoints (public `leads` and `messages` surfaces) sit
 ///    behind the general per-IP limiter. The payer's own link (token and
 ///    e-mail code, `routes::lead_payer_link`) opens, sends codes and checks
-///    them behind a tight limiter of its own; its questionnaire calls use
-///    the general one.
+///    them behind a tight limiter of its own; its questionnaire calls and
+///    the page's read-only code-status poll use the general one.
 /// 4. Authenticated routes sit behind the require-auth middleware *and*
 ///    the general per-IP limiter.
 /// 5. The whole tree is wrapped in [`security_headers::apply`] so every

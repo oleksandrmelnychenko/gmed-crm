@@ -19,7 +19,8 @@
 //!    route takes them in a path or query, and none of them is logged.
 //!    Wrong codes are counted in the database (5 per code, 10 per link lock
 //!    it); opening, sending and checking codes sit behind a tight per-IP
-//!    limiter of their own (`lib.rs`).
+//!    limiter of their own (`lib.rs`); the page's read-only poll whether a
+//!    code waits (`/public/payer-link/code-status`) uses the general one.
 //! 3. The payer acknowledges the privacy notice, answers (stored in
 //!    `lead_payer_statements`; the declaration is untouched while the payer
 //!    drafts, reads show the statement's value or else the declaration's),
@@ -332,6 +333,10 @@ pub fn public_router() -> Router<AppState> {
             post(recognize_upload),
         )
         .route("/public/payer-link/submit", post(submit))
+        // Polled by the code step (fix-86): here, not behind the tight
+        // limiter, so waiting for a code never uses up the budget of
+        // opening, sending and checking codes.
+        .route("/public/payer-link/code-status", get(code_status))
         .layer(middleware::from_fn(payer_link_guard))
 }
 
@@ -2701,6 +2706,16 @@ impl Refusal {
 /// sent for → `link_revoked`; past its time → `link_expired`; locked →
 /// `link_locked`.
 async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Link, Refusal> {
+    resolve_link_with(conn, headers, true).await
+}
+
+/// As [`resolve_link`]; `lock: false` reads the link without the row locks
+/// (the code-status poll changes nothing and must not queue behind writes).
+async fn resolve_link_with(
+    conn: &mut PgConnection,
+    headers: &HeaderMap,
+    lock: bool,
+) -> Result<Link, Refusal> {
     let Some(token) = headers
         .get(HEADER_LINK)
         .and_then(|value| value.to_str().ok())
@@ -2718,16 +2733,19 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
     else {
         return Err(Refusal::LinkInvalid);
     };
-    sqlx::query("SELECT 1 FROM leads WHERE id = $1 FOR UPDATE")
-        .bind(lead_id)
-        .execute(&mut *conn)
-        .await?;
+    if lock {
+        sqlx::query("SELECT 1 FROM leads WHERE id = $1 FOR UPDATE")
+            .bind(lead_id)
+            .execute(&mut *conn)
+            .await?;
+    }
+    let lock_clause = if lock { "FOR UPDATE OF k" } else { "" };
     let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {LINK_COLUMNS}, ({PORTAL_LEAD_SQL}) AS lead_open
            FROM lead_payer_links k
            JOIN leads l ON l.id = k.lead_id
            WHERE k.token_hash = $1
-           FOR UPDATE OF k"#
+           {lock_clause}"#
     )))
     .bind(token_hash)
     .fetch_optional(&mut *conn)
@@ -3614,6 +3632,33 @@ fn declared_correct(body: &[u8]) -> bool {
 // ----------------------------------------------------------------------------
 // Public handlers (the payer)
 // ----------------------------------------------------------------------------
+
+/// `GET /public/payer-link/code-status`: whether a code waits to be entered,
+/// polled by the page while it offers to send one, so a code the CEO issued
+/// by hand (fix-84) shows the field without a reload. Read only: no lock, no
+/// `last_seen_at`, no audit, no event; the link's refusals as everywhere.
+/// Answers what `GET /public/payer-link` already shows, nothing more.
+async fn code_status(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin payer code status"),
+    };
+    let link = match resolve_link_with(&mut tx, &headers, false).await {
+        Ok(link) => link,
+        Err(refusal) => return refusal.into_response(),
+    };
+    if let Err(error) = tx.rollback().await {
+        return intake::internal(error, "end payer code status");
+    }
+    let now = Utc::now();
+    let code_pending =
+        link.code_hash.is_some() && link.code_expires_at.is_some_and(|until| until > now);
+    Json(json!({
+        "code_pending": code_pending,
+        "code_sent_at": link.code_sent_at,
+    }))
+    .into_response()
+}
 
 /// `GET /public/payer-link` (3.1): what the opened link shows before the code.
 async fn open_link(State(state): State<AppState>, headers: HeaderMap) -> Response {

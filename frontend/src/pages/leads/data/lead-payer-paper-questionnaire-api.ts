@@ -79,6 +79,7 @@ export function createStaffPayerClient(leadId: string): PayerLinkClient {
   return {
     info: unavailable,
     requestCode: unavailable,
+    codeStatus: unavailable,
     verifyCode: unavailable,
     questionnaire: () => fetchStaffPayerQuestionnaire(leadId),
     consent: (contactChannels: string[], language: string) =>

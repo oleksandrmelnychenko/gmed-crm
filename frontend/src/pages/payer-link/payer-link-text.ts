@@ -81,6 +81,8 @@ export type PayerLinkText = {
   confirmCode: string;
   confirming: string;
   resendCode: string;
+  /** Shows the code field at once (a code given by phone, fix-86); the server decides whether it is valid. */
+  haveCode: string;
   resendIn: (seconds: number) => string;
   codeFormat: string;
   codeInvalid: (attemptsLeft: number | null) => string;
@@ -253,6 +255,7 @@ const de: PayerLinkText = {
   confirmCode: "Bestätigen",
   confirming: "Wird geprüft…",
   resendCode: "Code erneut senden",
+  haveCode: "Ich habe bereits einen Code",
   resendIn: (seconds) => `Code erneut senden (in ${seconds} s)`,
   codeFormat: "Bitte geben Sie die 6 Ziffern aus der E-Mail ein.",
   codeInvalid: (left) =>
@@ -573,6 +576,7 @@ const en: PayerLinkText = {
   confirmCode: "Confirm",
   confirming: "Checking…",
   resendCode: "Send the code again",
+  haveCode: "I already have a code",
   resendIn: (seconds) => `Send the code again (in ${seconds} s)`,
   codeFormat: "Please enter the 6 digits from the e-mail.",
   codeInvalid: (left) =>
@@ -892,6 +896,7 @@ const uk: PayerLinkText = {
   confirmCode: "Підтвердити",
   confirming: "Перевіряється…",
   resendCode: "Надіслати код ще раз",
+  haveCode: "Я вже маю код",
   resendIn: (seconds) => `Надіслати код ще раз (через ${seconds} с)`,
   codeFormat: "Будь ласка, введіть 6 цифр із листа.",
   codeInvalid: (left) =>
@@ -1213,6 +1218,7 @@ const ru: PayerLinkText = {
   confirmCode: "Подтвердить",
   confirming: "Проверяется…",
   resendCode: "Отправить код ещё раз",
+  haveCode: "У меня уже есть код",
   resendIn: (seconds) => `Отправить код ещё раз (через ${seconds} с)`,
   codeFormat: "Пожалуйста, введите 6 цифр из письма.",
   codeInvalid: (left) =>

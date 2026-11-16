@@ -329,9 +329,25 @@ async function setup(page: Page, options: Options = {}) {
     wrongTotal: 0,
     session: null as string | null,
     documents: 0,
+    /** The CEO issued a code by hand (fix-84): the code-status poll then says one waits. */
+    manualCode: false,
   };
   /** The second link (`OTHER_TOKEN`), when the test has one: its own status, code and session. */
-  const second: typeof state = { status: "active", codeSentAt: null, attemptsLeft: 5, wrongTotal: 0, session: null, documents: 0 };
+  const second: typeof state = {
+    status: "active",
+    codeSentAt: null,
+    attemptsLeft: 5,
+    wrongTotal: 0,
+    session: null,
+    documents: 0,
+    manualCode: false,
+  };
+  /** What the CEO's «Выдать код вручную» does on the server: a fresh code (`CODE`), told by phone. */
+  const issueManualCode = () => {
+    state.codeSentAt = now();
+    state.attemptsLeft = 5;
+    state.manualCode = true;
+  };
   const calls = {
     payer: [] as Call[],
     /** Any other API call: none may happen on this page. */
@@ -488,6 +504,15 @@ async function setup(page: Page, options: Options = {}) {
         },
       });
     }
+    // The code step's read-only poll (fix-86): whether a code waits.
+    if (path === "/public/payer-link/code-status" && method === "GET") {
+      return route.fulfill({
+        json: {
+          code_pending: link.manualCode,
+          code_sent_at: link.manualCode && link.codeSentAt ? new Date(link.codeSentAt).toISOString() : null,
+        },
+      });
+    }
     if (path === "/public/payer-link/code" && method === "POST") {
       if (link.codeSentAt && now() - link.codeSentAt < 60_000) {
         return refuse(route, 429, "code_rate_limited", { retry_after_seconds: Math.ceil((60_000 - (now() - link.codeSentAt)) / 1000) });
@@ -627,7 +652,7 @@ async function setup(page: Page, options: Options = {}) {
     return refuse(route, 404, "not_found");
   });
 
-  return { q, state, second, calls, signature };
+  return { q, state, second, calls, signature, issueManualCode };
 }
 
 /** Sets a date field (a date picker that takes "DD.MM.YYYY") like typing does. */
@@ -1303,7 +1328,8 @@ test.describe("payer link", () => {
     expect(page.url()).not.toContain(OTHER_TOKEN);
     expect(await stored(page, "gmed-payer-link")).toBe(OTHER_TOKEN);
     expect(await stored(page, "gmed-payer-session")).toBeNull();
-    const fresh = calls.payer.slice(callsBefore);
+    // The code step's poll (fix-86) may ask once meanwhile; it is not an opening.
+    const fresh = calls.payer.slice(callsBefore).filter((call) => call.path !== "/public/payer-link/code-status");
     expect(fresh.map((call) => `${call.method} ${call.path}`)).toEqual(["GET /public/payer-link"]);
     expect(fresh[0].link).toBe(OTHER_TOKEN);
     expect(fresh[0].session).toBeUndefined();
@@ -1901,6 +1927,71 @@ test.describe("payer link", () => {
     await page.getByLabel("Код подтверждения (6 цифр)").fill(CODE);
     await page.getByRole("button", { name: "Подтвердить" }).click();
     await expect(page.getByTestId("payer-link-thanks")).toBeVisible();
+    expect(calls.others).toEqual([]);
+  });
+
+  test("a code the CEO issues by hand shows the code field without a reload (fix-86)", async ({ page }) => {
+    const { calls, issueManualCode } = await setup(page, { language: "uk" });
+    await page.goto(`/payer#${TOKEN}`);
+    await expect(page.getByTestId("payer-link-send-code")).toBeVisible(lazyPageLoad);
+    await expect(page.getByTestId("payer-link-have-code")).toHaveText("Я вже маю код");
+    await expect(page.locator("#payer-link-code")).toHaveCount(0);
+    // Marks this document: a reload would lose it.
+    await page.evaluate(() => {
+      (window as unknown as { payerTabMark?: string }).payerTabMark = "same-document";
+    });
+
+    // The status is asked every 5 s; nothing waits yet.
+    await expect.poll(() => calls.payer.filter((call) => call.path === "/public/payer-link/code-status").length, { timeout: 12_000 }).toBeGreaterThan(0);
+    await expect(page.locator("#payer-link-code")).toHaveCount(0);
+
+    // The CEO issues the code by hand: the field appears by itself and takes the focus.
+    issueManualCode();
+    const field = page.locator("#payer-link-code");
+    await expect(field).toBeVisible({ timeout: 12_000 });
+    await expect(field).toBeFocused();
+    await expect(page.getByTestId("payer-link-send-code")).toHaveCount(0);
+    await expect(page.getByTestId("payer-link-have-code")).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { payerTabMark?: string }).payerTabMark)).toBe("same-document");
+
+    // The poll runs with the link alone, never the session, and only the first visit opened the link.
+    const polls = calls.payer.filter((call) => call.path === "/public/payer-link/code-status");
+    expect(polls.every((call) => call.method === "GET" && call.link === TOKEN && call.session === undefined)).toBe(true);
+    expect(calls.payer.filter((call) => call.method === "GET" && call.path === "/public/payer-link")).toHaveLength(1);
+    expect(calls.payer.filter((call) => call.path === "/public/payer-link/code")).toHaveLength(0);
+
+    await field.fill(CODE);
+    await page.getByTestId("payer-link-verify").click();
+    await expect(page.getByTestId("payer-link-form")).toBeVisible();
+    // Done waiting: no more asking.
+    const asked = calls.payer.filter((call) => call.path === "/public/payer-link/code-status").length;
+    await page.waitForTimeout(6_000);
+    expect(calls.payer.filter((call) => call.path === "/public/payer-link/code-status")).toHaveLength(asked);
+    expect(calls.others).toEqual([]);
+  });
+
+  test("«I already have a code» shows the code field at once; the server decides (fix-86)", async ({ page }) => {
+    const { calls, issueManualCode } = await setup(page, { language: "ru" });
+    await page.goto(`/payer#${TOKEN}`);
+    await page.getByRole("button", { name: "У меня уже есть код" }).click(lazyPageLoad);
+    const field = page.getByLabel("Код подтверждения (6 цифр)");
+    await expect(field).toBeVisible();
+    await expect(field).toBeFocused();
+    await expect(page.getByTestId("payer-link-send-code")).toHaveCount(0);
+    await expect(page.getByTestId("payer-link-resend")).toBeEnabled();
+
+    // No code waits yet: the server refuses without counting a try.
+    await field.fill(CODE);
+    await page.getByRole("button", { name: "Подтвердить" }).click();
+    await expect(page.getByTestId("payer-link-code-error")).toBeVisible();
+    await expect(page.getByTestId("payer-link-form")).toHaveCount(0);
+
+    // The code given by phone works in the same field.
+    issueManualCode();
+    await field.fill(CODE);
+    await page.getByRole("button", { name: "Подтвердить" }).click();
+    await expect(page.getByTestId("payer-link-form")).toBeVisible();
+    expect(calls.payer.filter((call) => call.path === "/public/payer-link/code")).toHaveLength(0);
     expect(calls.others).toEqual([]);
   });
 

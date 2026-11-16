@@ -37,6 +37,9 @@ export type PayerLinkInfo = {
   signature_package?: PayerSignaturePackage | null;
 };
 
+/** The code step's poll: the two code fields of {@link PayerLinkInfo}. */
+export type PayerCodeStatus = Pick<PayerLinkInfo, "code_pending" | "code_sent_at">;
+
 /** 3.2: a code was mailed. */
 export type PayerCodeSent = { sent_at: string | null; resend_after_seconds: number | null };
 
@@ -292,6 +295,12 @@ export function createPayerLinkClient(credentials: PayerCredentials) {
     /** `language`: the language the page is read in; the code e-mail follows it (QA 2026-11-10), else the link's. */
     requestCode: async (language?: string): Promise<PayerCodeSent> =>
       (await call(credentials, `${base}/code`, { method: "POST", json: language ? { language } : {} })) as PayerCodeSent,
+    /**
+     * Whether a code waits (fix-86): read only, behind the general limiter, so the code step can
+     * poll it without using up the budget of opening, sending and checking codes.
+     */
+    codeStatus: async (): Promise<PayerCodeStatus> =>
+      (await call(credentials, `${base}/code-status`)) as PayerCodeStatus,
     verifyCode: async (code: string): Promise<PayerVerified> =>
       (await call(credentials, `${base}/verify`, { method: "POST", json: { code } })) as PayerVerified,
     questionnaire,
