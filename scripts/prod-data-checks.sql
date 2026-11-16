@@ -984,6 +984,20 @@ WHERE created_at > now() - interval '14 days'
 GROUP BY kind, status, coalesce(error_code, '-')
 ORDER BY last_at DESC;
 
+-- [INFO] Open (undecided) sanctions hits: who/what matched which list entry.
+-- Subjects are shown by kind and lead/patient number only (2026-11-16: an
+-- order of «Wolf Testov» was held by «sanctions_review_pending»).
+SELECT 'I03_open_sanctions_hits' AS check_id, h.subject_kind, h.subject_ref,
+       left(h.lead_id::text, 8) AS lead, p.patient_id AS patient, round(h.score::numeric, 3) AS score,
+       left(coalesce(h.list_entry->>'name', h.list_entry->>'names', h.list_entry::text), 120) AS list_entry,
+       left(h.match_details::text, 200) AS match_details, h.created_at
+FROM sanctions_hits h
+
+LEFT JOIN patients p ON p.id = h.patient_id
+WHERE h.status = 'open'
+ORDER BY h.created_at DESC
+LIMIT 20;
+
 -- =============================================================================
 -- End. Expected: n = 0 for every [BUG] check.
 -- =============================================================================
