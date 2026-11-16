@@ -1301,7 +1301,7 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let quote_id = body["id"].as_str().unwrap().to_string();
 
-    let insert_estimate = |name: &'static str, signed: bool| {
+    let insert_estimate = |name: &'static str, signed: bool, dated_back: bool| {
         let pool = pool.clone();
         async move {
             let id = Uuid::new_v4();
@@ -1309,10 +1309,26 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
                 r#"INSERT INTO documents (
                         id, version_root_document_id, patient_id, order_id, auto_name,
                         art, category, status, visibility, is_medical, uploaded_by,
-                        generated_template_id, signed_at
-                   ) VALUES ($1, $1, $2, $3, $4, 'cost_estimate', 'finance', 'active',
+                        generated_template_id, signed_at, created_at
+                   ) SELECT $1, $1, $2, $3, $4, 'cost_estimate', 'finance', 'active',
                              'internal', false, $5, 'order_cost_estimate',
-                             CASE WHEN $6 THEN now() END)"#,
+                             CASE WHEN $6 THEN now() END,
+                             -- Dated like a generated document: never before
+                             -- the last change of the order's terms, also
+                             -- when the clock steps back in between. The
+                             -- stale version is dated a minute back, so the
+                             -- next change is later whatever the clock does.
+                             CASE WHEN $7 THEN now() - interval '1 minute'
+                                  ELSE GREATEST(now(), o.client_terms_changed_at,
+                                                o.prepayment_terms_changed_at,
+                                                o.payer_terms_changed_at,
+                                                o.contracting_party_changed_at,
+                                                (SELECT MAX(d.created_at)
+                                                        + interval '1 millisecond'
+                                                 FROM documents d
+                                                 WHERE d.order_id = o.id))
+                             END
+                     FROM orders o WHERE o.id = $3"#,
             )
             .bind(id)
             .bind(patient_id)
@@ -1320,6 +1336,7 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
             .bind(name)
             .bind(admin_id)
             .bind(signed)
+            .bind(dated_back)
             .execute(&pool)
             .await
             .unwrap();
@@ -1327,7 +1344,7 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
         }
     };
     // Signed, yet older than the order's terms: the signature confirms nothing.
-    let first = insert_estimate("Kostenvoranschlag V01", true).await;
+    let first = insert_estimate("Kostenvoranschlag V01", true, true).await;
     // Staff require a prepayment after the estimate was generated.
     sqlx::query(
         "UPDATE orders SET prepayment_required = true, prepayment_amount = 50.00 WHERE id = $1",
@@ -1365,11 +1382,11 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
 
     // A fresh estimate shows the order's terms again; unsigned, it does not
     // confirm the quote (owner decision 2026-11-11).
-    insert_estimate("Kostenvoranschlag V02", false).await;
+    insert_estimate("Kostenvoranschlag V02", false, false).await;
     let (status, refused) = accept().await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"], "estimate_signature_required", "{refused}");
-    insert_estimate("Kostenvoranschlag V03", true).await;
+    insert_estimate("Kostenvoranschlag V03", true, false).await;
     let (status, accepted) = accept().await;
     assert_eq!(status, StatusCode::OK, "{accepted}");
     assert_eq!(accepted["status"], "accepted");

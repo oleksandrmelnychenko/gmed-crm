@@ -280,18 +280,32 @@ pub async fn seed_signed_order_estimate(pool: &PgPool, order_id: Uuid) -> Uuid {
         r#"INSERT INTO documents (
                 id, version_root_document_id, patient_id, lead_id, order_id, auto_name,
                 art, category, status, visibility, is_medical, uploaded_by,
-                generated_template_id, signed_at, generated_bindings
+                generated_template_id, signed_at, generated_bindings, created_at
            )
            SELECT $1, $1, o.patient_id,
                   CASE WHEN o.patient_id IS NULL THEN o.source_lead_id END,
                   o.id, 'Kostenvoranschlag (signed)', 'cost_estimate', 'finance', 'active',
                   'internal', false, (SELECT id FROM users ORDER BY created_at LIMIT 1),
                   'order_cost_estimate', now(),
-                  -- Made for the order's current quote, as generation records it.
+                  -- Made for the order's current quote, as generation records
+                  -- it: an open quote before a rejected or expired one (the
+                  -- clock of the test database can step back by seconds, so
+                  -- `created_at` alone may name the rejected one).
                   jsonb_build_object('_quote_number',
                       (SELECT q.quote_number FROM quotes q
                        WHERE q.order_id = o.id AND q.status <> 'superseded'
-                       ORDER BY q.created_at DESC, q.id DESC LIMIT 1))
+                       ORDER BY q.status IN ('rejected', 'expired'), q.created_at DESC, q.id DESC
+                       LIMIT 1)),
+                  -- Dated like a generated document: never before the last
+                  -- change of the order's terms and never before the order's
+                  -- other estimates (it is the newest), also when the clock
+                  -- steps back in between.
+                  GREATEST(now(), o.client_terms_changed_at, o.prepayment_terms_changed_at,
+                           o.payer_terms_changed_at, o.contracting_party_changed_at,
+                           (SELECT MAX(d.created_at) + interval '1 millisecond'
+                            FROM documents d
+                            WHERE d.order_id = o.id
+                              AND d.generated_template_id = 'order_cost_estimate'))
            FROM orders o WHERE o.id = $2"#,
     )
     .bind(document_id)

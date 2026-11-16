@@ -31,6 +31,11 @@ use serde_json::{Value, json};
 use sqlx::{PgConnection, Postgres, Row, Transaction};
 use uuid::Uuid;
 
+use super::advance_rows;
+use super::document::{
+    DeductedAdvance, VatBreakdownRow, advance_vat_rows, deducted_advance_rows,
+    load_deducted_advances,
+};
 use super::{
     CreditNoteIssue, InvoicePaymentContext, IssuedCreditNote, can_manage_invoice_finance,
     coded_err, credit_notes, decimal_to_string, ensure_patient_access, err, load_invoice_detail,
@@ -317,6 +322,7 @@ pub(super) async fn close_advance_rest_tx(
         &context,
         &issue,
         &plan,
+        &[],
         json!({
             "advance_rest": true,
             "settled_by_invoice_number": final_invoice_number,
@@ -458,6 +464,9 @@ pub(crate) struct CreditRoom {
     pub released_prepayments: Vec<(Uuid, Decimal)>,
     /// `(supplier invoice, amount)` no longer billed by this invoice.
     pub reversed_supplier_costs: Vec<(Uuid, Decimal)>,
+    /// The released advance deductions per advance and VAT category, as the
+    /// credit-note document states them.
+    pub(super) released_advances: Vec<DeductedAdvance>,
 }
 
 impl CreditRoom {
@@ -478,6 +487,7 @@ impl CreditRoom {
                 "advance_invoice_id": id,
                 "amount_gross": decimal_to_string(*amount),
             })).collect::<Vec<_>>(),
+            "released_advances": super::storno::deducted_advances_to_json(&self.released_advances),
             "reversed_supplier_cost_allocations": self.reversed_supplier_costs.iter().map(|(id, amount)| json!({
                 "external_invoice_id": id,
                 "amount_gross": decimal_to_string(*amount),
@@ -486,20 +496,39 @@ impl CreditRoom {
     }
 }
 
-/// What a credit note of `credit_gross` on the invoice would release:
-/// `(prepayment, supplier cost)` gross. For the service-cancellation preview:
-/// it credits service lines, so no re-billing line adds to the cap.
+/// What a credit note planned as `plan` on the invoice would release:
+/// `(prepayment, supplier cost)` gross, by the rules of
+/// [`make_room_for_credit_tx`]. For the service-cancellation preview: it
+/// credits service lines, so no re-billing line adds to the cap.
 pub(super) async fn credit_room_needed(
     conn: &mut PgConnection,
     context: &InvoicePaymentContext,
-    credit_gross: Decimal,
+    plan: &credit_notes::CreditNotePlan,
 ) -> Result<(Decimal, Decimal), sqlx::Error> {
-    let remaining = context.total_gross - context.credited_amount - credit_gross;
+    let remaining = context.total_gross - context.credited_amount - plan.gross;
     let external = active_supplier_cost_allocations(conn, context.invoice_id).await?;
-    Ok((
-        (context.prepayment_applied_amount - remaining).max(Decimal::ZERO),
-        (external - remaining).max(Decimal::ZERO),
-    ))
+    let mut released = Decimal::ZERO;
+    if context.prepayment_applied_amount > Decimal::ZERO {
+        if let Some(billed) = rows_after_credit(conn, context, plan_as_credit(plan)).await? {
+            let allocations = target_allocations(conn, context.invoice_id, false).await?;
+            let kept = kept_allocation_rows(
+                &billed,
+                &allocations
+                    .iter()
+                    .map(|allocation| (allocation.stored, allocation.rows.clone()))
+                    .collect::<Vec<_>>(),
+            );
+            for (allocation, kept) in allocations.iter().zip(kept) {
+                if let Some(kept) = kept {
+                    released +=
+                        allocation.amount - kept.iter().map(|row| row.gross).sum::<Decimal>();
+                }
+            }
+        }
+        released += (context.prepayment_applied_amount - released - remaining.max(Decimal::ZERO))
+            .max(Decimal::ZERO);
+    }
+    Ok((released, (external - remaining).max(Decimal::ZERO)))
 }
 
 async fn active_supplier_cost_allocations(
@@ -559,115 +588,9 @@ pub(super) async fn make_room_for_credit_tx(
         ));
     }
 
-    let excess_prepayment = context.prepayment_applied_amount - remaining.max(Decimal::ZERO);
-    if excess_prepayment > Decimal::ZERO {
-        sqlx::query(
-            "SELECT set_config('gmed.accounting_actor_id', $1, true),
-                    set_config('gmed.prepayment_release_context', 'correction', true)",
-        )
-        .bind(actor_id.to_string())
-        .execute(&mut **transaction)
-        .await
-        .map_err(|error| failed(error, "release actor"))?;
-        let allocations = sqlx::query(
-            r#"SELECT id, advance_invoice_id, amount_gross, vat_rows
-               FROM invoice_prepayment_allocations
-               WHERE target_invoice_id = $1
-               ORDER BY created_at DESC, id DESC
-               FOR UPDATE"#,
-        )
-        .bind(invoice_id)
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|error| failed(error, "lock prepayment allocations"))?;
-        let mut left = excess_prepayment;
-        for allocation in allocations {
-            if left <= Decimal::ZERO {
-                break;
-            }
-            let allocation_id = allocation.try_get::<Uuid, _>("id").unwrap_or_default();
-            let advance_id = allocation
-                .try_get::<Uuid, _>("advance_invoice_id")
-                .unwrap_or_default();
-            let amount = allocation
-                .try_get::<Decimal, _>("amount_gross")
-                .unwrap_or(Decimal::ZERO);
-            let take = amount.min(left);
-            // Allocations are immutable: release it (kept in the release
-            // history) and re-apply what stays.
-            sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE id = $1")
-                .bind(allocation_id)
-                .execute(&mut **transaction)
-                .await
-                .map_err(|error| failed(error, "release prepayment allocation"))?;
-            let keep = amount - take;
-            if keep > Decimal::ZERO {
-                // The kept part keeps the VAT categories of the released one.
-                let kept_rows = allocation
-                    .try_get::<Option<Value>, _>("vat_rows")
-                    .unwrap_or_default()
-                    .and_then(|value| super::advance_rows::rows_from_json(&value))
-                    .map(|rows| {
-                        super::advance_rows::rows_to_json(&super::document::deducted_advance_rows(
-                            &rows, keep,
-                        ))
-                    });
-                let request_id = Uuid::new_v4();
-                let new_id = sqlx::query_scalar::<_, Uuid>(
-                    r#"INSERT INTO invoice_prepayment_allocations (
-                            request_id, advance_invoice_id, target_invoice_id, amount_gross, created_by,
-                            vat_rows
-                       ) VALUES ($1, $2, $3, $4, $5, $6)
-                       RETURNING id"#,
-                )
-                .bind(request_id)
-                .bind(advance_id)
-                .bind(invoice_id)
-                .bind(keep)
-                .bind(actor_id)
-                .bind(kept_rows)
-                .fetch_one(&mut **transaction)
-                .await
-                .map_err(|error| failed(error, "re-apply prepayment"))?;
-                sqlx::query(
-                    r#"INSERT INTO invoice_prepayment_allocation_requests (
-                            target_invoice_id, request_id, advance_invoice_id, amount_gross,
-                            allocation_id, created_by
-                       ) VALUES ($1, $2, $3, $4, $5, $6)"#,
-                )
-                .bind(invoice_id)
-                .bind(request_id)
-                .bind(advance_id)
-                .bind(keep)
-                .bind(new_id)
-                .bind(actor_id)
-                .execute(&mut **transaction)
-                .await
-                .map_err(|error| failed(error, "re-apply prepayment request"))?;
-            }
-            write_invoice_audit_tx(
-                transaction,
-                actor_id,
-                "release_invoice_prepayment",
-                invoice_id,
-                json!({
-                    "allocation_id": allocation_id,
-                    "advance_invoice_id": advance_id,
-                    "amount_gross": decimal_to_string(take),
-                    "kept_gross": decimal_to_string(keep),
-                    "patient_id": context.patient_id,
-                    "automatic": true,
-                    "trigger": "credit_note",
-                }),
-            )
-            .await
-            .map_err(|error| failed(error, "audit prepayment release"))?;
-            room.released_prepayments.push((advance_id, take));
-            left -= take;
-        }
-        recompute_invoice_settlement_status(transaction, invoice_id)
-            .await
-            .map_err(|error| failed(error, "recompute after prepayment release"))?;
+    if context.prepayment_applied_amount > Decimal::ZERO {
+        release_prepayments_for_credit(transaction, context, plan, remaining, actor_id, &mut room)
+            .await?;
     }
 
     let allocations = sqlx::query(
@@ -767,6 +690,366 @@ pub(super) async fn make_room_for_credit_tx(
         }
     }
     Ok(room)
+}
+
+/// An advance allocation credited into a settlement invoice, with its rows
+/// per VAT category: stored (`stored`), or for allocations made before the
+/// rows were stored, the advance's pro rata share (the reading of the
+/// settlement invoice's document).
+struct TargetAllocation {
+    id: Uuid,
+    advance_id: Uuid,
+    amount: Decimal,
+    stored: bool,
+    rows: Vec<VatBreakdownRow>,
+}
+
+/// The allocations credited into `invoice_id`, oldest first; `lock` locks
+/// them for this transaction.
+async fn target_allocations(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+    lock: bool,
+) -> Result<Vec<TargetAllocation>, sqlx::Error> {
+    let sql = if lock {
+        "SELECT id, advance_invoice_id, amount_gross, vat_rows
+         FROM invoice_prepayment_allocations
+         WHERE target_invoice_id = $1
+         ORDER BY created_at, id
+         FOR UPDATE"
+    } else {
+        "SELECT id, advance_invoice_id, amount_gross, vat_rows
+         FROM invoice_prepayment_allocations
+         WHERE target_invoice_id = $1
+         ORDER BY created_at, id"
+    };
+    let rows = sqlx::query(sql)
+        .bind(invoice_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut allocations = Vec::with_capacity(rows.len());
+    for row in rows {
+        let advance_id = row.try_get::<Uuid, _>("advance_invoice_id")?;
+        let amount = row.try_get::<Decimal, _>("amount_gross")?;
+        let stored = row
+            .try_get::<Option<Value>, _>("vat_rows")?
+            .and_then(|value| advance_rows::rows_from_json(&value));
+        let (stored, rows) = match stored {
+            Some(rows) => (true, rows),
+            None => (
+                false,
+                deducted_advance_rows(&advance_rows::advance_rows(conn, advance_id).await?, amount),
+            ),
+        };
+        allocations.push(TargetAllocation {
+            id: row.try_get("id")?,
+            advance_id,
+            amount,
+            stored,
+            rows,
+        });
+    }
+    Ok(allocations)
+}
+
+/// What the settlement invoice bills per VAT category once `credit` joins
+/// its active credit notes; `None` when its lines carry no amounts.
+async fn rows_after_credit(
+    conn: &mut PgConnection,
+    context: &InvoicePaymentContext,
+    credit: credit_notes::ExistingCredit,
+) -> Result<Option<Vec<VatBreakdownRow>>, sqlx::Error> {
+    if !credit_notes::line_snapshot_carries_total(&context.line_items, context.total_gross) {
+        return Ok(None);
+    }
+    let mut credits = credit_notes::load_active_credits(conn, context.invoice_id).await?;
+    credits.push(credit);
+    Ok(Some(advance_vat_rows(&context.line_items, &credits)))
+}
+
+fn plan_as_credit(plan: &credit_notes::CreditNotePlan) -> credit_notes::ExistingCredit {
+    credit_notes::ExistingCredit {
+        vat: plan.vat,
+        gross: plan.gross,
+        lines: (!plan.lines.is_empty()).then(|| plan.lines.clone()),
+    }
+}
+
+/// `base` less `minus`, per category of `base`; categories left at zero are
+/// dropped.
+fn rows_less(base: &[VatBreakdownRow], minus: &[VatBreakdownRow]) -> Vec<VatBreakdownRow> {
+    base.iter()
+        .filter_map(|row| {
+            let key = advance_rows::category_of(row);
+            let (gross, vat) = minus
+                .iter()
+                .filter(|item| advance_rows::category_of(item) == key)
+                .fold((row.gross, row.vat), |(gross, vat), item| {
+                    (gross - item.gross, vat - item.vat)
+                });
+            (!gross.is_zero() || !vat.is_zero()).then_some(VatBreakdownRow {
+                kind: key.0,
+                rate: key.1,
+                net: gross - vat,
+                vat,
+                gross,
+            })
+        })
+        .collect()
+}
+
+/// What each allocation keeps (`None`: unchanged) when the settlement invoice
+/// bills `billed` per VAT category: never more in a category than the
+/// invoice still bills there beyond the older allocations, so the newest
+/// give way first. Allocations without stored rows keep their reading (the
+/// gross rule handles them) and take their room first.
+fn kept_allocation_rows(
+    billed: &[VatBreakdownRow],
+    allocations: &[(bool, Vec<VatBreakdownRow>)],
+) -> Vec<Option<Vec<VatBreakdownRow>>> {
+    let mut left = billed.to_vec();
+    allocations
+        .iter()
+        .map(|(stored, rows)| {
+            let kept = if *stored {
+                let gross = rows.iter().map(|row| row.gross).sum::<Decimal>();
+                advance_rows::plan_allocation_rows(rows, &left, gross)
+            } else {
+                rows.clone()
+            };
+            left = advance_rows::subtract_rows(&left, &kept);
+            (*stored && !rows_less(rows, &kept).is_empty()).then_some(kept)
+        })
+        .collect()
+}
+
+/// The advance deductions a credit note released: what each advance
+/// deducted before less what it deducts after, per VAT category.
+fn released_advances(
+    before: &[DeductedAdvance],
+    after: &[DeductedAdvance],
+) -> Vec<DeductedAdvance> {
+    before
+        .iter()
+        .filter_map(|advance| {
+            let kept = after
+                .iter()
+                .find(|item| {
+                    item.invoice_number == advance.invoice_number
+                        && item.issue_date == advance.issue_date
+                })
+                .map(|item| item.rows.as_slice())
+                .unwrap_or_default();
+            let mut rows = rows_less(&advance.rows, kept);
+            rows.retain(|row| row.gross > Decimal::ZERO);
+            (!rows.is_empty()).then(|| DeductedAdvance {
+                invoice_number: advance.invoice_number.clone(),
+                issue_date: advance.issue_date,
+                rows,
+            })
+        })
+        .collect()
+}
+
+/// Releases the advance money a credit note leaves the settlement invoice no
+/// longer billing (QA 2026-11-16, fix-81 open items):
+///
+/// 1. per VAT category: after the credit note no category deducts more gross
+///    or VAT than the invoice still bills there (the rule of the final
+///    release, `advance_rows::plan_allocation_rows`); the newest allocation
+///    gives way first, the rest is re-applied with its rows;
+/// 2. by gross, for invoices whose lines carry no amounts and allocations
+///    made before rows were stored: nothing beyond the corrected total
+///    (newest first, a part is re-applied pro rata).
+///
+/// Released allocations stay in the release history; each release is
+/// audited. `room` receives what was released, per advance and per category
+/// as the credit-note document prints it.
+async fn release_prepayments_for_credit(
+    transaction: &mut Transaction<'_, Postgres>,
+    context: &InvoicePaymentContext,
+    plan: &credit_notes::CreditNotePlan,
+    remaining: Decimal,
+    actor_id: Uuid,
+    room: &mut CreditRoom,
+) -> Result<(), axum::response::Response> {
+    let invoice_id = context.invoice_id;
+    let failed = |error: sqlx::Error, step: &str| failed_response(error, invoice_id, step);
+    let before = load_deducted_advances(transaction, invoice_id)
+        .await
+        .map_err(|error| failed(error, "deducted advances"))?;
+    let mut release_context_set = false;
+
+    if let Some(billed) = rows_after_credit(transaction, context, plan_as_credit(plan))
+        .await
+        .map_err(|error| failed(error, "invoice rows after credit"))?
+    {
+        let allocations = target_allocations(transaction, invoice_id, true)
+            .await
+            .map_err(|error| failed(error, "lock prepayment allocations"))?;
+        let kept = kept_allocation_rows(
+            &billed,
+            &allocations
+                .iter()
+                .map(|allocation| (allocation.stored, allocation.rows.clone()))
+                .collect::<Vec<_>>(),
+        );
+        let changes = allocations
+            .iter()
+            .zip(kept)
+            .filter_map(|(allocation, kept)| kept.map(|kept| (allocation, kept)))
+            .collect::<Vec<_>>();
+        if !changes.is_empty() {
+            set_release_context(transaction, actor_id)
+                .await
+                .map_err(|error| failed(error, "release actor"))?;
+            release_context_set = true;
+            // Every changed allocation is released before the kept parts are
+            // re-applied: each insert is checked against the categories.
+            for (allocation, _) in &changes {
+                sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE id = $1")
+                    .bind(allocation.id)
+                    .execute(&mut **transaction)
+                    .await
+                    .map_err(|error| failed(error, "release prepayment allocation"))?;
+            }
+            for (allocation, kept) in &changes {
+                let keep = kept.iter().map(|row| row.gross).sum::<Decimal>();
+                if keep > Decimal::ZERO {
+                    advance_rows::insert_allocation(
+                        transaction,
+                        Uuid::new_v4(),
+                        allocation.advance_id,
+                        invoice_id,
+                        keep,
+                        Some(kept),
+                        actor_id,
+                    )
+                    .await
+                    .map_err(|error| failed(error, "re-apply prepayment"))?;
+                }
+                let take = allocation.amount - keep;
+                write_invoice_audit_tx(
+                    transaction,
+                    actor_id,
+                    "release_invoice_prepayment",
+                    invoice_id,
+                    json!({
+                        "allocation_id": allocation.id,
+                        "advance_invoice_id": allocation.advance_id,
+                        "amount_gross": decimal_to_string(take),
+                        "kept_gross": decimal_to_string(keep),
+                        "released_vat_rows": advance_rows::rows_to_json(&rows_less(&allocation.rows, kept)),
+                        "kept_vat_rows": advance_rows::rows_to_json(kept),
+                        "by_vat_category": true,
+                        "patient_id": context.patient_id,
+                        "automatic": true,
+                        "trigger": "credit_note",
+                    }),
+                )
+                .await
+                .map_err(|error| failed(error, "audit prepayment release"))?;
+                room.released_prepayments
+                    .push((allocation.advance_id, take));
+            }
+        }
+    }
+
+    let applied = sqlx::query_scalar::<_, Decimal>(
+        "SELECT COALESCE(SUM(amount_gross), 0) FROM invoice_prepayment_allocations
+         WHERE target_invoice_id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| failed(error, "applied prepayment"))?;
+    let mut left = applied - remaining.max(Decimal::ZERO);
+    if left > Decimal::ZERO {
+        if !release_context_set {
+            set_release_context(transaction, actor_id)
+                .await
+                .map_err(|error| failed(error, "release actor"))?;
+        }
+        let allocations = target_allocations(transaction, invoice_id, true)
+            .await
+            .map_err(|error| failed(error, "lock prepayment allocations"))?;
+        for allocation in allocations.iter().rev() {
+            if left <= Decimal::ZERO {
+                break;
+            }
+            let take = allocation.amount.min(left);
+            // Allocations are immutable: release it (kept in the release
+            // history) and re-apply what stays.
+            sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE id = $1")
+                .bind(allocation.id)
+                .execute(&mut **transaction)
+                .await
+                .map_err(|error| failed(error, "release prepayment allocation"))?;
+            let keep = allocation.amount - take;
+            if keep > Decimal::ZERO {
+                // The kept part keeps the VAT categories of the released one.
+                let kept_rows = allocation
+                    .stored
+                    .then(|| deducted_advance_rows(&allocation.rows, keep));
+                advance_rows::insert_allocation(
+                    transaction,
+                    Uuid::new_v4(),
+                    allocation.advance_id,
+                    invoice_id,
+                    keep,
+                    kept_rows.as_deref(),
+                    actor_id,
+                )
+                .await
+                .map_err(|error| failed(error, "re-apply prepayment"))?;
+            }
+            write_invoice_audit_tx(
+                transaction,
+                actor_id,
+                "release_invoice_prepayment",
+                invoice_id,
+                json!({
+                    "allocation_id": allocation.id,
+                    "advance_invoice_id": allocation.advance_id,
+                    "amount_gross": decimal_to_string(take),
+                    "kept_gross": decimal_to_string(keep),
+                    "patient_id": context.patient_id,
+                    "automatic": true,
+                    "trigger": "credit_note",
+                }),
+            )
+            .await
+            .map_err(|error| failed(error, "audit prepayment release"))?;
+            room.released_prepayments
+                .push((allocation.advance_id, take));
+            left -= take;
+        }
+    }
+
+    if !room.released_prepayments.is_empty() {
+        recompute_invoice_settlement_status(transaction, invoice_id)
+            .await
+            .map_err(|error| failed(error, "recompute after prepayment release"))?;
+        let after = load_deducted_advances(transaction, invoice_id)
+            .await
+            .map_err(|error| failed(error, "deducted advances after release"))?;
+        room.released_advances = released_advances(&before, &after);
+    }
+    Ok(())
+}
+
+async fn set_release_context(
+    transaction: &mut Transaction<'_, Postgres>,
+    actor_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "SELECT set_config('gmed.accounting_actor_id', $1, true),
+                set_config('gmed.prepayment_release_context', 'correction', true)",
+    )
+    .bind(actor_id.to_string())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 /// Gross a credit note takes from the lines that re-bill a supplier cost, per
@@ -917,6 +1200,99 @@ pub(super) async fn close_advance_rest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::routes::invoices::document::VatGroupKind;
+
+    fn row(kind: VatGroupKind, rate: &str, vat: &str, gross: &str) -> VatBreakdownRow {
+        let (vat, gross) = (
+            vat.parse::<Decimal>().unwrap(),
+            gross.parse::<Decimal>().unwrap(),
+        );
+        VatBreakdownRow {
+            kind,
+            rate: rate.parse().unwrap(),
+            net: gross - vat,
+            vat,
+            gross,
+        }
+    }
+
+    /// The fix-81 open item: a partial credit note removes the whole 19 %
+    /// category of a final while its total stays above the deductions. The
+    /// 19 % deduction is released in full, the 0 % one stays.
+    #[test]
+    fn a_credit_note_removing_a_category_releases_its_deduction() {
+        let billed = vec![row(VatGroupKind::ZeroRated, "0", "0", "1000")];
+        let allocation = vec![
+            row(VatGroupKind::Taxed, "19", "36.33", "227.53"),
+            row(VatGroupKind::ZeroRated, "0", "0", "272.47"),
+        ];
+        let kept = kept_allocation_rows(&billed, &[(true, allocation.clone())]);
+        let kept = kept[0].clone().expect("changed");
+        assert_eq!(kept, vec![row(VatGroupKind::ZeroRated, "0", "0", "272.47")]);
+        assert_eq!(
+            rows_less(&allocation, &kept),
+            vec![row(VatGroupKind::Taxed, "19", "36.33", "227.53")]
+        );
+    }
+
+    /// Within a category: the newest allocation gives way first, gross and
+    /// VAT stay within what the category still bills.
+    #[test]
+    fn the_newest_allocation_gives_way_within_a_category() {
+        // 19 % billed after the credit note: 119,00 / VAT 19,00.
+        let billed = vec![row(VatGroupKind::Taxed, "19", "19.00", "119.00")];
+        let older = vec![row(VatGroupKind::Taxed, "19", "15.97", "100.00")];
+        let newer = vec![row(VatGroupKind::Taxed, "19", "15.97", "100.00")];
+        let kept = kept_allocation_rows(&billed, &[(true, older), (true, newer)]);
+        assert!(kept[0].is_none(), "the older allocation fits");
+        let newer_kept = kept[1].clone().expect("changed");
+        assert_eq!(newer_kept[0].gross, Decimal::new(1900, 2));
+        assert!(newer_kept[0].vat <= Decimal::new(303, 2), "{newer_kept:?}");
+        // Nothing changes when the category still bills enough.
+        let kept = kept_allocation_rows(
+            &[row(VatGroupKind::Taxed, "19", "38.00", "238.00")],
+            &[(
+                true,
+                vec![row(VatGroupKind::Taxed, "19", "15.97", "100.00")],
+            )],
+        );
+        assert!(kept[0].is_none());
+    }
+
+    #[test]
+    fn released_advances_are_the_difference_per_advance() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let advance = |number: &str, rows| DeductedAdvance {
+            invoice_number: number.to_string(),
+            issue_date: date,
+            rows,
+        };
+        let before = vec![
+            advance(
+                "A-1",
+                vec![
+                    row(VatGroupKind::Taxed, "19", "36.33", "227.53"),
+                    row(VatGroupKind::ZeroRated, "0", "0", "272.47"),
+                ],
+            ),
+            advance("A-2", vec![row(VatGroupKind::ZeroRated, "0", "0", "100")]),
+        ];
+        let after = vec![
+            advance(
+                "A-1",
+                vec![row(VatGroupKind::ZeroRated, "0", "0", "272.47")],
+            ),
+            advance("A-2", vec![row(VatGroupKind::ZeroRated, "0", "0", "100")]),
+        ];
+        assert_eq!(
+            released_advances(&before, &after),
+            vec![advance(
+                "A-1",
+                vec![row(VatGroupKind::Taxed, "19", "36.33", "227.53")]
+            )]
+        );
+        assert_eq!(released_advances(&before, &[]), before);
+    }
 
     #[test]
     fn the_rest_of_an_advance_is_what_no_settlement_invoice_uses() {

@@ -261,8 +261,20 @@ async fn plan(
             .filter_map(|index| creditable.get(*index))
             .map(|line| line.remaining_gross())
             .sum();
+        // The credit note the cancellation issues: these lines in full.
+        let plan = credit_notes::plan_credit_note(
+            &creditable,
+            &CreditSelection::Lines(open.iter().map(|index| (*index, None)).collect()),
+        )
+        .unwrap_or_else(|_| {
+            credit_notes::CreditNotePlan::without_lines(
+                amount_gross,
+                context.total_vat,
+                context.total_gross,
+            )
+        });
         let (prepayment_released_gross, supplier_cost_released_gross) =
-            super::advance_settlement::credit_room_needed(conn, &context, amount_gross).await?;
+            super::advance_settlement::credit_room_needed(conn, &context, &plan).await?;
         preview.credits.push(InvoiceCredit {
             invoice_id,
             invoice_number: context.invoice_number.clone(),

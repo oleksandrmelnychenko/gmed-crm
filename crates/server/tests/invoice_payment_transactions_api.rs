@@ -2898,3 +2898,406 @@ async fn an_earlier_unsplit_payment_is_frozen_with_its_former_reading() {
     // 400 of 800 paid pro rata: 236,71 of 473,42.
     assert_eq!(money(&paid_taxed), "236.71".parse::<Decimal>().unwrap());
 }
+
+/// A paid advance of 800 (19 % 473,42 / VAT 75,59, 0 % 326,58) deducted in
+/// full on a released final that bills 19 % 1.000 (VAT 159,66) and 0 %
+/// 1.000. Returns the billing bearer, the advance and the final.
+async fn final_with_a_paid_mixed_advance(
+    app: &axum::Router,
+    pool: &PgPool,
+    admin_id: Uuid,
+    tag: &str,
+) -> (String, Uuid, Uuid) {
+    let patient_id = seed_patient(pool, admin_id, tag).await;
+    let billing_id = seed_user(pool, tag, "billing").await;
+    seed_assignment(pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(pool, patient_id, admin_id, tag).await;
+    let advance: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by,
+                issued_at
+           ) VALUES ($1, $2, $3, 'advance', 'sent', CURRENT_DATE + 14, 724.41, 75.59, 800, 0,
+                     $4, $5, now() - interval '1 day')
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-adv"))
+    .bind(json!([
+        {"description": "Anzahlung – Anteil 19 % USt.", "quantity": "1", "unit_price": "397.83",
+         "vat_rate": "19", "is_cost_passthrough": false, "line_net": "397.83", "line_vat": "75.59",
+         "line_gross": "473.42", "source": "advance_prepayment"},
+        {"description": "Anzahlung – Anteil 0 % USt.", "quantity": "1", "unit_price": "326.58",
+         "vat_rate": "0", "is_cost_passthrough": false, "line_net": "326.58", "line_vat": "0",
+         "line_gross": "326.58", "source": "advance_prepayment"}
+    ]))
+    .bind(admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{advance}/payments"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "800",
+            "payment_method": "bank_transfer",
+            "received_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let final_invoice: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, 'final', 'draft', CURRENT_DATE + 14, 1840.34, 159.66, 2000, 0, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(json!([
+        {"description": "Dolmetscher", "quantity": "1", "unit_price": "840.34",
+         "vat_rate": "19", "is_cost_passthrough": false, "line_net": "840.34",
+         "line_vat": "159.66", "line_gross": "1000"},
+        {"description": "Organisation", "quantity": "1", "unit_price": "1000",
+         "vat_rate": "0", "is_cost_passthrough": false, "line_net": "1000",
+         "line_vat": "0", "line_gross": "1000"}
+    ]))
+    .bind(admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (status, released) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{final_invoice}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released:?}");
+    assert_eq!(money(&released["prepayment_applied_amount"]), dec("800"));
+    assert_eq!(money(&released["balance_due"]), dec("1200"));
+    (billing, advance, final_invoice)
+}
+
+fn dec(value: &str) -> Decimal {
+    value.parse::<Decimal>().unwrap()
+}
+
+/// Issues a credit note of `lines` on `invoice_id`; returns the response.
+async fn credit_lines(app: &axum::Router, bearer: &str, invoice_id: Uuid, lines: Value) -> Value {
+    let (status, credit) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": lines,
+            "reason": "Leistung entfällt",
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
+    credit
+}
+
+/// The invariant of the final release, kept after credit notes: per VAT
+/// category the allocations into the final deduct no more gross or VAT than
+/// the final, net of its credit notes, bills there. Returns what they deduct
+/// per category.
+async fn assert_deductions_fit(
+    pool: &PgPool,
+    final_invoice: Uuid,
+) -> std::collections::BTreeMap<String, (Decimal, Decimal)> {
+    let key = |item: &Value| {
+        let rate = dec(item["vat_rate"].as_str().unwrap_or("0"));
+        if rate > Decimal::ZERO {
+            format!("taxed {}", rate.normalize())
+        } else {
+            "zero_rated".to_string()
+        }
+    };
+    let mut billed = std::collections::BTreeMap::<String, (Decimal, Decimal)>::new();
+    let line_items: Value = sqlx::query_scalar("SELECT line_items FROM invoices WHERE id = $1")
+        .bind(final_invoice)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    for item in line_items.as_array().unwrap() {
+        let entry = billed.entry(key(item)).or_default();
+        entry.0 += dec(item["line_gross"].as_str().unwrap());
+        entry.1 += dec(item["line_vat"].as_str().unwrap());
+    }
+    let credits: Vec<Value> = sqlx::query_scalar(
+        r#"SELECT credit.line_items FROM invoice_credit_note_transactions credit
+           WHERE credit.invoice_id = $1 AND credit.transaction_type = 'credit_note'
+             AND NOT EXISTS (SELECT 1 FROM invoice_credit_note_transactions reversal
+                             WHERE reversal.reverses_transaction_id = credit.id)"#,
+    )
+    .bind(final_invoice)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    for credit in &credits {
+        for item in credit.as_array().unwrap() {
+            let entry = billed.entry(key(item)).or_default();
+            entry.0 -= dec(item["line_gross"].as_str().unwrap());
+            entry.1 -= dec(item["line_vat"].as_str().unwrap());
+        }
+    }
+    let allocations: Vec<Value> = sqlx::query_scalar(
+        "SELECT vat_rows FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
+    )
+    .bind(final_invoice)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let mut deducted = std::collections::BTreeMap::<String, (Decimal, Decimal)>::new();
+    for allocation in &allocations {
+        for row in allocation.as_array().unwrap() {
+            let key = if row["kind"] == "taxed" {
+                format!("taxed {}", dec(row["rate"].as_str().unwrap()).normalize())
+            } else {
+                row["kind"].as_str().unwrap().to_string()
+            };
+            let entry = deducted.entry(key).or_default();
+            entry.0 += dec(row["gross"].as_str().unwrap());
+            entry.1 += dec(row["vat"].as_str().unwrap());
+        }
+    }
+    for (key, (gross, vat)) in &deducted {
+        let (billed_gross, billed_vat) = billed.get(key).copied().unwrap_or_default();
+        assert!(
+            *gross <= billed_gross && *vat <= billed_vat,
+            "{key}: deducted {gross} / {vat}, billed {billed_gross} / {billed_vat}"
+        );
+    }
+    deducted
+}
+
+async fn credit_note_pdf_text(
+    app: &axum::Router,
+    bearer: &str,
+    invoice_id: Uuid,
+    credit_note_id: &str,
+) -> (Vec<u8>, String) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/invoices/{invoice_id}/credit-notes/{credit_note_id}/pdf"
+                ))
+                .header("Authorization", bearer)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap()
+        .to_vec();
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    (bytes, text)
+}
+
+async fn stored_release(pool: &PgPool, credit_note_id: &str) -> Option<Value> {
+    sqlx::query_scalar(
+        "SELECT released_advances FROM invoice_credit_note_transactions WHERE id = $1::uuid",
+    )
+    .bind(credit_note_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// fix-81 open item: a partial credit note removes the whole 19 % category
+/// of a final while its total (1.000) stays above the deductions (800).
+/// Before, the 19 % deduction stayed against a final that no longer bills
+/// 19 %. Now it is released, the money is refundable again, and the credit
+/// note states the release; its remaining amount is what the final no
+/// longer asks.
+#[tokio::test]
+async fn a_partial_credit_note_removing_a_vat_category_releases_its_advance_deduction() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("credit-category");
+    let (billing, advance, final_invoice) =
+        final_with_a_paid_mixed_advance(&app, &pool, admin_id, &tag).await;
+
+    let credit = credit_lines(&app, &billing, final_invoice, json!([{"line_index": 0}])).await;
+    assert_eq!(money(&credit["released_prepayment_gross"]), dec("473.42"));
+    assert_eq!(
+        money(&credit["invoice"]["prepayment_applied_amount"]),
+        dec("326.58")
+    );
+    // 2.000 − 1.000 credited − 326,58 deducted: 673,42 (was 1.200).
+    assert_eq!(money(&credit["invoice"]["balance_due"]), dec("673.42"));
+    let deducted = assert_deductions_fit(&pool, final_invoice).await;
+    assert!(!deducted.contains_key("taxed 19"), "{deducted:?}");
+    assert_eq!(deducted["zero_rated"].0, dec("326.58"));
+
+    // The released 19 % money is closed on the advance and refundable.
+    let detail = invoice_detail(&app, &billing, advance).await;
+    assert_eq!(money(&detail["credited_amount"]), dec("473.42"), "{detail}");
+    assert_eq!(
+        money(&detail["refundable_cash_amount"]),
+        dec("473.42"),
+        "{detail}"
+    );
+
+    // Stored with the credit note, as printed.
+    let credit_id = credit["credit_note_transaction_id"].as_str().unwrap();
+    let stored = stored_release(&pool, credit_id).await.expect("stored");
+    assert_eq!(stored[0]["invoice_number"], format!("INV-{tag}-adv"));
+    let rows = stored[0]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{stored}");
+    assert_eq!(rows[0]["kind"], "taxed");
+    assert_eq!(dec(rows[0]["gross"].as_str().unwrap()), dec("473.42"));
+    assert_eq!(dec(rows[0]["vat"].as_str().unwrap()), dec("75.59"));
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE action = 'release_invoice_prepayment' AND entity_id = $1
+             AND (context ->> 'by_vat_category')::boolean"#,
+    )
+    .bind(final_invoice)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    let (bytes, text) = credit_note_pdf_text(&app, &billing, final_invoice, credit_id).await;
+    assert!(
+        text.to_lowercase()
+            .contains("zuzüglich freigegebener anzahlungen"),
+        "{text}"
+    );
+    assert!(text.contains(&format!("INV-{tag}-adv")), "{text}");
+    assert!(text.contains("473,42"), "{text}");
+    // −1.000,00 + 473,42: the final asks 526,58 less (1.200 → 673,42);
+    // VAT −159,66 + 75,59.
+    assert!(text.contains("-526,58"), "{text}");
+    assert!(text.contains("-84,07"), "{text}");
+    let (again, _) = credit_note_pdf_text(&app, &billing, final_invoice, credit_id).await;
+    assert_eq!(bytes, again, "the issued document never changes");
+}
+
+/// Within a category: a credit note on the 0 % line that leaves room
+/// releases nothing and prints no release; one on part of the 19 % line
+/// releases only what that category no longer bills.
+#[tokio::test]
+async fn a_partial_credit_note_within_a_category_releases_only_the_excess() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("credit-within");
+    let (billing, advance, final_invoice) =
+        final_with_a_paid_mixed_advance(&app, &pool, admin_id, &tag).await;
+
+    // 0 % 1.000 → 500: still above its 326,58 deduction.
+    let credit = credit_lines(
+        &app,
+        &billing,
+        final_invoice,
+        json!([{"line_index": 1, "amount_gross": "500"}]),
+    )
+    .await;
+    assert_eq!(money(&credit["released_prepayment_gross"]), dec("0"));
+    assert_eq!(
+        money(&credit["invoice"]["prepayment_applied_amount"]),
+        dec("800")
+    );
+    assert_eq!(money(&credit["invoice"]["balance_due"]), dec("700"));
+    let credit_id = credit["credit_note_transaction_id"].as_str().unwrap();
+    assert!(stored_release(&pool, credit_id).await.is_none());
+    let (_, text) = credit_note_pdf_text(&app, &billing, final_invoice, credit_id).await;
+    assert!(!text.contains("Anzahlungen"), "{text}");
+    assert_deductions_fit(&pool, final_invoice).await;
+
+    // 19 % 1.000 → 300 (VAT 47,90): the 473,42 deduction keeps 300,00.
+    let credit = credit_lines(
+        &app,
+        &billing,
+        final_invoice,
+        json!([{"line_index": 0, "amount_gross": "700"}]),
+    )
+    .await;
+    assert_eq!(money(&credit["released_prepayment_gross"]), dec("173.42"));
+    assert_eq!(
+        money(&credit["invoice"]["prepayment_applied_amount"]),
+        dec("626.58")
+    );
+    // 2.000 − 1.200 credited − 626,58: 173,42 (was 700).
+    assert_eq!(money(&credit["invoice"]["balance_due"]), dec("173.42"));
+    let deducted = assert_deductions_fit(&pool, final_invoice).await;
+    assert_eq!(deducted["taxed 19"], (dec("300"), dec("47.90")));
+    assert_eq!(deducted["zero_rated"].0, dec("326.58"));
+    let detail = invoice_detail(&app, &billing, advance).await;
+    assert_eq!(
+        money(&detail["refundable_cash_amount"]),
+        dec("173.42"),
+        "{detail}"
+    );
+
+    let credit_id = credit["credit_note_transaction_id"].as_str().unwrap();
+    let (_, text) = credit_note_pdf_text(&app, &billing, final_invoice, credit_id).await;
+    assert!(text.contains("173,42"), "{text}");
+    // −700,00 + 173,42: the final asks 526,58 less (700 → 173,42).
+    assert!(text.contains("-526,58"), "{text}");
+}
+
+/// A full credit note still releases every deduction and states them all.
+#[tokio::test]
+async fn a_full_credit_note_on_a_final_releases_and_states_every_deduction() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("credit-full");
+    let (billing, advance, final_invoice) =
+        final_with_a_paid_mixed_advance(&app, &pool, admin_id, &tag).await;
+    let credit = credit_lines(
+        &app,
+        &billing,
+        final_invoice,
+        json!([{"line_index": 0}, {"line_index": 1}]),
+    )
+    .await;
+    assert_eq!(money(&credit["released_prepayment_gross"]), dec("800"));
+    assert_eq!(
+        money(&credit["invoice"]["prepayment_applied_amount"]),
+        dec("0")
+    );
+    let left: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
+    )
+    .bind(final_invoice)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(left, 0);
+    let detail = invoice_detail(&app, &billing, advance).await;
+    assert_eq!(
+        money(&detail["refundable_cash_amount"]),
+        dec("800"),
+        "{detail}"
+    );
+    let credit_id = credit["credit_note_transaction_id"].as_str().unwrap();
+    let stored = stored_release(&pool, credit_id).await.expect("stored");
+    assert_eq!(stored[0]["rows"].as_array().unwrap().len(), 2, "{stored}");
+    let (_, text) = credit_note_pdf_text(&app, &billing, final_invoice, credit_id).await;
+    // −2.000,00 + 800,00: the 1.200,00 the final asked.
+    assert!(text.contains("-1.200,00"), "{text}");
+    assert!(text.contains("-84,07"), "{text}");
+}

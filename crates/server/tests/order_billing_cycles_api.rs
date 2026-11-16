@@ -359,6 +359,14 @@ async fn a_fully_credited_final_invoice_leaves_the_quote_open_for_a_new_invoice(
     assert_eq!(status, StatusCode::CREATED, "{second:?}");
     let second_gross: Decimal = second["total_gross"].as_str().unwrap().parse().unwrap();
     assert_eq!(second_gross, Decimal::new(45220, 2));
+    // The clock stepped back between the credit note and the new invoice
+    // (QA 2026-11-16: this made the reversal pass the check and fail with a
+    // 500): which document is newer does not decide it.
+    sqlx::query("UPDATE invoices SET created_at = created_at - interval '1 hour' WHERE id = $1")
+        .bind(Uuid::parse_str(second["id"].as_str().unwrap()).unwrap())
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
 
     // Reversing the credit note now would bill the service twice.
     let (status, refused) = call(

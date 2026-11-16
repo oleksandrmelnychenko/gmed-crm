@@ -12485,8 +12485,15 @@ async fn issue_credit_note_locked(
     let room =
         advance_settlement::make_room_for_credit_tx(transaction, context, &plan, issue.user_id)
             .await?;
-    let mut issued =
-        store_credit_note_tx(transaction, context, issue, &plan, room.audit_json()).await?;
+    let mut issued = store_credit_note_tx(
+        transaction,
+        context,
+        issue,
+        &plan,
+        &room.released_advances,
+        room.audit_json(),
+    )
+    .await?;
     issued.room = room;
     for advance_id in issued.room.released_advance_ids() {
         // The released money is no longer needed by this invoice: the
@@ -12574,6 +12581,7 @@ async fn store_credit_note_tx(
     context: &InvoicePaymentContext,
     issue: &CreditNoteIssue<'_>,
     plan: &credit_notes::CreditNotePlan,
+    released_advances: &[document::DeductedAdvance],
     extra_audit: Value,
 ) -> Result<IssuedCreditNote, axum::response::Response> {
     let invoice_id = context.invoice_id;
@@ -12601,8 +12609,10 @@ async fn store_credit_note_tx(
                 invoice_id, transaction_type, request_id, document_number, reason,
                 amount_net, amount_vat, amount_gross, currency,
                 issued_on, portal_visible, created_by,
-                credit_mode, line_items, request_selection, source_order_leistung_id
-           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                credit_mode, line_items, request_selection, source_order_leistung_id,
+                released_advances
+           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                     $16)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -12620,6 +12630,12 @@ async fn store_credit_note_tx(
     .bind(plan.line_items_json())
     .bind(issue.request_selection)
     .bind(issue.source_order_leistung_id)
+    // What the document states as released: kept with it (GoBD, the PDF
+    // never changes).
+    .bind(
+        (!released_advances.is_empty())
+            .then(|| storno::deducted_advances_to_json(released_advances)),
+    )
     .fetch_one(&mut **transaction)
     .await
     {
@@ -12847,19 +12863,29 @@ async fn reverse_invoice_credit_note(
                       WHERE reversal.reverses_transaction_id = credit.id
                         AND reversal.transaction_type = 'reversal'
                   ) AS already_reversed,
-                  -- Lines this credit note gave back and a later invoice billed
-                  -- again: the reversal would bill them twice (R3-7).
+                  -- Lines this credit note gave back and another invoice billed
+                  -- again: the reversal would bill them twice (R3-7). Read
+                  -- from the quantities, not from which row is newer: a
+                  -- clock that steps back between the credit note and the
+                  -- new invoice made the reversal pass (QA 2026-11-16).
                   EXISTS (
                       SELECT 1
                       FROM invoice_order_line_allocations own
-                      JOIN invoice_order_line_allocations again
-                        ON again.quote_id = own.quote_id
-                       AND again.quote_line_index = own.quote_line_index
-                       AND again.invoice_id <> own.invoice_id
-                      JOIN invoices rebilling ON rebilling.id = again.invoice_id
+                      JOIN quotes quote ON quote.id = own.quote_id
                       WHERE own.invoice_id = invoice.id
-                        AND rebilling.status <> 'cancelled'
-                        AND rebilling.created_at > credit.created_at
+                        AND own.quantity + (
+                            SELECT COALESCE(SUM(again.quantity), 0)
+                            FROM invoice_order_line_allocations again
+                            JOIN invoices rebilling ON rebilling.id = again.invoice_id
+                            WHERE again.quote_id = own.quote_id
+                              AND again.quote_line_index = own.quote_line_index
+                              AND again.invoice_id <> own.invoice_id
+                              AND rebilling.status <> 'cancelled'
+                              AND NOT invoice_quote_line_credited(
+                                  rebilling.id, again.quote_line_index)
+                        ) > COALESCE(NULLIF(
+                            quote.line_items -> own.quote_line_index ->> 'quantity', ''
+                        )::NUMERIC, 0)
                   ) AS rebilled_since
            FROM invoice_credit_note_transactions credit
            JOIN invoices invoice ON invoice.id = credit.invoice_id
