@@ -627,7 +627,27 @@ fn portal_export_documents_sql() -> String {
 /// (`access_policies`) are not listed; nor is the clinical record, which the
 /// portal does not show at all: it goes out through the staff handler
 /// (QA 2026-11-01).
-const PORTAL_EXPORT_FIELDS: [(&str, &[&str]); 13] = [
+const PORTAL_EXPORT_FIELDS: [(&str, &[&str]); 14] = [
+    // As the portal's privacy page shows it (no staff names or notes; built
+    // so by `export_history`).
+    (
+        "consent_choice_history",
+        &[
+            "id",
+            "chosen_at",
+            "source",
+            "source_label",
+            "access_kind",
+            "chosen_by_name",
+            "recorded_how",
+            "recorded_how_label",
+            "options",
+            "channels",
+            "trusted_persons",
+            "changes",
+            "signed",
+        ],
+    ),
     (
         "patient",
         &[
@@ -1406,6 +1426,12 @@ pub(crate) async fn build_patient_export_payload(
             .collect::<Result<Vec<_>, _>>(),
         "medication_ai_analysis_events_decode",
     )?;
+    // Who changed the consent options and the trusted persons when (owner
+    // 2026-11-16); the patient's own download without staff names and notes.
+    let consent_choice_history = require_patient_export_section(
+        crate::consent_choices::patient::export_history(&state.db, patient_id, !portal).await,
+        "consent_choice_history",
+    )?;
 
     let export = serde_json::json!({
         "export_type": "DSGVO Art. 15 - Right of Access",
@@ -1601,6 +1627,7 @@ pub(crate) async fn build_patient_export_payload(
         "medication_evidence_reviews": medication_evidence_reviews,
         "medication_ai_analyses": medication_ai_analyses,
         "medication_ai_analysis_events": medication_ai_analysis_events,
+        "consent_choice_history": consent_choice_history,
     });
 
     state.audit_sender.try_send(audit::domain_event(

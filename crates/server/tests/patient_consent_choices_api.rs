@@ -785,3 +785,166 @@ async fn an_open_order_locks_manual_new_versions_of_its_documents_but_not_the_co
     let (_, after) = estimate(Some(&current)).await;
     assert_ne!(after["error"], "document_locked_by_active_order", "{after}");
 }
+
+/// Owner 2026-11-16: the patient's own change makes the new version of the
+/// consent form on the server (system actor), releases it to the portal and
+/// supersedes the old one; the manager is told to send it for signature.
+/// Both data exports carry the history of the choices.
+#[tokio::test]
+async fn a_portal_change_renews_the_consent_form_and_the_exports_carry_the_history() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = ctx.pool.clone();
+    let app = ctx.app.clone();
+    let tag = Uuid::new_v4().simple().to_string();
+    let fixture = seed_converted_patient(&pool, ctx.admin_id, &tag).await;
+    let patient_id = fixture.patient_id;
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    assign(&pool, patient_id, pm_id, ctx.admin_id).await;
+    let patient_user = seed_user(&pool, &tag, "patient").await;
+    assign(&pool, patient_id, patient_user, ctx.admin_id).await;
+    let me = bearer(patient_user, "patient");
+
+    // The consent form staff made at the conversion, not released yet.
+    let first = generate_consent(&app, &ceo, patient_id, None).await;
+    let (_, before) =
+        json_request(&app, "GET", "/api/v1/me/consent-choices?lang=uk", &me, None).await;
+    assert_eq!(before["documents"], json!([]), "{before}");
+
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/consent-choices",
+        &me,
+        Some(json!({
+            "choices": core(json!({ "channel_whatsapp": true })),
+            "recipients": [person("Otto Muster", &["medical"])],
+            "version": TEXT_VERSION, "language": "uk",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let saved_id = saved["saved_id"].as_str().unwrap().to_string();
+    let renewed = saved["renewed_document_ids"].as_array().unwrap();
+    assert_eq!(renewed.len(), 1, "{saved}");
+    let second = renewed[0].as_str().unwrap().to_string();
+    assert_ne!(second, first);
+
+    // The new version replaces the old one and prints the patient's choice.
+    let (replaces, version, status_now): (Option<Uuid>, i32, String) = sqlx::query_as(
+        "SELECT replaces_document_id, version_number, status FROM documents WHERE id = $1::uuid",
+    )
+    .bind(&second)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(replaces.map(|id| id.to_string()), Some(first.clone()));
+    assert_eq!(version, 2);
+    assert_eq!(status_now, "active");
+    assert_eq!(
+        recorded_choice(&pool, &second).await.as_deref(),
+        Some(saved_id.as_str())
+    );
+    let old_status: String = sqlx::query_scalar("SELECT status FROM documents WHERE id = $1::uuid")
+        .bind(&first)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(old_status, "archived");
+
+    // Released to the patient's login with a confirmation asked; the portal
+    // lists it.
+    let (shares, confirm): (i64, bool) = sqlx::query_as(
+        r#"SELECT count(*), bool_and(requires_confirmation) FROM document_shares
+           WHERE document_id = $1::uuid AND shared_with_user_id = $2
+             AND channel = 'patient_portal' AND revoked_at IS NULL"#,
+    )
+    .bind(&second)
+    .bind(patient_user)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((shares, confirm), (1, true));
+    assert_eq!(saved["documents"][0]["id"], json!(second), "{saved}");
+    assert_eq!(saved["documents"][0]["awaiting_confirmation"], true);
+    let (_, portal) = json_request(&app, "GET", "/api/v1/me/consent-choices", &me, None).await;
+    assert_eq!(portal["documents"][0]["id"], json!(second), "{portal}");
+
+    // The system made it: the trail names no actor and who triggered it.
+    let (audited, actor, triggered): (i64, Option<Uuid>, Option<String>) = sqlx::query_as(
+        r#"SELECT count(*) OVER (), user_id, context ->> 'triggered_by_user_id'
+           FROM audit_log
+           WHERE action = 'patient_consent_form_renewed' AND entity_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    assert_eq!(actor, None);
+    assert_eq!(triggered, Some(patient_user.to_string()));
+
+    // The manager sends it for signature.
+    let params: Value = sqlx::query_scalar(
+        r#"SELECT params FROM user_notifications
+           WHERE user_id = $1 AND kind = 'patient_consent_choice_changed' AND entity_id = $2"#,
+    )
+    .bind(pm_id)
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(params["renewed"], true);
+    assert_eq!(params["document_id"], json!(second));
+
+    // Nothing left to renew: the staff view names no outdated form.
+    let (_, staff_view) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/consent-choices"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(staff_view["documents"][0]["id"], json!(second));
+    assert_eq!(staff_view["documents"][0]["needs_new_version"], false);
+
+    // The patient's own export: the lead's choice and the change, no staff
+    // names or notes.
+    let (status, export) =
+        json_request(&app, "GET", "/api/v1/me/export?format=json", &me, None).await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    let history = export["consent_choice_history"].as_array().unwrap();
+    assert_eq!(history.len(), 2, "{export}");
+    assert_eq!(history[0]["source"], "staff_recorded");
+    assert_eq!(history[0]["chosen_by_name"], "GMED");
+    assert!(history[0].get("recorded_note").is_none());
+    assert_eq!(history[0]["recorded_how_label"]["uk"], "телефоном");
+    assert_eq!(history[1]["source"], "patient_portal");
+    assert_eq!(history[1]["source_label"]["uk"], "Портал");
+    assert_eq!(history[1]["chosen_by_name"], format!("patient {tag}"));
+    assert_eq!(
+        history[1]["changes"]["removed_persons"],
+        json!(["Eva Muster"])
+    );
+    assert_eq!(history[1]["channels"], json!(["channel_whatsapp"]));
+    assert_eq!(names(&history[1]["trusted_persons"]), ["Otto Muster"]);
+
+    // The staff export of an access request names the staff member.
+    let (status, staff_export) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/export?format=json"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{staff_export}");
+    let history = staff_export["consent_choice_history"].as_array().unwrap();
+    assert_eq!(history.len(), 2);
+    assert_ne!(history[0]["chosen_by_name"], "GMED");
+    assert!(history[0].get("recorded_note").is_some());
+    assert_eq!(history[1]["source_label"]["de"], "Portal");
+}

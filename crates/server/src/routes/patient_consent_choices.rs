@@ -13,7 +13,11 @@
 //! answer names it (`documents[].needs_new_version`) and staff make it with
 //! the replace path of the documents (`POST /documents/generate` with
 //! `replace_document_id`), then send it for signature or pass it to the
-//! client. Trusted persons are never sanctions-screened (owner decision
+//! client. A change the patient makes in the portal renews the form on the
+//! server at once (owner 2026-11-16, [`renew_consent_forms`]: the same
+//! replace path, no actor in the trail) and releases it to the portal with a
+//! confirmation asked; the manager is told to send it for signature (the
+//! portal itself signs nothing). Trusted persons are never sanctions-screened (owner decision
 //! 2026-10-12); names stay out of the audit trail.
 
 use axum::{
@@ -145,7 +149,7 @@ where
 async fn consent_documents(
     state: &AppState,
     patient_id: Uuid,
-    requested: Option<&patient::RequestedChoice>,
+    requested_id: Option<Uuid>,
     newest_is_patient_change: bool,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
@@ -166,7 +170,7 @@ async fn consent_documents(
     .bind(patient::consent_form_templates())
     .fetch_all(&state.db)
     .await?;
-    let requested_id = requested.map(|requested| requested.id.to_string());
+    let requested_id = requested_id.map(|id| id.to_string());
     Ok(rows
         .into_iter()
         .map(|row| {
@@ -179,6 +183,53 @@ async fn consent_documents(
                 "signed_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at"),
                 "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
                 "needs_new_version": needs_new_version,
+            })
+        })
+        .collect())
+}
+
+/// The patient's current consent forms released to this portal login: the
+/// portal links them (the documents page signs nothing; GMED sends the
+/// invitation, the patient confirms the receipt there).
+async fn portal_consent_documents(
+    state: &AppState,
+    patient_id: Uuid,
+    user_id: Uuid,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT DISTINCT ON (d.generated_template_id)
+                  d.id, d.generated_template_id,
+                  COALESCE(NULLIF(btrim(d.original_filename), ''), d.auto_name) AS title,
+                  d.signed_at, d.created_at, ds.requires_confirmation, ds.confirmed
+           FROM documents d
+           JOIN document_shares ds ON ds.document_id = d.id
+           WHERE d.patient_id = $1
+             AND d.generated_template_id = ANY($2)
+             AND d.status <> 'archived'
+             AND d.visibility = 'patient_visible'
+             AND d.file_deleted_at IS NULL
+             AND ds.channel = 'patient_portal'
+             AND ds.shared_with_user_id = $3
+             AND ds.revoked_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id)
+           ORDER BY d.generated_template_id, d.created_at DESC"#,
+    )
+    .bind(patient_id)
+    .bind(patient::consent_form_templates())
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "template_id": row.get::<Option<String>, _>("generated_template_id"),
+                "title": row.get::<Option<String>, _>("title"),
+                "signed_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+                "needs_new_version": false,
+                "awaiting_confirmation": row.get::<bool, _>("requires_confirmation") && !row.get::<bool, _>("confirmed"),
             })
         })
         .collect())
@@ -201,7 +252,7 @@ async fn state_json(
     let documents = consent_documents(
         state,
         patient_id,
-        loaded.requested.as_ref(),
+        loaded.requested.as_ref().map(|requested| requested.id),
         newest_is_patient_change,
     )
     .await?;
@@ -334,8 +385,11 @@ async fn get_portal_state(
         Ok(mut body) => {
             // A minor's own login reads; a parent or the guardian chooses.
             body["can_edit"] = json!(!(minor && access_kind == "self"));
-            // The documents are staff's work; the portal only reads the state.
-            body["documents"] = json!([]);
+            // The portal lists only the consent forms released to this login.
+            match portal_consent_documents(&state, patient_id, auth.user_id).await {
+                Ok(documents) => body["documents"] = json!(documents),
+                Err(error) => return failed(error, "load released consent forms"),
+            }
             Json(body).into_response()
         }
         Err(error) => failed(error, "load consent choices"),
@@ -719,9 +773,23 @@ async fn save_change(
             .await;
         });
     }
-    if matches!(actor, Actor::Portal { .. }) {
-        notify_staff(state, patient_id).await;
-    }
+    // The patient's own change (owner 2026-11-16): the consent form gets its
+    // new version at once, made by the server and released to the portal;
+    // the patient's manager is told to send it for signature.
+    let renewed = if matches!(actor, Actor::Portal { .. }) {
+        let renewed = renew_consent_forms(
+            state,
+            patient_id,
+            choice_id,
+            auth.user_id,
+            actor.access_kind(),
+        )
+        .await;
+        notify_staff(state, patient_id, &renewed).await;
+        renewed
+    } else {
+        Vec::new()
+    };
     crate::realtime::publish_patient_event(
         state,
         Some(auth.user_id),
@@ -745,7 +813,16 @@ async fn save_change(
             body["can_edit"] = json!(true);
             body["saved_id"] = json!(choice_id);
             if !staff {
-                body["documents"] = json!([]);
+                match portal_consent_documents(state, patient_id, auth.user_id).await {
+                    Ok(documents) => body["documents"] = json!(documents),
+                    Err(error) => return failed(error, "load released consent forms"),
+                }
+                body["renewed_document_ids"] = json!(
+                    renewed
+                        .iter()
+                        .map(|renewed| renewed.document_id)
+                        .collect::<Vec<_>>()
+                );
             }
             (StatusCode::CREATED, Json(body)).into_response()
         }
@@ -770,9 +847,116 @@ fn option_keys(choices: &ConsentChoices) -> Vec<&'static str> {
     .collect()
 }
 
+/// A consent form the server renewed after a portal change.
+struct RenewedForm {
+    document_id: Uuid,
+    released: bool,
+}
+
+/// Makes the new version of each current consent form that does not print
+/// the choice `choice_id` (owner 2026-11-16: the same replace path as the
+/// staff save, system actor, audited) and releases it to the portal. Best
+/// effort after the commit: a refusal is logged and leaves the version to
+/// staff («Создать новую версию» in the patient card), as before.
+async fn renew_consent_forms(
+    state: &AppState,
+    patient_id: Uuid,
+    choice_id: Uuid,
+    triggered_by: Uuid,
+    access_kind: &str,
+) -> Vec<RenewedForm> {
+    let documents = match consent_documents(state, patient_id, Some(choice_id), true).await {
+        Ok(documents) => documents,
+        Err(error) => {
+            tracing::error!(%error, %patient_id, "load the consent forms to renew");
+            return Vec::new();
+        }
+    };
+    let mut renewed = Vec::new();
+    for document in documents {
+        if document["needs_new_version"] != json!(true) {
+            continue;
+        }
+        let Some(previous) = document["id"]
+            .as_str()
+            .and_then(|id| Uuid::parse_str(id).ok())
+        else {
+            continue;
+        };
+        let context = json!({
+            "reason": "patient_portal_consent_change",
+            "consent_form_choice_id": choice_id,
+            "triggered_by_user_id": triggered_by,
+            "access_kind": access_kind,
+        });
+        let version = match crate::routes::documents::generate_consent_form_version_as_system(
+            state, previous, context,
+        )
+        .await
+        {
+            Ok(Some(version)) => version,
+            Ok(None) => continue,
+            Err(response) => {
+                tracing::warn!(status = %response.status(), %patient_id, %previous, "renew the consent form after a portal change");
+                continue;
+            }
+        };
+        // The patient's change made it, no staff member: the trail names
+        // no actor and who triggered it.
+        let audited = async {
+            let mut tx = state.db.begin().await?;
+            audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "patient_consent_form_renewed",
+                    None,
+                    "patient",
+                    Some(patient_id),
+                    json!({
+                        "reason": "patient_portal_consent_change",
+                        "consent_form_choice_id": choice_id,
+                        "triggered_by_user_id": triggered_by,
+                        "access_kind": access_kind,
+                        "previous_document_id": previous,
+                        "document_id": version.document_id,
+                        "released_to_portal": version.released,
+                    }),
+                ),
+            )
+            .await?;
+            tx.commit().await
+        }
+        .await;
+        if let Err(error) = audited {
+            tracing::error!(%error, %patient_id, document_id = %version.document_id, "audit the renewed consent form");
+        }
+        renewed.push(RenewedForm {
+            document_id: version.document_id,
+            released: version.released,
+        });
+    }
+    renewed
+}
+
 /// The patient changed the consents in the portal: the patient's managers
-/// (or, without one, the CEO) make the new version of the consent form.
-async fn notify_staff(state: &AppState, patient_id: Uuid) {
+/// (or, without one, the CEO) are told. The new version of the consent form
+/// is made already (`renewed`): they send it for signature; otherwise they
+/// make it.
+async fn notify_staff(state: &AppState, patient_id: Uuid, renewed: &[RenewedForm]) {
+    let (body, params) = match renewed.first() {
+        Some(first) => (
+            "The patient changed the consent choice. The new version of the consent form was created; send it for signature.",
+            json!({
+                "renewed": true,
+                "document_id": first.document_id,
+                "released_to_portal": first.released,
+            }),
+        ),
+        None => (
+            "The patient changed the consent choice. Create a new version of the consent form.",
+            json!({ "renewed": false }),
+        ),
+    };
     let rows = sqlx::query(
         r#"WITH managers AS (
                SELECT pa.user_id
@@ -787,14 +971,15 @@ async fn notify_staff(state: &AppState, patient_id: Uuid) {
                WHERE u.is_active = true AND u.role = 'ceo'
                  AND NOT EXISTS (SELECT 1 FROM managers)
            )
-           INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
            SELECT user_id, 'patient_consent_choice_changed', 'Consent choice changed',
-                  'The patient changed the consent choice. Create a new version of the consent form.',
-                  'patient', $1
+                  $2, 'patient', $1, $3
            FROM recipients
            RETURNING id, user_id"#,
     )
     .bind(patient_id)
+    .bind(body)
+    .bind(params)
     .fetch_all(&state.db)
     .await;
     match rows {

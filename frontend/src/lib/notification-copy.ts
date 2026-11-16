@@ -174,15 +174,6 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
       de: "Bitte ein neues Einwilligungsdokument und eine neue Signatureinladung erstellen.",
     },
   },
-  // An existing patient changed the consents in the portal
-  // (crates/server/src/routes/patient_consent_choices.rs, 2026-11-16).
-  patient_consent_choice_changed: {
-    title: { ru: "Пациент изменил согласия", de: "Einwilligungen geändert" },
-    body: {
-      ru: "Создайте новую версию согласия на передачу данных.",
-      de: "Bitte eine neue Version der Einverständniserklärung erstellen.",
-    },
-  },
   // The patient withdrew the consent to the payer's cost estimate
   // (crates/server/src/routes/lead_payer_package.rs).
   lead_cost_estimate_consent_withdrawn: {
@@ -926,6 +917,31 @@ function documentValidity(item: NotificationFacts, lang: Lang): NotificationCopy
 // ---------------------------------------------------------------------------
 
 /**
+ * An existing patient changed the consents in the portal
+ * (crates/server/src/routes/patient_consent_choices.rs, 2026-11-16). Since the
+ * owner's decision of the same day the server makes the new version of the
+ * consent form itself (`params.renewed`): staff send it for signature.
+ */
+function patientConsentChoiceChanged(item: NotificationFacts, lang: Lang): NotificationCopy {
+  const title: Texts = { ru: "Пациент изменил согласия", de: "Einwilligungen geändert" };
+  const body: Texts = flag(item, "renewed") && flag(item, "released_to_portal") === false
+    ? {
+      ru: "Новая версия согласия на передачу данных создана. Отправьте её на подпись.",
+      de: "Die neue Version der Einverständniserklärung wurde erstellt. Bitte zur Unterschrift senden.",
+    }
+    : flag(item, "renewed")
+    ? {
+      ru: "Новая версия согласия на передачу данных создана и передана в кабинет пациента. Отправьте её на подпись.",
+      de: "Die neue Version der Einverständniserklärung wurde erstellt und ins Patientenportal gestellt. Bitte zur Unterschrift senden.",
+    }
+    : {
+      ru: "Создайте новую версию согласия на передачу данных.",
+      de: "Bitte eine neue Version der Einverständniserklärung erstellen.",
+    };
+  return { title: pick(title, lang), body: pick(body, lang) };
+}
+
+/**
  * The RU/DE wording of a notification of the kinds above, or null for a kind
  * this module does not know (the caller then shows the stored text).
  */
@@ -939,6 +955,8 @@ export function notificationCopyFromFacts(
     return { title: pick(fixed.title, lang), body: fixed.body ? pick(fixed.body, lang) : null };
   }
   switch (item.kind) {
+    case "patient_consent_choice_changed":
+      return patientConsentChoiceChanged(item, lang);
     case "new_lead":
       return newLead(item, lang);
     case "lead_payer_submitted":

@@ -421,6 +421,126 @@ where
     })
 }
 
+/// The label of a history source in the four portal languages.
+fn source_label(source: &str) -> Value {
+    let (de, ru, uk, en) = match source {
+        "lead_portal" => ("Anfrage", "Заявка", "Заявка", "Request"),
+        "staff_recorded" => (
+            "Anfrage, Mitarbeiter",
+            "Заявка, сотрудник",
+            "Заявка, співробітник",
+            "Request, staff",
+        ),
+        "staff_correction" => ("Korrektur", "Исправление", "Виправлення", "Correction"),
+        SOURCE_STAFF => ("Mitarbeiter", "Сотрудник", "Співробітник", "Staff"),
+        SOURCE_PORTAL => ("Portal", "Портал", "Портал", "Portal"),
+        other => (other, other, other, other),
+    };
+    serde_json::json!({ "de": de, "ru": ru, "uk": uk, "en": en })
+}
+
+/// How the client told staff, in the four portal languages.
+fn recorded_how_label(how: &str) -> Value {
+    let (de, ru, uk, en) = match how {
+        "phone" => ("telefonisch", "по телефону", "телефоном", "by phone"),
+        "in_person" => ("persönlich", "лично", "особисто", "in person"),
+        "email" => ("per E-Mail", "по e-mail", "e-mail", "by e-mail"),
+        "paper" => ("auf Papier", "на бумаге", "на папері", "on paper"),
+        other => (other, other, other, other),
+    };
+    serde_json::json!({ "de": de, "ru": ru, "uk": uk, "en": en })
+}
+
+/// The options ticked in `choices`.
+fn ticked_keys(choices: &ConsentChoices) -> Vec<&'static str> {
+    ticked(choices)
+        .into_iter()
+        .filter(|(_, ticked)| *ticked)
+        .map(|(key, _)| key)
+        .collect()
+}
+
+/// The consent-choice history of a patient for the data export (Art. 15
+/// DSGVO, owner 2026-11-16), oldest first: who changed what when, the
+/// channels and the trusted persons of each version, what changed against
+/// the version before and whether a signed consent form records it. The
+/// patient's own download (`staff = false`) names no staff member ("GMED")
+/// and leaves the staff's note out, as the portal shows the history.
+pub async fn export_history<'e, E>(
+    executor: E,
+    patient_id: Uuid,
+    staff: bool,
+) -> Result<Vec<Value>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    use sqlx::Row;
+    let rows = sqlx::query(STEPS_SQL)
+        .bind(patient_id)
+        .bind(consent_form_templates())
+        .fetch_all(executor)
+        .await?;
+    let mut entries = Vec::with_capacity(rows.len());
+    let mut before: Option<(ConsentChoices, Vec<ConsentRecipient>)> = None;
+    for row in rows {
+        let Ok(choices) = serde_json::from_value::<ConsentChoices>(row.get::<Value, _>("choices"))
+        else {
+            continue;
+        };
+        let recipients: Vec<ConsentRecipient> = if choices.named_recipients {
+            serde_json::from_value(row.get::<Value, _>("recipients")).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let source: String = row.get("source");
+        let access_kind: String = row.get("access_kind");
+        let recorded_how: Option<String> = row.get("recorded_how");
+        let chosen_by_name: Option<String> = if staff || access_kind != "staff" {
+            row.get("chosen_by_name")
+        } else {
+            Some("GMED".to_string())
+        };
+        let options = ticked_keys(&choices);
+        let changes = before.as_ref().map(|(then_choices, then_recipients)| {
+            let then_options = ticked_keys(then_choices);
+            let names = |list: &[ConsentRecipient], other: &[ConsentRecipient]| {
+                list.iter()
+                    .filter(|person| {
+                        !other
+                            .iter()
+                            .any(|candidate| person_key(candidate) == person_key(person))
+                    })
+                    .map(|person| person.name.clone())
+                    .collect::<Vec<_>>()
+            };
+            serde_json::json!({
+                "added_options": options.iter().filter(|key| !then_options.contains(key)).collect::<Vec<_>>(),
+                "withdrawn_options": then_options.iter().filter(|key| !options.contains(key)).collect::<Vec<_>>(),
+                "added_persons": names(&recipients, then_recipients),
+                "removed_persons": names(then_recipients, &recipients),
+            })
+        });
+        entries.push(serde_json::json!({
+            "id": row.get::<Uuid, _>("id"),
+            "chosen_at": row.get::<DateTime<Utc>, _>("chosen_at").to_rfc3339(),
+            "source": source,
+            "source_label": source_label(&source),
+            "access_kind": access_kind,
+            "chosen_by_name": chosen_by_name,
+            "recorded_how": recorded_how,
+            "recorded_how_label": recorded_how.as_deref().map(recorded_how_label),
+            "recorded_note": if staff { row.get::<Option<String>, _>("recorded_note") } else { None },
+            "options": options,
+            "channels": options.iter().filter(|key| key.starts_with("channel_")).collect::<Vec<_>>(),
+            "trusted_persons": recipients,
+            "changes": changes,
+            "signed": row.get::<bool, _>("signed"),
+        }));
+        before = Some((choices, recipients));
+    }
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

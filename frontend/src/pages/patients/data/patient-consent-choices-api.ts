@@ -25,6 +25,8 @@ export type PatientConsentDocument = {
   created_at: string;
   /** The form does not print the newest choice yet. */
   needs_new_version: boolean;
+  /** Portal: released to this login and its receipt not confirmed yet. */
+  awaiting_confirmation?: boolean;
 };
 
 /** `GET /patients/{id}/consent-choices` and `GET /me/consent-choices` (owner request 2026-11-16). */
@@ -46,9 +48,12 @@ export type PatientConsentState = {
   /** Additions of the newest choice that wait for the signature. */
   pending: { options: (keyof ConsentFormChoices)[]; recipients: boolean[] };
   history: PatientConsentHistoryEntry[];
+  /** Staff: the current consent forms. Portal: those released to this login. */
   documents: PatientConsentDocument[];
   disclosure_text: string;
   saved_id?: string;
+  /** Portal save: the consent forms the server renewed and released (owner 2026-11-16). */
+  renewed_document_ids?: string[];
 };
 
 export type PatientConsentChange = {

@@ -424,3 +424,24 @@ describe("document validity notices (owner 2026-11-15)", () => {
     expect(late?.title).toBe("Dokument von P-0042 · Erika Muster ist abgelaufen");
   });
 });
+
+describe("a patient's consent change in the portal (owner 2026-11-16)", () => {
+  it("asks for the signature once the server renewed the consent form", () => {
+    const renewed = notice("patient_consent_choice_changed", "Consent choice changed", "x", {
+      renewed: true,
+      released_to_portal: true,
+    });
+    expect(notificationCopyFromFacts(renewed, "ru")?.body).toBe(
+      "Новая версия согласия на передачу данных создана и передана в кабинет пациента. Отправьте её на подпись.",
+    );
+    expect(notificationCopyFromFacts(renewed, "de")?.body).toContain("zur Unterschrift senden");
+  });
+
+  it("asks for the new version when nothing was renewed (or an older row)", () => {
+    const old = notice("patient_consent_choice_changed", "Consent choice changed", "x");
+    expect(notificationCopyFromFacts(old, "ru")).toEqual({
+      title: "Пациент изменил согласия",
+      body: "Создайте новую версию согласия на передачу данных.",
+    });
+  });
+});

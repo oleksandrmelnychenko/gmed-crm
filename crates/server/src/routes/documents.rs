@@ -3316,6 +3316,11 @@ struct GenerateDocumentRequest {
     /// patients. Set only by [`generate_document`].
     #[serde(skip)]
     from_agency_template: bool,
+    /// The server makes this version on its own (no staff click): the audit
+    /// trail names no actor and carries this context. Set only by
+    /// [`generate_consent_form_version_as_system`], never read from a body.
+    #[serde(skip)]
+    system_context: Option<Value>,
 }
 
 /// Optional manual binding fields ("yellow sockets") for the generated
@@ -21557,9 +21562,15 @@ async fn generate_document(
         }
     }
 
+    let system_context = body.system_context.clone();
+    let audit_actor = if system_context.is_some() {
+        None
+    } else {
+        Some(auth.user_id)
+    };
     state.audit_sender.try_send(audit::domain_event(
         "generate_document_from_template",
-        Some(auth.user_id),
+        audit_actor,
         "document",
         Some(document_id),
         json!({
@@ -21571,12 +21582,13 @@ async fn generate_document(
             "language": language,
             "replace_document_id": replacement.as_ref().map(|value| value.document_id),
             "version_number": persist_input.version_number,
+            "system": system_context,
         }),
     ));
 
     crate::realtime::publish_document_event(
         &state,
-        Some(auth.user_id),
+        audit_actor,
         "document.generated",
         document_id,
         json!({
@@ -31162,6 +31174,181 @@ pub(crate) async fn generate_lead_document(
         })
 }
 
+/// Bindings of a consent form's previous version that are no data of the
+/// patient and stay with the document (as `KEPT_BINDING_KEYS` of the
+/// frontend's one-click new version): where the parties sign.
+const CONSENT_FORM_KEPT_BINDINGS: [&str; 3] =
+    ["party_sign_place", "party_city", "agency_sign_place"];
+
+/// The new version of a patient's consent form the server made on its own.
+pub(crate) struct SystemConsentFormVersion {
+    pub(crate) document_id: Uuid,
+    /// The new version is in the patient's portal (released now or following
+    /// the release of the version it replaces).
+    pub(crate) released: bool,
+}
+
+/// Makes the next version of a patient's consent form (Einverständnis-
+/// erklärung) without a staff click (owner 2026-11-16: the patient changed
+/// the consent choice in the portal): the same path as «Новая версия» of the
+/// documents screen (`POST /documents/generate` with `replace_document_id`,
+/// every check of the endpoint applies), the same form as the frontend's
+/// one-click version (same template, patient, order, language, visibility;
+/// sign places kept; dated today), then released to the patient's portal
+/// with a confirmation asked. The audit trail names no actor (system) and
+/// carries `context`; the stored `uploaded_by` and `shared_by` are the
+/// staff member who made the version it replaces (both name a login). A
+/// patient whose processing is restricted (Art. 18) gets nothing
+/// automatically: `Ok(None)`, staff renew it.
+pub(crate) async fn generate_consent_form_version_as_system(
+    state: &AppState,
+    previous_document_id: Uuid,
+    context: Value,
+) -> Result<Option<SystemConsentFormVersion>, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %previous_document_id, "load the consent form to renew");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the consent form",
+        )
+    };
+    let Some(previous) = sqlx::query(
+        r#"SELECT patient_id, order_id, appointment_id, generated_template_id, document_language,
+                  visibility, klinik, access_category, generated_bindings, uploaded_by,
+                  source_person, source_institution
+           FROM documents
+           WHERE id = $1 AND patient_id IS NOT NULL AND lead_id IS NULL"#,
+    )
+    .bind(previous_document_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(failed)?
+    else {
+        return Err(err(StatusCode::NOT_FOUND, "Document not found"));
+    };
+    let patient_id: Uuid = previous.get("patient_id");
+    let Some(template_id) = previous
+        .get::<Option<String>, _>("generated_template_id")
+        .filter(|template| {
+            crate::consent_choices::patient::consent_form_templates().contains(template)
+        })
+    else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only a consent form is renewed automatically",
+        ));
+    };
+    match super::patients::ensure_patient_processing_allows(
+        state,
+        patient_id,
+        "renewing the consent form",
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(response) if response.status() == StatusCode::LOCKED => return Ok(None),
+        Err(response) => return Err(response),
+    }
+    let kept: serde_json::Map<String, Value> = previous
+        .get::<Option<Value>, _>("generated_bindings")
+        .and_then(|bindings| bindings.as_object().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(key, value)| {
+            CONSENT_FORM_KEPT_BINDINGS.contains(&key.as_str())
+                && value.as_str().is_some_and(|value| !value.trim().is_empty())
+        })
+        .collect();
+    let bindings = serde_json::from_value::<DocumentBindingOverrides>(Value::Object(kept)).ok();
+    let language = previous
+        .get::<Option<String>, _>("document_language")
+        .filter(|language| normalize_document_language(Some(language.as_str())).is_some())
+        .unwrap_or_else(|| "de".to_string());
+    let uploaded_by: Uuid = previous.get("uploaded_by");
+    // Active also after a draft: the version goes to the patient to sign.
+    let status = "active";
+    let request = GenerateDocumentRequest {
+        template_id,
+        patient_id: Some(patient_id),
+        order_id: previous.get("order_id"),
+        appointment_id: previous.get("appointment_id"),
+        replace_document_id: Some(previous_document_id),
+        status: Some(status.to_string()),
+        visibility: previous.get("visibility"),
+        klinik: previous.get("klinik"),
+        document_direction: Some("outgoing".to_string()),
+        document_variant: Some("original".to_string()),
+        document_language: Some(language.clone()),
+        language: Some(language),
+        access_category: previous.get("access_category"),
+        document_date: Some(crate::app_time::today()),
+        source_person: previous.get("source_person"),
+        source_institution: previous
+            .get::<Option<String>, _>("source_institution")
+            .or_else(|| Some("GMED".to_string())),
+        bindings,
+        system_context: Some(context),
+        ..GenerateDocumentRequest::default()
+    };
+    // The endpoint's checks run as the CEO would pass them; the trail
+    // names no actor (`system_context`).
+    let auth = AuthUser {
+        selected_patient_id: None,
+        user_id: uploaded_by,
+        role: Role::Ceo,
+        family_id: Uuid::nil(),
+        access_token_jti: Uuid::nil(),
+        access_token_expires_at: chrono::Utc::now(),
+    };
+    let response = generate_document(State(state.clone()), Extension(auth), Json(request)).await;
+    if !response.status().is_success() {
+        return Err(response);
+    }
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read the generated document",
+            )
+        })?;
+    let document_id = serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|value| value["id"].as_str().and_then(|id| Uuid::parse_str(id).ok()))
+        .ok_or_else(|| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The generated document has no id",
+            )
+        })?;
+    // A version that replaces a released one is released already
+    // (`release_new_version_like_predecessor`); otherwise the patient's
+    // logins get it now, with a confirmation asked.
+    let already_released: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (SELECT 1 FROM document_shares
+                          WHERE document_id = $1 AND channel = 'patient_portal'
+                            AND revoked_at IS NULL)"#,
+    )
+    .bind(document_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(failed)?;
+    let released = already_released
+        || match release_document_to_patient_portal_as(state, uploaded_by, None, document_id, true)
+            .await
+        {
+            Ok(_) => true,
+            Err(response) => {
+                tracing::warn!(status = %response.status(), %document_id, "release the renewed consent form to the portal");
+                false
+            }
+        };
+    Ok(Some(SystemConsentFormVersion {
+        document_id,
+        released,
+    }))
+}
+
 /// Fixed explanation of "Auskunft an Dritte" on the patient form PDF: the
 /// adult who answers for himself and nobody acts for.
 const THIRD_PARTY_DISCLOSURE_INTRO: &str = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
@@ -39635,6 +39822,27 @@ async fn release_document_to_patient_portal_internal(
     id: Uuid,
     requires_confirmation: bool,
 ) -> Result<PortalReleaseResult, axum::response::Response> {
+    release_document_to_patient_portal_as(
+        state,
+        actor_user_id,
+        Some(actor_user_id),
+        id,
+        requires_confirmation,
+    )
+    .await
+}
+
+/// [`release_document_to_patient_portal_internal`] with the actor of the
+/// audit trail apart from the login the shares name (`shared_by`): `None`
+/// for a release the server makes on its own (a portal consent change,
+/// owner 2026-11-16).
+async fn release_document_to_patient_portal_as(
+    state: &AppState,
+    actor_user_id: Uuid,
+    audit_actor: Option<Uuid>,
+    id: Uuid,
+    requires_confirmation: bool,
+) -> Result<PortalReleaseResult, axum::response::Response> {
     let row = match sqlx::query(
         r#"SELECT id, patient_id, visibility, status, auto_name
            FROM documents
@@ -39826,7 +40034,7 @@ async fn release_document_to_patient_portal_internal(
 
     state.audit_sender.try_send(audit::domain_event(
         "release_document_to_patient_portal",
-        Some(actor_user_id),
+        audit_actor,
         "document",
         Some(id),
         json!({
@@ -39842,7 +40050,7 @@ async fn release_document_to_patient_portal_internal(
 
     crate::realtime::publish_document_event(
         state,
-        Some(actor_user_id),
+        audit_actor,
         "document.portal_released",
         id,
         json!({

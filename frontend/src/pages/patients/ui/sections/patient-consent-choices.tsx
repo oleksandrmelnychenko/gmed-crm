@@ -45,6 +45,7 @@ const TEXT: Record<Lang, {
   history: string; signed: string; save: string; consent: string; newVersion: string;
   sources: Record<string, string>; staff: string; nothingChanged: string; failed: string;
   coreRequired: string; consentRequired: string; byGuardian: string; outdated: string; howLabel: string; saved: string;
+  openDocuments: string; renewed: string;
 }> = {
   ru: {
     title: "Согласия и доверенные лица", change: "Изменить согласия", channels: "Каналы связи", persons: "Доверенные лица",
@@ -56,6 +57,7 @@ const TEXT: Record<Lang, {
     consentRequired: "Подтвердите согласие на передачу данных названным лицам.",
     byGuardian: "Для несовершеннолетнего выбирает родитель или опекун.",
     outdated: "Текст согласия изменился. Обновите страницу.", howLabel: "Как клиент сообщил", saved: "Сохранено",
+    openDocuments: "Открыть в документах", renewed: "Новая версия согласия — в разделе «Документы»",
   },
   de: {
     title: "Einwilligungen und Vertrauenspersonen", change: "Einwilligungen ändern", channels: "Kommunikationswege", persons: "Vertrauenspersonen",
@@ -67,6 +69,7 @@ const TEXT: Record<Lang, {
     consentRequired: "Bestätigen Sie die Einwilligung zur Weitergabe an die genannten Personen.",
     byGuardian: "Für Minderjährige wählt ein Elternteil oder der Vormund.",
     outdated: "Der Einwilligungstext hat sich geändert. Laden Sie die Seite neu.", howLabel: "Wie der Kunde es mitgeteilt hat", saved: "Gespeichert",
+    openDocuments: "In Dokumenten öffnen", renewed: "Neue Version der Einwilligung – unter «Dokumente»",
   },
   uk: {
     title: "Згоди та довірені особи", change: "Змінити згоди", channels: "Канали зв’язку", persons: "Довірені особи",
@@ -78,6 +81,7 @@ const TEXT: Record<Lang, {
     consentRequired: "Підтвердьте згоду на передачу даних названим особам.",
     byGuardian: "За неповнолітнього обирає батько, мати або опікун.",
     outdated: "Текст згоди змінився. Оновіть сторінку.", howLabel: "Як клієнт повідомив", saved: "Збережено",
+    openDocuments: "Відкрити в документах", renewed: "Нова версія згоди — у розділі «Документи»",
   },
   en: {
     title: "Consents and trusted persons", change: "Change consents", channels: "Communication channels", persons: "Trusted persons",
@@ -89,6 +93,7 @@ const TEXT: Record<Lang, {
     consentRequired: "Confirm the consent to share data with the named persons.",
     byGuardian: "For a minor, a parent or the guardian chooses.",
     outdated: "The consent text has changed. Reload the page.", howLabel: "How the client told us", saved: "Saved",
+    openDocuments: "Open in documents", renewed: "New version of the consent — under «Documents»",
   },
 };
 
@@ -252,11 +257,14 @@ export function PatientConsentChoicesView({
   onEdit,
   renewing,
   onRenew,
+  portal = false,
 }: {
   state: PatientConsentState;
   onEdit?: () => void;
   renewing?: string | null;
   onRenew?: (documentId: string) => void;
+  /** The portal: lists the consent forms released to the login. */
+  portal?: boolean;
 }) {
   const { lang } = useLang();
   const text = consentText(lang);
@@ -264,7 +272,8 @@ export function PatientConsentChoicesView({
   const { applies, waiting } = listedPersons(state);
   const channels = CONSENT_FORM_CHANNELS.filter((key) => state.effective.choices[key]);
   const waitingChannels = state.pending.options.filter((key) => (CONSENT_FORM_CHANNELS as readonly string[]).includes(key));
-  const how = cabinetStaffText(lang === "de" ? "de" : "ru").channels;
+  // The portal shows the history in the patient's language (uk / en too).
+  const how = cabinetStaffText(lang).channels;
   return (
     <div className="space-y-3 text-sm" data-testid="patient-consent-choices">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -301,6 +310,18 @@ export function PatientConsentChoicesView({
             {renewing === document.id ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <FilePlus2 aria-hidden="true" className="size-3.5" />}
             {text.newVersion}
           </Button>
+        </div>
+      )) : null}
+      {portal ? state.documents.map((document) => (
+        // The consent forms released to this login (owner 2026-11-16: a portal change renews the form).
+        <div key={document.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2" data-testid="portal-consent-document">
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="min-w-0 [overflow-wrap:anywhere]">{document.title}</span>
+            {document.signed_at
+              ? <StatusChip tone="success">{text.signed}</StatusChip>
+              : <StatusChip tone="warning"><Clock3 aria-hidden="true" />{text.waiting}</StatusChip>}
+          </span>
+          <a href="/documents" className="text-xs font-medium text-primary hover:underline" data-testid="portal-consent-document-open">{text.openDocuments}</a>
         </div>
       )) : null}
       {state.history.length > 0 ? (
@@ -347,7 +368,8 @@ export function usePatientConsentChoices(patientId: string | null) {
   const { renew } = renewal;
   const onSaved = useCallback((saved: PatientConsentState) => {
     setState(saved);
-    toast.success(consentText(lang).saved);
+    // Portal: the server renewed the consent form and released it (owner 2026-11-16).
+    toast.success(saved.renewed_document_ids?.length ? consentText(lang).renewed : consentText(lang).saved);
     // Staff: the consent form that prints the choice gets its new version at once.
     const [first] = patientId ? documentsToRenew(saved) : [];
     if (first) void renew(first, "consent_changed");
@@ -399,7 +421,7 @@ export function PortalConsentChoicesSection() {
   return (
     <section className="space-y-3 rounded-xl border border-border/70 bg-card p-4" data-testid="portal-consent-card">
       <h2 className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck aria-hidden="true" className="size-4" />{text.title}</h2>
-      <PatientConsentChoicesView state={state} onEdit={state.can_edit ? () => setEditing(true) : undefined} />
+      <PatientConsentChoicesView state={state} portal onEdit={state.can_edit ? () => setEditing(true) : undefined} />
       {state.can_edit ? (
         <PatientConsentChoicesDialog state={state} patientId={null} open={editing} onOpenChange={setEditing} onSaved={onSaved} />
       ) : null}
