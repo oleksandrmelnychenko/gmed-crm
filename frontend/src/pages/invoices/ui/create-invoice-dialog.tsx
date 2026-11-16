@@ -273,10 +273,12 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 </section>
 
                 {form.invoiceType === "advance" && selectedQuote && requiredPrepayment != null ? (
-                  <fieldset className="grid gap-2 rounded-xl border border-border bg-card p-3">
-                    <legend className="px-1">
-                      <SectionHeading icon={BookMarked}>{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</SectionHeading>
-                    </legend>
+                  <fieldset className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+                    <legend className="sr-only">{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</legend>
+                    <div className="border-b border-border px-3 py-2.5" aria-hidden="true">
+                      <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={BookMarked}>{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</SectionHeading></h3>
+                    </div>
+                    <div className="grid gap-2 p-3">
                     {([
                       ["prepayment", de ? `Erforderliche Vorauszahlung · ${money(requiredPrepayment)}` : `Требуемая предоплата · ${money(requiredPrepayment)}`],
                       ["positions", de ? "Ausgewählte Angebotspositionen" : "Выбранные позиции предложения"],
@@ -294,6 +296,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                           : "Требуемая предоплата больше суммы, ещё не выставленной по предложению. Выбраны открытые позиции."}
                       </p>
                     ) : null}
+                    </div>
                   </fieldset>
                 ) : null}
 
