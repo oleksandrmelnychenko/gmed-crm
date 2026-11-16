@@ -64,7 +64,8 @@ export type LeadSanctionsFlag = {
   flag: "confirmed" | "review_pending" | "blocked_country" | "country_lifted";
 };
 
-export type HitStatus = "open" | "false_positive" | "confirmed";
+/** `no_longer_matches`: closed by re-screening itself — the unchanged subject no longer matches (owner 2026-11-16). */
+export type HitStatus = "open" | "false_positive" | "confirmed" | "no_longer_matches";
 /**
  * `lead_bank`: the bank of the lead's payment route; `lead_recipient`: a third-party invoice
  * recipient who does not pay (owner decisions 2026-10-11); `patient_relation`: a relation of a
@@ -168,7 +169,8 @@ export type SanctionsHit = {
 
 export type HitsResponse = {
   hits: SanctionsHit[];
-  counts: Record<HitStatus, number>;
+  // An older server sends no `no_longer_matches` count.
+  counts: Record<Exclude<HitStatus, "no_longer_matches">, number> & { no_longer_matches?: number };
 };
 
 export type ListVersion = {

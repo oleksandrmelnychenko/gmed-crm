@@ -709,7 +709,9 @@ fn classify_segments(
                 // the order is queued and screened again, and the hold stays
                 // until the CEO decides the old hit — an open hit counts
                 // also when its subject is gone (`still_matches = false`),
-                // so renaming the payer lifts nothing.
+                // so renaming the payer lifts nothing. Only an UNCHANGED
+                // subject that no longer matches closes its hit by itself
+                // (`no_longer_matches`, owner 2026-11-16, QA fix-91).
                 ["payer"] => return Ok(None),
                 [] if *method == Method::DELETE => return Ok(None),
                 _ => Rule::Always(OrderContractWork),
@@ -1147,7 +1149,7 @@ async fn sanctions_flags(state: &AppState) -> Result<Vec<LeadFlag>, sqlx::Error>
                   bool_or(h.status = 'confirmed') AS confirmed,
                   bool_or(h.status = 'open') AS open
            FROM sanctions_hits h
-           WHERE h.lead_id IS NOT NULL AND h.status <> 'false_positive'
+           WHERE h.lead_id IS NOT NULL AND h.status IN ('open', 'confirmed')
            GROUP BY h.lead_id"#,
     )
     .fetch_all(&state.db)

@@ -71,4 +71,21 @@ describe("sanctions hit card", () => {
     // Label (dt) and value (dd) follow each other in the markup.
     expect(cardText(hit([], "unknown"))).toContain(`${ru.sanctions_field_dob}(нет даты для сравнения)`);
   });
+
+  it("shows an automatically closed hit as closed with its date, without decision buttons (owner 2026-11-16)", () => {
+    const closed: SanctionsHit = {
+      ...hit([], "unknown"),
+      status: "no_longer_matches",
+      still_matches: false,
+      decided_at: "2026-11-16T21:30:00Z",
+      decision_reason: "Automatically closed: the unchanged subject no longer matches the active list",
+    };
+    const text = cardText(closed);
+    expect(text).toContain("Больше не совпадает (автоматически)");
+    expect(text).toContain("Закрыто автоматически");
+    expect(text).toContain("16.11.2026");
+    expect(text).not.toContain(ru.sanctions_button_confirm);
+    expect(text).not.toContain(ru.sanctions_no_longer_matches);
+    expect(text).not.toContain("Решение:");
+  });
 });

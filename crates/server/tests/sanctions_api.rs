@@ -1856,6 +1856,286 @@ async fn the_bank_of_the_payment_route_is_screened_held_and_decided_like_any_hit
     assert_eq!(lead_status(&app, paid).await["screening"], "confirmed");
 }
 
+/// The bank list with the listed bank renamed (same logical id), as a later
+/// version: the entry no longer matches "Testgrad Commerce Bank".
+fn bank_list_version(generated: &str, file_id: &str, renamed: bool) -> String {
+    let xml = SYNTHETIC_BANK_LIST
+        .replace("2026-10-10T18:00:00.000+02:00", generated)
+        .replace(
+            "globalFileId=\"990002\"",
+            &format!("globalFileId=\"{file_id}\""),
+        );
+    if renamed {
+        xml.replace("Testgrad", "Zentralgrad")
+            .replace("Тестград", "Центральград")
+    } else {
+        xml
+    }
+}
+
+async fn hits_with_status(app: &TestApp, status: &str) -> (Vec<Value>, Value) {
+    let (code, body) = request(
+        app,
+        "GET",
+        &format!("/sanctions/hits?status={status}"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    (
+        body["hits"].as_array().unwrap().clone(),
+        body["counts"].clone(),
+    )
+}
+
+async fn hit_of(app: &TestApp, lead_id: Uuid) -> (String, String) {
+    sqlx::query_as(
+        "SELECT id::text, status FROM sanctions_hits WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap()
+}
+
+async fn bank_lead(app: &TestApp, last_name: &str, bank: &str) -> Uuid {
+    let lead = insert_lead(
+        app,
+        "Anna",
+        last_name,
+        Some("1990-02-02"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    declare_payer(
+        app,
+        lead,
+        json!({ "payer_kind": "self", "source_of_funds": "employment" }),
+    )
+    .await;
+    set_payment_route(app, lead, bank, "RU").await;
+    screen_queue(app).await;
+    lead
+}
+
+/// Owner decision 2026-11-16 (QA fix-91): an open hit whose subject is
+/// unchanged but no longer matches after a list or matcher change is closed
+/// by re-screening as `no_longer_matches`, with an audit event of the
+/// system; a changed subject keeps its hold (QA 2026-10-12), decided hits
+/// stay as decided, and the startup re-screen closes an open hit the old
+/// matcher left (the DEV «Commerzbank» / EU.10350.3 case).
+#[tokio::test]
+async fn an_unchanged_subject_that_no_longer_matches_closes_its_open_hit() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let (code, body) = upload_list(&app, &app.ceo(), SYNTHETIC_BANK_LIST).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["outcome"]["result"], "imported", "{body}");
+
+    let unchanged = bank_lead(&app, "Unverändert", "Testgrad Commerce Bank").await;
+    let renamed = bank_lead(&app, "Umbenannt", "Testgrad Commerce Bank").await;
+    let confirmed = bank_lead(&app, "Bestätigt", "Testgrad Commerce Bank").await;
+    let cleared = bank_lead(&app, "Geklärt", "Testgrad Commerce Bank").await;
+    for lead in [unchanged, renamed, confirmed, cleared] {
+        assert_eq!(hit_of(&app, lead).await.1, "open");
+    }
+    let (confirmed_hit, _) = hit_of(&app, confirmed).await;
+    decide(
+        &app,
+        &confirmed_hit,
+        "confirmed",
+        "Listed bank, same name and seat",
+    )
+    .await;
+    let (cleared_hit, _) = hit_of(&app, cleared).await;
+    decide(
+        &app,
+        &cleared_hit,
+        "false_positive",
+        "Other bank, BIC and seat checked",
+    )
+    .await;
+    let (unchanged_hit, _) = hit_of(&app, unchanged).await;
+    let (renamed_hit, _) = hit_of(&app, renamed).await;
+
+    // A changed subject (another bank) keeps its open hit: renaming lifts
+    // nothing (QA 2026-10-12).
+    set_payment_route(&app, renamed, "Deutsche Bank AG", "DE").await;
+    screen_queue(&app).await;
+    assert_eq!(
+        hit_of(&app, renamed).await,
+        (renamed_hit.clone(), "open".into())
+    );
+
+    // The next list version no longer names the bank so.
+    let (code, body) = upload_list(
+        &app,
+        &app.ceo(),
+        &bank_list_version("2026-10-20T18:00:00.000+02:00", "990003", true),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["outcome"]["result"], "imported", "{body}");
+
+    assert_eq!(
+        hit_of(&app, unchanged).await,
+        (unchanged_hit.clone(), "no_longer_matches".into())
+    );
+    assert_eq!(hit_of(&app, renamed).await.1, "open");
+    assert_eq!(hit_of(&app, confirmed).await.1, "confirmed");
+    assert_eq!(hit_of(&app, cleared).await.1, "false_positive");
+
+    // The CEO's page lists it as closed, by nobody, with the date.
+    let (closed, counts) = hits_with_status(&app, "no_longer_matches").await;
+    assert_eq!(closed.len(), 1, "{closed:?}");
+    assert_eq!(closed[0]["id"], json!(unchanged_hit));
+    assert!(closed[0]["decided_at"].is_string(), "{}", closed[0]);
+    assert!(closed[0]["decided_by_name"].is_null(), "{}", closed[0]);
+    assert_eq!(closed[0]["still_matches"], false);
+    assert_eq!(counts["no_longer_matches"], 1, "{counts}");
+    assert_eq!(counts["open"], 1, "{counts}");
+    // Its notification no longer waits; one audit event of the system.
+    let unread: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE entity_id = $1::uuid AND NOT is_read",
+    )
+    .bind(&unchanged_hit)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(unread, 0);
+    let audits: Vec<(Option<Uuid>, Value)> = sqlx::query_as(
+        "SELECT user_id, context FROM audit_log
+         WHERE action = 'sanctions_hit_auto_closed' AND entity_id = $1::uuid",
+    )
+    .bind(&unchanged_hit)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(audits.len(), 1, "{audits:?}");
+    assert_eq!(audits[0].0, None);
+    assert_eq!(audits[0].1["list_logical_id"], "900301", "{:?}", audits[0]);
+    assert!(audits[0].1["old_score"].as_f64().unwrap() >= 0.9);
+    assert_eq!(audits[0].1["lead_id"], json!(unchanged));
+    assert!(audits[0].1.get("last_name").is_none());
+
+    // The gate no longer holds the unchanged lead; the renamed one stays held.
+    assert_eq!(lead_status(&app, unchanged).await["screening"], "clear");
+    let (_, body) = qualify(&app, unchanged).await;
+    assert!(not_a_gate_block(&body), "{body}");
+    let (code, body) = qualify(&app, renamed).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+    let (code, body) = qualify(&app, confirmed).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_confirmed");
+
+    // A closed hit is final, like a decision.
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!("/sanctions/hits/{unchanged_hit}/decision"),
+        &app.ceo(),
+        Some(json!({ "decision": "confirmed", "reason": "Trying to decide a closed hit" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+
+    // The DEV case: an open hit the earlier matcher left for a bank the
+    // current matcher does not match. The start of the server queues the
+    // owners of open hits once; re-screening closes it.
+    let dev = insert_lead(
+        &app,
+        "Dora",
+        "Muster",
+        Some("1980-01-01"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    declare_payer(
+        &app,
+        dev,
+        json!({ "payer_kind": "self", "source_of_funds": "employment" }),
+    )
+    .await;
+    set_payment_route(&app, dev, "Commerzbank AG", "DE").await;
+    screen_queue(&app).await;
+    let record = gmed_server::sanctions::screening::bank_subjects(
+        dev,
+        &[json!({ "payer_kind": "self", "bank_name": "Commerzbank AG", "account_country": "DE" })],
+    )
+    .remove(0);
+    let fingerprint = gmed_server::sanctions::screening::subject_fingerprint(&record.subject);
+    let dev_hit: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO sanctions_hits
+               (subject_kind, lead_id, subject_ref, subject_snapshot, subject_fingerprint,
+                list_version_id, list_logical_id, list_entry, entry_fingerprint, score,
+                match_details)
+           SELECT subject_kind, $2, subject_ref,
+                  jsonb_set(subject_snapshot, '{last_name}', to_jsonb('Commerzbank AG'::text)),
+                  $3, list_version_id, list_logical_id, list_entry, entry_fingerprint, 0.91,
+                  match_details
+           FROM sanctions_hits WHERE id = $1::uuid
+           RETURNING id"#,
+    )
+    .bind(&unchanged_hit)
+    .bind(dev)
+    .bind(&fingerprint)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let held: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sanctions_hits WHERE lead_id = $1 AND status = 'open'",
+    )
+    .bind(dev)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(held, 1);
+    let queued = gmed_server::sanctions::screening::enqueue_open_hit_owners(app.pool())
+        .await
+        .unwrap();
+    assert!(queued >= 1);
+    assert!(lead_is_queued(&app, dev).await);
+    // Idempotent: queueing again adds nothing new.
+    gmed_server::sanctions::screening::enqueue_open_hit_owners(app.pool())
+        .await
+        .unwrap();
+    screen_queue(&app).await;
+    let status: String = sqlx::query_scalar("SELECT status FROM sanctions_hits WHERE id = $1")
+        .bind(dev_hit)
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(status, "no_longer_matches");
+    let (_, body) = qualify(&app, dev).await;
+    assert!(not_a_gate_block(&body), "{body}");
+    // The startup re-screen leaves the changed subject's hold alone.
+    assert_eq!(hit_of(&app, renamed).await.1, "open");
+
+    // The bank listed again under its name: a new open hit, the closed one
+    // stays as history.
+    let (code, body) = upload_list(
+        &app,
+        &app.ceo(),
+        &bank_list_version("2026-10-30T18:00:00.000+02:00", "990004", false),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let statuses: Vec<String> = sqlx::query_scalar(
+        "SELECT status FROM sanctions_hits WHERE lead_id = $1 ORDER BY created_at",
+    )
+    .bind(unchanged)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(statuses, vec!["no_longer_matches", "open"]);
+    assert_eq!(hit_of(&app, cleared).await.1, "false_positive");
+}
+
 /// Step 3 of the cabinet as any writer stores it: the invoice recipient
 /// answers (`lead_invoice_recipients`), the keys of `recipient` only.
 async fn set_recipient(app: &TestApp, lead_id: Uuid, recipient: Value) {

@@ -233,7 +233,9 @@ export function HitCard({
         ) : null}
       </header>
 
-      {!hit.still_matches ? <Banner tone="warning">{t.sanctions_no_longer_matches}</Banner> : null}
+      {!hit.still_matches && hit.status !== "no_longer_matches" ? (
+        <Banner tone="warning">{t.sanctions_no_longer_matches}</Banner>
+      ) : null}
 
       <div className="grid gap-3 rounded-xl bg-muted p-3 lg:grid-cols-2">
         <section className="min-w-0 space-y-3 rounded-lg border border-border/50 bg-card p-3">
@@ -338,6 +340,13 @@ export function HitCard({
             </p>
           ) : null}
         </div>
+      ) : hit.status === "no_longer_matches" ? (
+        // Closed by re-screening itself (owner 2026-11-16): no CEO decision.
+        <p className="text-xs text-muted-foreground" data-testid="sanctions-hit-auto-closed">
+          {formatUiText(t.sanctions_auto_closed, {
+            date: hit.decided_at ? formatAppDateTime(hit.decided_at) : "",
+          })}
+        </p>
       ) : (
         <p className="text-xs text-muted-foreground">
           {formatUiText(t.sanctions_decided_by, {
@@ -385,12 +394,13 @@ function HitsTab({
     setError("");
     try {
       if (status === "decided") {
-        const [falsePositives, confirmed] = await Promise.all([
+        const [falsePositives, confirmed, closed] = await Promise.all([
           sanctionsApi.hits("false_positive"),
           sanctionsApi.hits("confirmed"),
+          sanctionsApi.hits("no_longer_matches"),
         ]);
         setHits(
-          [...confirmed.hits, ...falsePositives.hits].sort((left, right) =>
+          [...confirmed.hits, ...falsePositives.hits, ...closed.hits].sort((left, right) =>
             (right.decided_at ?? "").localeCompare(left.decided_at ?? ""),
           ),
         );

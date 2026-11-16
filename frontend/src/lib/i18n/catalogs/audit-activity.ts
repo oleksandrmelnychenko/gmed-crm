@@ -304,6 +304,10 @@ const ACTIONS: Record<string, Pair> = {
   ],
   sanctions_hit_created: ["Возможное совпадение с санкционным списком", "Möglicher Treffer auf der Sanktionsliste"],
   sanctions_hit_decided: ["Решение по совпадению принято", "Entscheidung zum Treffer getroffen"],
+  sanctions_hit_auto_closed: [
+    "Совпадение закрыто автоматически: больше не совпадает",
+    "Treffer automatisch geschlossen: kein Treffer mehr",
+  ],
   sanctions_list_imported: ["Санкционный список загружен", "Sanktionsliste geladen"],
   sanctions_list_refresh_requested: ["Запрошено обновление санкционного списка", "Aktualisierung der Sanktionsliste angefordert"],
   sanctions_blocked_countries_updated: ["Список запрещённых стран изменён", "Liste gesperrter Länder geändert"],

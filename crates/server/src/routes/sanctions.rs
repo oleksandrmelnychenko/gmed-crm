@@ -499,7 +499,7 @@ async fn list_hits(
     let status = query.status.unwrap_or_else(|| "open".to_string());
     if !matches!(
         status.as_str(),
-        "open" | "false_positive" | "confirmed" | "all"
+        "open" | "false_positive" | "confirmed" | "no_longer_matches" | "all"
     ) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -521,7 +521,8 @@ async fn list_hits(
         let counts = sqlx::query(
             r#"SELECT COUNT(*) FILTER (WHERE status = 'open') AS open,
                       COUNT(*) FILTER (WHERE status = 'false_positive') AS false_positive,
-                      COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed
+                      COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
+                      COUNT(*) FILTER (WHERE status = 'no_longer_matches') AS no_longer_matches
                FROM sanctions_hits"#,
         )
         .fetch_one(&state.db)
@@ -532,6 +533,7 @@ async fn list_hits(
                 "open": counts.try_get::<i64, _>("open")?,
                 "false_positive": counts.try_get::<i64, _>("false_positive")?,
                 "confirmed": counts.try_get::<i64, _>("confirmed")?,
+                "no_longer_matches": counts.try_get::<i64, _>("no_longer_matches")?,
             },
         }))
     }

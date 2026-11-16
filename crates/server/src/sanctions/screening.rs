@@ -1832,6 +1832,30 @@ struct ExistingHit {
     status: String,
     subject_fingerprint: String,
     entry_fingerprint: String,
+    score: f64,
+}
+
+/// Status of an open hit that re-screening closed itself (owner decision
+/// 2026-11-16, QA fix-91): the subject is unchanged, the current matcher and
+/// list no longer find the entry. Not a decision of the CEO.
+pub const HIT_STATUS_NO_LONGER_MATCHES: &str = "no_longer_matches";
+/// `decision_reason` of an automatically closed hit.
+pub const NO_LONGER_MATCHES_REASON: &str =
+    "Automatically closed: the unchanged subject no longer matches the active list";
+
+/// Whether re-screening closes an open hit by itself: the hit is open, its
+/// subject is still there with exactly the data the hit was found with
+/// (`current` = the fingerprint of the subject with the hit's kind and
+/// reference now, `None` when it is gone), and the entry was not found again.
+/// A changed or removed subject keeps its open hit until the CEO decides (QA
+/// 2026-10-12: renaming the payer lifts nothing); decided hits are final.
+pub fn closes_as_no_longer_matching(
+    status: &str,
+    hit_subject_fingerprint: &str,
+    current: Option<&str>,
+    found_again: bool,
+) -> bool {
+    status == "open" && !found_again && current == Some(hit_subject_fingerprint)
 }
 
 /// A hit of one of a patient's leads (converted into the patient or with the
@@ -1905,7 +1929,7 @@ async fn screen_owner(
     let mut tx = state.db.begin().await?;
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT id, subject_kind, subject_ref, list_logical_id, status,
-                  subject_fingerprint, entry_fingerprint
+                  subject_fingerprint, entry_fingerprint, score
            FROM sanctions_hits
            WHERE {owner_column} = $1
            FOR UPDATE"#
@@ -1925,6 +1949,7 @@ async fn screen_owner(
             status: row.try_get("status")?,
             subject_fingerprint: row.try_get("subject_fingerprint")?,
             entry_fingerprint: row.try_get("entry_fingerprint")?,
+            score: row.try_get("score")?,
         });
     }
 
@@ -1988,6 +2013,17 @@ async fn screen_owner(
         .collect(),
     };
 
+    // Every subject screened now, also those without a match: an open hit
+    // closes by itself only while its subject is unchanged.
+    let current_fingerprints: HashMap<(String, String), String> = computed
+        .iter()
+        .map(|(record, _)| {
+            (
+                (record.kind.as_str().to_string(), record.subject_ref.clone()),
+                subject_fingerprint(&record.subject),
+            )
+        })
+        .collect();
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
     let mut new_hits = Vec::new();
     for (record, matches) in computed {
@@ -2112,8 +2148,19 @@ async fn screen_owner(
         }
     }
 
+    let mut auto_closed = 0usize;
     for hit in &existing {
-        if hit.status != "false_positive" && !seen.contains(&hit.key) {
+        let found_again = seen.contains(&hit.key);
+        let current = current_fingerprints
+            .get(&(hit.key.0.clone(), hit.key.1.clone()))
+            .map(String::as_str);
+        if closes_as_no_longer_matching(&hit.status, &hit.subject_fingerprint, current, found_again)
+        {
+            close_no_longer_matching(&mut tx, hit, owner, index.version_id).await?;
+            auto_closed += 1;
+            continue;
+        }
+        if matches!(hit.status.as_str(), "open" | "confirmed") && !found_again {
             sqlx::query(
                 r#"UPDATE sanctions_hits
                    SET still_matches = false, last_screened_at = now(), updated_at = now()
@@ -2121,6 +2168,28 @@ async fn screen_owner(
             )
             .bind(hit.id)
             .execute(&mut *tx)
+            .await?;
+        }
+    }
+    // A patient's closed hit may have held the risk assessment of its leads
+    // (a lead's own screening reassesses it in `screen_lead`).
+    if auto_closed > 0
+        && let Owner::Patient(patient_id) = owner
+    {
+        let leads: Vec<Uuid> = sqlx::query_scalar(
+            r#"SELECT id FROM leads
+               WHERE prospect_patient_id = $1 OR converted_patient_id = $1"#,
+        )
+        .bind(patient_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        for lead_id in leads {
+            crate::risk::store::reassess(
+                &mut tx,
+                lead_id,
+                crate::risk::store::Cause::Screening,
+                None,
+            )
             .await?;
         }
     }
@@ -2133,6 +2202,78 @@ async fn screen_owner(
         list_version_date: Some(index.list_date),
         new_hits,
     })
+}
+
+/// Closes an open hit as [`HIT_STATUS_NO_LONGER_MATCHES`] inside the
+/// screening transaction: the CEO's notification about it is marked read and
+/// one audit event (no actor: the system) records the hit, the list entry
+/// and the old score — nothing about the person beyond what the hit stores.
+async fn close_no_longer_matching(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hit: &ExistingHit,
+    owner: Owner,
+    list_version_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE sanctions_hits
+           SET status = $2, decided_at = now(), decided_by = NULL, decision_reason = $3,
+               still_matches = false, last_screened_at = now(), updated_at = now()
+           WHERE id = $1 AND status = 'open'"#,
+    )
+    .bind(hit.id)
+    .bind(HIT_STATUS_NO_LONGER_MATCHES)
+    .bind(NO_LONGER_MATCHES_REASON)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE user_notifications SET is_read = true WHERE entity_type = $1 AND entity_id = $2",
+    )
+    .bind(HIT_ENTITY_TYPE)
+    .bind(hit.id)
+    .execute(&mut **tx)
+    .await?;
+    let (lead_id, patient_id) = match owner {
+        Owner::Lead(id) => (Some(id), None),
+        Owner::Patient(id) => (None, Some(id)),
+    };
+    audit::write_in_transaction(
+        tx,
+        &audit::domain_event(
+            "sanctions_hit_auto_closed",
+            None,
+            HIT_ENTITY_TYPE,
+            Some(hit.id),
+            json!({
+                "status": HIT_STATUS_NO_LONGER_MATCHES,
+                "subject_kind": hit.key.0,
+                "lead_id": lead_id,
+                "patient_id": patient_id,
+                "list_logical_id": hit.key.2,
+                "list_version_id": list_version_id,
+                "old_score": hit.score,
+            }),
+        ),
+    )
+    .await
+}
+
+/// Queues every lead and patient with an open hit for screening (idempotent).
+/// Called once at every start of the server, so a matcher change of the new
+/// release re-screens the open hits and closes those that no longer match
+/// ([`closes_as_no_longer_matching`]) without waiting for a new list.
+pub async fn enqueue_open_hit_owners(db: &gmed_db::DbPool) -> Result<u64, sqlx::Error> {
+    let queued = sqlx::query(
+        r#"INSERT INTO sanctions_screening_queue (subject_type, subject_id)
+           SELECT DISTINCT 'lead', lead_id FROM sanctions_hits
+           WHERE status = 'open' AND lead_id IS NOT NULL
+           UNION
+           SELECT DISTINCT 'patient', patient_id FROM sanctions_hits
+           WHERE status = 'open' AND patient_id IS NOT NULL
+           ON CONFLICT (subject_type, subject_id) DO NOTHING"#,
+    )
+    .execute(db)
+    .await?;
+    Ok(queued.rows_affected())
 }
 
 /// Tells every active CEO about new possible matches. The notification names
@@ -2269,6 +2410,19 @@ pub async fn process_queue(state: &AppState) -> Result<usize, sqlx::Error> {
 /// Polls the screening queue.
 pub fn spawn_screening_worker(state: AppState) {
     tokio::spawn(async move {
+        // One re-screen of the open hits per start (owner 2026-11-16).
+        match enqueue_open_hit_owners(&state.db).await {
+            Ok(queued) if queued > 0 => {
+                tracing::info!(
+                    queued,
+                    "Open sanctions hits queued for re-screening at start"
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(error = %error, "Queueing open sanctions hits at start failed");
+            }
+        }
         let mut ticker = tokio::time::interval(Duration::from_secs(QUEUE_POLL_SECONDS));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -2299,7 +2453,7 @@ pub async fn rescreen_all(state: &AppState) -> Result<RescreenReport, sqlx::Erro
              AND NOT (first_name = $1 AND last_name = 'Lead')
            UNION
            SELECT DISTINCT lead_id FROM sanctions_hits
-           WHERE lead_id IS NOT NULL AND status <> 'false_positive'"#,
+           WHERE lead_id IS NOT NULL AND status IN ('open', 'confirmed')"#,
     )
     .bind(crate::routes::leads::ANONYMIZED_FIRST_NAME)
     .fetch_all(&state.db)
@@ -2310,7 +2464,7 @@ pub async fn rescreen_all(state: &AppState) -> Result<RescreenReport, sqlx::Erro
              AND NOT (legal_status ? 'anonymized_at')
            UNION
            SELECT DISTINCT patient_id FROM sanctions_hits
-           WHERE patient_id IS NOT NULL AND status <> 'false_positive'"#,
+           WHERE patient_id IS NOT NULL AND status IN ('open', 'confirmed')"#,
     )
     .fetch_all(&state.db)
     .await?;
@@ -2456,6 +2610,21 @@ pub async fn purge_for_patient_in_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_open_hit_of_an_unchanged_subject_closes_by_itself() {
+        let close = closes_as_no_longer_matching;
+        assert!(close("open", "fp", Some("fp"), false));
+        // Found again, changed, gone: the hit stays open.
+        assert!(!close("open", "fp", Some("fp"), true));
+        assert!(!close("open", "fp", Some("other"), false));
+        assert!(!close("open", "fp", None, false));
+        // Decided hits are final.
+        for status in ["false_positive", "confirmed", HIT_STATUS_NO_LONGER_MATCHES] {
+            assert!(!close(status, "fp", Some("fp"), false), "{status}");
+        }
+        assert!(NO_LONGER_MATCHES_REASON.trim().chars().count() >= 10);
+    }
 
     #[test]
     fn guardian_relations_are_recognised_in_all_staff_languages() {

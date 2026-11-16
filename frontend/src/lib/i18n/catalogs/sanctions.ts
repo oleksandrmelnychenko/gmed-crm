@@ -15,6 +15,8 @@ export interface SanctionsTranslations {
   sanctions_status_open: string;
   sanctions_status_false_positive: string;
   sanctions_status_confirmed: string;
+  sanctions_status_no_longer_matches: string;
+  sanctions_auto_closed: string;
   sanctions_kind_lead_patient: string;
   sanctions_kind_lead_guardian: string;
   sanctions_kind_lead_payer: string;
@@ -177,6 +179,8 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_status_open: "Открыто",
   sanctions_status_false_positive: "Ложное совпадение",
   sanctions_status_confirmed: "Подтверждено",
+  sanctions_status_no_longer_matches: "Больше не совпадает (автоматически)",
+  sanctions_auto_closed: "Закрыто автоматически {date}: данные не менялись, совпадение с текущим списком больше не находится",
   sanctions_kind_lead_patient: "Пациент (лид)",
   sanctions_kind_lead_guardian: "Родитель / опекун",
   sanctions_kind_lead_payer: "Плательщик",
@@ -339,6 +343,8 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_status_open: "Offen",
   sanctions_status_false_positive: "Falsch positiv",
   sanctions_status_confirmed: "Bestätigt",
+  sanctions_status_no_longer_matches: "Kein Treffer mehr (automatisch)",
+  sanctions_auto_closed: "Automatisch geschlossen am {date}: unveränderte Daten, mit der aktuellen Liste kein Treffer mehr",
   sanctions_kind_lead_patient: "Patient (Lead)",
   sanctions_kind_lead_guardian: "Elternteil / Vormund",
   sanctions_kind_lead_payer: "Zahler",

@@ -147,6 +147,7 @@ export function hitStatusLabel(status: SanctionsHit["status"], t: Translations):
     open: t.sanctions_status_open,
     false_positive: t.sanctions_status_false_positive,
     confirmed: t.sanctions_status_confirmed,
+    no_longer_matches: t.sanctions_status_no_longer_matches,
   }[status];
 }
 
