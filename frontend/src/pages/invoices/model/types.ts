@@ -151,6 +151,8 @@ export type InvoicePaymentTransaction = {
   created_by_name?: string;
   created_by_role?: string;
   created_at: string;
+  /** VAT split set by hand on a payment of an advance (staff view). */
+  category_split?: { kind: string; vat_rate: string; amount_gross: string }[] | null;
 };
 
 export type InvoicePaymentHistoryResponse = {

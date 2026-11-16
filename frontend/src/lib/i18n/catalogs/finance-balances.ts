@@ -117,7 +117,7 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_credit_note_error_vat_rate_exceeded: "Сумма превышает остаток по этой ставке НДС.",
   finance_credit_note_limit: "Можно скорректировать по счёту: {amount}",
   finance_credit_note_limit_applied_advance:
-    "Можно скорректировать: {amount}. Этот аванс зачтён в финальный счёт: сначала снимите зачёт в финальном счёте или скорректируйте финальный счёт кредит-нотой.",
+    "Можно скорректировать: {amount}. Этот аванс зачтён в финальный счёт: сначала сторнируйте финальный счёт или скорректируйте его кредит-нотой.",
   finance_credit_note_error_limit_exceeded: "Сумма больше, чем можно скорректировать по счёту ({amount}).",
   finance_credit_note_empty: "Кредит-нот пока нет.",
   finance_credit_note_visible_in_portal: "Видно в портале",
@@ -208,7 +208,7 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
     "Der Betrag übersteigt den offenen Betrag dieses Steuersatzes.",
   finance_credit_note_limit: "Insgesamt korrigierbar: {amount}",
   finance_credit_note_limit_applied_advance:
-    "Korrigierbar: {amount}. Diese Anzahlung ist in die Schlussrechnung angerechnet: Heben Sie zuerst die Anrechnung in der Schlussrechnung auf oder korrigieren Sie die Schlussrechnung per Gutschrift.",
+    "Korrigierbar: {amount}. Diese Anzahlung ist in die Schlussrechnung angerechnet: Stornieren Sie zuerst die Schlussrechnung oder korrigieren Sie sie per Gutschrift.",
   finance_credit_note_error_limit_exceeded:
     "Der Betrag übersteigt den korrigierbaren Betrag der Rechnung ({amount}).",
   finance_credit_note_empty: "Keine Rechnungskorrekturen.",

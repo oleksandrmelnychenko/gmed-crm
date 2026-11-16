@@ -112,6 +112,7 @@ import {
   paymentSplitOffered,
   paymentSplitPayload,
   paymentSplitProblem,
+  paymentSplitSummary,
   type PaymentSplitValues,
 } from "./model/payment-split";
 import { CreditNoteForm, CreditNoteLinesSummary } from "./ui/credit-note-form";
@@ -3510,8 +3511,8 @@ function useStaffInvoicesPageContent() {
                     {detail.invoice_type === "advance" && detail.advance_settlement ? (
                       <ShellBanner tone="warning">
                         {lang === "de"
-                          ? `Diese Anzahlung rechnet die Schlussrechnung ${detail.advance_settlement.final_invoice_number} ab. Neue Zahlungen bitte auf die Schlussrechnung buchen; hier gebucht werden sie Guthaben des Patienten.`
-                          : `Этот аванс закрыт финальным счётом ${detail.advance_settlement.final_invoice_number}. Новые оплаты записывайте на финальный счёт; записанные здесь, они станут переплатой пациента.`}
+                          ? `Diese Anzahlung rechnet die Schlussrechnung ${detail.advance_settlement.final_invoice_number} ab. Neue Zahlungen bitte auf die Schlussrechnung buchen.`
+                          : `Этот аванс закрыт финальным счётом ${detail.advance_settlement.final_invoice_number}. Новые оплаты записывайте на финальный счёт.`}
                       </ShellBanner>
                     ) : null}
 
@@ -3553,7 +3554,10 @@ function useStaffInvoicesPageContent() {
                     {/* Receipts are recorded also on settled invoices: money that
                         arrives twice becomes the patient's credit balance. */}
                     {access.canManage &&
-                    !["draft", "cancelled"].includes(detail.status) ? (
+                    !["draft", "cancelled"].includes(detail.status) &&
+                    // An advance settled by its final takes no new receipts
+                    // here (QA 2026-11-16 S3-5).
+                    !(detail.invoice_type === "advance" && detail.advance_settlement) ? (
                       <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
                         <Field label={text.paymentAmount}>
                           <MoneyInput
@@ -3770,6 +3774,11 @@ function useStaffInvoicesPageContent() {
                                   {payment.payer_name ? (
                                     <div className="mt-1 text-xs text-foreground [overflow-wrap:anywhere]">
                                       {lang === "de" ? "Zahler" : "Плательщик"}: {payment.payer_name}
+                                    </div>
+                                  ) : null}
+                                  {paymentSplitSummary(payment.category_split, lang, detail?.currency) ? (
+                                    <div className="mt-1 text-xs text-muted-foreground" data-testid="payment-category-split-summary">
+                                      {lang === "de" ? "Aufteilung" : "Распределение"}: {paymentSplitSummary(payment.category_split, lang, detail?.currency)}
                                     </div>
                                   ) : null}
                                   {payment.payment_method === CREDIT_TRANSFER_METHOD ? (
@@ -5363,7 +5372,11 @@ function useStaffInvoicesPageContent() {
                       <option
                         key={status}
                         value={status}
-                        disabled={!detail || !canPickInvoiceStatus(detail.status, status)}
+                        disabled={
+                          !detail
+                          || !(canPickInvoiceStatus(detail.status, status)
+                            || (status === "cancelled" && canStornoInvoice(detail)))
+                        }
                       >
                         {invoiceStatusLabel(status)}
                       </option>

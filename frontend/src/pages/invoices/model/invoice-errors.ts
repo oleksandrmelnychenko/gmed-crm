@@ -203,16 +203,16 @@ const EXACT: Record<string, Pair> = {
     "Этот возврат — перенос переплаты: сторнируйте перенос.",
   ],
   "applied advances must be released before this payment can be corrected": [
-    "Vor der Korrektur die angerechneten Vorauszahlungen dieser Anzahlung freigeben.",
-    "Перед исправлением снимите зачёт этого аванса в других счетах.",
+    "Vor der Korrektur die Schlussrechnung stornieren, in die diese Anzahlung angerechnet ist.",
+    "Перед исправлением сторнируйте финальный счёт, в который зачтён этот аванс.",
   ],
   "refunds and applied advances must be reversed or released before this payment can be reduced": [
-    "Vor dem Verringern Erstattungen stornieren und angerechnete Vorauszahlungen freigeben.",
-    "Перед уменьшением платежа сторнируйте возвраты и снимите зачёт аванса.",
+    "Vor dem Verringern Erstattungen und die Schlussrechnung mit der Anrechnung stornieren.",
+    "Перед уменьшением платежа сторнируйте возвраты и финальный счёт, в который зачтён аванс.",
   ],
   "refunds and applied advances must be reversed or released before this payment can be reversed": [
-    "Vor dem Storno Erstattungen stornieren und angerechnete Vorauszahlungen freigeben.",
-    "Перед сторно платежа сторнируйте возвраты и снимите зачёт аванса.",
+    "Vor dem Storno Erstattungen und die Schlussrechnung mit der Anrechnung stornieren.",
+    "Перед сторно платежа сторнируйте возвраты и финальный счёт, в который зачтён аванс.",
   ],
   "refunds and applied advances of the target invoice must be reversed first": [
     "Zuerst Erstattungen und angerechnete Vorauszahlungen der Zielrechnung zurücknehmen.",

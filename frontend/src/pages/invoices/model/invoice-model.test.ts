@@ -17,6 +17,7 @@ import {
   formatDateTime,
   canEditInvoiceDueDate,
   canPickInvoiceStatus,
+  canStornoInvoice,
   defaultReleaseDueDate,
   dunningLetterFileName,
   invoiceDisplayNumber,
@@ -699,5 +700,28 @@ describe("prepayment advance invoices", () => {
   it("hits the agreed gross with a cent-exact net", () => {
     expect(netForGross(150, 19)).toBe(126.05);
     expect(netForGross(550, 0)).toBe(550);
+  });
+});
+
+describe("canStornoInvoice", () => {
+  const released = "2026-11-16T10:00:00Z";
+  const base = { released_at: released, paid_amount: "0", credited_amount: "0", prepayment_applied_amount: "0" };
+
+  it("offers the Storno of a final whose advances settled it, also when paid", () => {
+    for (const status of ["sent", "partially_paid", "paid", "overdue"]) {
+      expect(
+        canStornoInvoice({ ...base, status, invoice_type: "final", prepayment_applied_amount: "1700.00" }),
+      ).toBe(true);
+    }
+  });
+
+  it("refuses it with cash or credit notes, and for other invoices with applied prepayment", () => {
+    const final = { ...base, status: "partially_paid", invoice_type: "final", prepayment_applied_amount: "1700.00" };
+    expect(canStornoInvoice({ ...final, paid_amount: "10.00" })).toBe(false);
+    expect(canStornoInvoice({ ...final, credited_amount: "10.00" })).toBe(false);
+    expect(canStornoInvoice({ ...final, invoice_type: "interim" })).toBe(false);
+    expect(canStornoInvoice({ ...base, status: "paid", invoice_type: "final" })).toBe(false);
+    expect(canStornoInvoice({ ...base, status: "sent", invoice_type: "standard" })).toBe(true);
+    expect(canStornoInvoice({ ...base, status: "draft", released_at: null, invoice_type: "final" })).toBe(false);
   });
 });

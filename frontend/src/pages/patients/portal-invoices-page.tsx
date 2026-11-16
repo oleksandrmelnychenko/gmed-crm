@@ -1288,6 +1288,9 @@ function usePatientInvoicesPageContent() {
                   </section>
                 ) : null}
 
+                {/* Nothing to pay and nothing uploaded (e.g. a final settled
+                    by advances): no empty proof section (QA 2026-11-16 S3-4). */}
+                {portalInvoiceNothingToPay(detail) && !(Number(detail.payment_proof_count ?? 0) > 0) ? null : (
                 <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -1330,6 +1333,7 @@ function usePatientInvoicesPageContent() {
                     />
                   </div>
                 </section>
+                )}
 
                 <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>

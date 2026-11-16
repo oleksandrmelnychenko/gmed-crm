@@ -131,17 +131,21 @@ export function isInvoiceReleased(invoice: Pick<InvoiceItem, "released_at" | "st
 
 /**
  * Whether an issued invoice can still be cancelled by Storno: the server
- * refuses it once payments, applied prepayments or credit notes are booked
- * on it; then a full credit note corrects it (QA 2026-11-15, A-2).
+ * refuses it once payments or credit notes are booked on it; then a full
+ * credit note corrects it (QA 2026-11-15, A-2). A final invoice's Storno
+ * releases the advances it deducted, also once they settled it in full
+ * (QA 2026-11-16 S2-2); other invoices with applied prepayment are refused.
  */
 export function canStornoInvoice(
-  invoice: Pick<InvoiceItem, "released_at" | "status" | "paid_amount" | "credited_amount" | "prepayment_applied_amount">,
+  invoice: Pick<
+    InvoiceItem,
+    "released_at" | "status" | "paid_amount" | "credited_amount" | "prepayment_applied_amount" | "invoice_type"
+  >,
 ) {
-  if (!isInvoiceReleased(invoice) || !canPickInvoiceStatus(invoice.status, "cancelled")) return false;
-  if (invoice.status === "cancelled") return false;
-  return [invoice.paid_amount, invoice.credited_amount, invoice.prepayment_applied_amount].every(
-    (value) => !(Number(value ?? 0) > 0),
-  );
+  if (!isInvoiceReleased(invoice) || invoice.status === "cancelled" || invoice.status === "draft") return false;
+  if ([invoice.paid_amount, invoice.credited_amount].some((value) => Number(value ?? 0) > 0)) return false;
+  if (Number(invoice.prepayment_applied_amount ?? 0) > 0) return invoice.invoice_type === "final";
+  return canPickInvoiceStatus(invoice.status, "cancelled");
 }
 
 /** The invoice number, or the draft label for an invoice not released yet. */

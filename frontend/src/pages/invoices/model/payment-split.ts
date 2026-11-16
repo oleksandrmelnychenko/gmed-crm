@@ -4,7 +4,7 @@
  * validates the same rules (sum = payment, no negative part, no part above
  * what its category has open).
  */
-import { roundCents, toCents } from "@/lib/money";
+import { formatMoneyLabel, moneyInputText, parseMoneyInput, roundCents, toCents } from "@/lib/money";
 
 import type { AdvanceCategory } from "./types";
 
@@ -47,7 +47,7 @@ export function proRataSplit(categories: AdvanceCategory[] | undefined, amount: 
       ? left
       : roundCents((amount * Number(category.open_gross)) / total);
     left = roundCents(left - share);
-    values[categoryKey(category)] = share.toFixed(2);
+    values[categoryKey(category)] = moneyInputText(share);
   });
   return values;
 }
@@ -62,8 +62,8 @@ export function paymentSplitProblem(
   const de = lang === "de";
   let sum = 0;
   for (const category of openCategories(categories)) {
-    const raw = (values[categoryKey(category)] ?? "").replace(",", ".").trim();
-    const value = raw === "" ? 0 : Number(raw);
+    const raw = (values[categoryKey(category)] ?? "").trim();
+    const value = raw === "" ? 0 : parseMoneyInput(raw);
     if (!Number.isFinite(value) || value < 0) {
       return de ? "Ein Anteil ist ungültig." : "Доля указана неверно.";
     }
@@ -83,6 +83,27 @@ export function paymentSplitPayload(categories: AdvanceCategory[] | undefined, v
   return openCategories(categories).map((category) => ({
     kind: category.kind,
     vat_rate: category.kind === "taxed" ? category.vat_rate : "0",
-    amount_gross: roundCents(Number((values[categoryKey(category)] ?? "0").replace(",", ".")) || 0).toFixed(2),
+    amount_gross: roundCents(parseMoneyInput(values[categoryKey(category)] || "0") || 0).toFixed(2),
   }));
+}
+
+/** A VAT split staff set by hand on a recorded payment, as the server lists it. */
+export type PaymentCategorySplitPart = { kind: string; vat_rate: string; amount_gross: string };
+
+/** The split of a recorded payment in one short line: «19 % 50,00 € · 0 % 150,00 €». */
+export function paymentSplitSummary(
+  split: PaymentCategorySplitPart[] | null | undefined,
+  lang: string,
+  currency?: string | null,
+): string | null {
+  const parts = (split ?? []).filter((part) => toCents(Number(part.amount_gross)) > 0);
+  if (parts.length === 0) return null;
+  return parts
+    .map((part) => {
+      const name = part.kind === "passthrough"
+        ? (lang === "de" ? "Auslagen" : "Расходы")
+        : `${Number(part.kind === "taxed" ? part.vat_rate : 0)} %`;
+      return `${name} ${formatMoneyLabel(part.amount_gross, currency)}`;
+    })
+    .join(" · ");
 }
