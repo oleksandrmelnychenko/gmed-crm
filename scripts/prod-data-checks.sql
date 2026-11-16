@@ -968,5 +968,22 @@ WHERE r.revoked_at IS NULL AND r.effect = 'allow'
        OR (r.scope_type = 'record' AND d.is_medical));
 
 -- =============================================================================
+-- [INFO] Mail delivery state (no addresses, no content): is the mail
+-- connection on, and how did the last payer-link mails go (2026-11-16: a payer
+-- saw «не вдалося надіслати лист із кодом»).
+-- =============================================================================
+SELECT 'I01_mail_connection' AS check_id, enabled,
+       (ciphertext IS NOT NULL) AS has_key, (sender IS NOT NULL AND sender <> '') AS has_sender,
+       revision IS NOT NULL AS has_revision
+FROM mail_provider_connection WHERE singleton;
+
+SELECT 'I02_payer_link_mails_14d' AS check_id, kind, status, coalesce(error_code, '-') AS error_code,
+       count(*) AS n, max(created_at) AS last_at
+FROM lead_payer_link_emails
+WHERE created_at > now() - interval '14 days'
+GROUP BY kind, status, coalesce(error_code, '-')
+ORDER BY last_at DESC;
+
+-- =============================================================================
 -- End. Expected: n = 0 for every [BUG] check.
 -- =============================================================================
