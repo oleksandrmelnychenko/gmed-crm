@@ -165,6 +165,25 @@ AS $$
                              jsonb_build_object('source_order_leistung_id', service.id::text)
                          )
                      )
+               ), '[]'::jsonb),
+               -- Invoices that billed it and are credited in full: billable again.
+               'credited_invoice_ids', COALESCE((
+                   SELECT jsonb_agg(DISTINCT invoice.id)
+                   FROM invoices invoice
+                   WHERE invoice.order_id = service.order_id
+                     AND invoice.status <> 'cancelled'
+                     AND invoice.total_gross > 0
+                     AND invoice.credited_amount >= invoice.total_gross
+                     AND (
+                         EXISTS (
+                             SELECT 1 FROM invoice_order_line_allocations allocation
+                             WHERE allocation.invoice_id = invoice.id
+                               AND allocation.order_leistung_id = service.id
+                         )
+                         OR invoice.line_items @> jsonb_build_array(
+                             jsonb_build_object('source_order_leistung_id', service.id::text)
+                         )
+                     )
                ), '[]'::jsonb)
            ) ORDER BY service.created_at, service.id), '[]'::jsonb)
     FROM order_leistungen service

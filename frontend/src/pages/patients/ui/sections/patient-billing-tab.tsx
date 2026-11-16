@@ -25,6 +25,7 @@ import {
 } from "@/pages/invoices/model/billing-release";
 import { INVOICE_LINE_COMMENT_MAX_LENGTH, isOverageOnlyInvoice, isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
+import { finalLineAmounts, finalServiceAmounts } from "@/pages/invoices/model/final-invoice";
 import { PatientTerminationSettlements } from "@/pages/invoices/termination-settlement/ui";
 import { doubleBillingWarnings, proposedOrderForExpense } from "./patient-billing-double-billing";
 import {
@@ -127,9 +128,17 @@ type CreatedInvoice = { id: string; invoice_number: string };
 
 const checkboxClass = "size-4 rounded border-border accent-[var(--brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-function availableQuantity(line: InvoiceLineItem) {
-  const value = Number(line.remaining_quantity ?? line.quantity);
+function availableQuantity(line: InvoiceLineItem, invoiceType: InvoiceType = "interim") {
+  // A final invoice bills the delivered quantity, above or below the quote (owner 2026-11-17).
+  const value = Number(invoiceType === "final" ? line.final_quantity ?? line.remaining_quantity ?? line.quantity : line.remaining_quantity ?? line.quantity);
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function lineGross(line: InvoiceLineItem, invoiceType: InvoiceType) {
+  const quantity = availableQuantity(line, invoiceType);
+  return invoiceType === "final"
+    ? finalLineAmounts(line, quantity).gross
+    : quantity * Number(line.line_gross || 0) / Math.max(Number(line.quantity || 1), 1);
 }
 
 export function PatientBillingTab({ patientId }: { patientId: string }) {
@@ -325,15 +334,17 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     });
   }, [activeCurrency, orderId, quoteId, quotes, workspace, selectedExpenses]);
 
+  // Delivered services outside the estimate go on the final invoice too.
+  const finalExtras = invoiceType === "final" ? quote?.delivered_services_outside_quote ?? [] : [];
   const serviceTotal = selectedLines.reduce((sum, index) => {
     const line = serviceLines[index];
-    return sum + (line ? availableQuantity(line) * Number(line.line_gross || 0) / Math.max(Number(line.quantity || 1), 1) : 0);
-  }, 0);
+    return sum + (line ? lineGross(line, invoiceType) : 0);
+  }, 0) + finalExtras.reduce((sum, extra) => sum + finalServiceAmounts(extra, Number(extra.quantity)).gross, 0);
   const expenseTotal = readyExpenses.filter(expense => selectedExpenses.includes(expense.id))
     .reduce((sum, expense) => sum + Number(expense.remaining_receivable_gross || 0), 0);
   // The approved overage the server adds to the invoice of the last open lines.
   const billsAllOpenLines = selectedLines.length > 0
-    && serviceLines.every((line, index) => availableQuantity(line) <= 0 || selectedLines.includes(index));
+    && serviceLines.every((line, index) => availableQuantity(line, invoiceType) <= 0 || selectedLines.includes(index));
   // Every line is billed: an interim invoice bills the overage alone (QA 2026-11-01, X3 NEW-1).
   const overageOnly = isOverageOnlyInvoice(quote, { invoiceType: "interim" });
   const overageTotal = billsAllOpenLines || overageOnly ? Number(quote?.open_package_overage_gross ?? 0) : 0;
@@ -353,7 +364,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   function selectQuote(nextId: string) {
     const next = orderQuotes.find(item => item.id === nextId) ?? null;
     setQuoteId(next?.id ?? "");
-    setSelectedLines(next ? next.line_items.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0) : []);
+    setSelectedLines(next ? next.line_items.map((line, index) => availableQuantity(line, invoiceType) > 0 ? index : -1).filter(index => index >= 0) : []);
     setLineComments({});
     setCreated(null);
   }
@@ -378,10 +389,13 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           due_date: dueDate || null,
           line_items: billedQuote && !overageOnly ? selectedLines.map(line_index => {
             const comment = (lineComments[line_index] ?? "").trim();
-            return { line_index, quantity: String(availableQuantity(serviceLines[line_index])), ...(comment ? { comment } : {}) };
+            return { line_index, quantity: String(availableQuantity(serviceLines[line_index], invoiceType)), ...(comment ? { comment } : {}) };
           }) : null,
           external_invoice_ids: selectedExpenses,
           concierge_service_ids: billableConciergeIds,
+          ...(billedQuote && invoiceType === "final"
+            ? { order_services: finalExtras.map(extra => ({ order_leistung_id: extra.order_leistung_id, quantity: extra.quantity })) }
+            : {}),
         }),
       });
       setCreated(invoice);
@@ -583,7 +597,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); setProposedOrderId(null); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setSelectedConcierge([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : copy.orderStatus[item.status] ?? item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.currency}><NativeComboboxSelect value={activeCurrency} disabled={Boolean(order) || busy || saving} onChange={event => { setBillingCurrency(event.target.value); setSelectedExpenses([]); setCreated(null); }}>{currencyOptions.map(currency => <option key={currency} value={currency}>{currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.quote}><NativeComboboxSelect value={quoteId || "__empty__"} disabled={!order || busy || saving} onChange={event => selectQuote(event.target.value === "__empty__" ? "" : event.target.value)}><option value="__empty__">{copy.noQuote}</option>{orderQuotes.map(item => <option key={item.id} value={item.id}>{item.quote_number}</option>)}</NativeComboboxSelect></Field>
-          <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
+          <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line, value) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
           <Field label={copy.due}><ReleaseDueDateField ariaLabel={copy.due} disabled={saving} value={dueDate} onChange={setDueDate} /></Field>
         </div>
         {error ? <Banner tone="error">{error}</Banner> : null}
@@ -594,19 +608,24 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
         <section className="overflow-hidden rounded-xl border border-border/70">
           <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle icon={BriefcaseMedical}>{copy.services}</AdminSectionTitle></div>
-          {!quote || !serviceLines.some(line => availableQuantity(line) > 0) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{!order ? copy.noOrderForQuote : !quote ? (orderQuotes.length > 0 ? copy.selectQuote : copy.noOrderQuotes) : copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</>}</p> : <div className="divide-y divide-border/60">
+          {!quote || (!serviceLines.some(line => availableQuantity(line, invoiceType) > 0) && !finalExtras.length) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{!order ? copy.noOrderForQuote : !quote ? (orderQuotes.length > 0 ? copy.selectQuote : copy.noOrderQuotes) : copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</>}</p> : <div className="divide-y divide-border/60">
             {serviceLines.map((line, index) => {
-              const available = availableQuantity(line);
+              const available = availableQuantity(line, invoiceType);
               if (available <= 0) return null;
               const checked = selectedLines.includes(index);
               return <div key={`${quote.id}-${index}`} className={cn(!checked && "bg-muted/15")}><label className="grid cursor-pointer grid-cols-[1.25rem_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3">
                 <input className={checkboxClass} type="checkbox" checked={checked} disabled={saving || invoiceType === "final"} onChange={event => setSelectedLines(current => event.target.checked ? [...current, index] : current.filter(value => value !== index))} />
                 <span className="min-w-0"><span className="block text-sm font-medium">{line.description}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBillingQuantity(available)} × {formatMoneyAmount(line.unit_price, activeCurrency)} · {de ? "MwSt." : "НДС"} {line.vat_rate}%</span></span>
-                <span className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums">{formatMoneyAmount(String(available * Number(line.line_gross || 0) / Math.max(Number(line.quantity || 1), 1)), activeCurrency)}</span>
+                <span className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums">{formatMoneyAmount(String(lineGross(line, invoiceType)), activeCurrency)}</span>
               </label>
                 {checked ? <label className="block space-y-1 px-4 pb-3 pl-[2.75rem] text-xs text-muted-foreground"><span>{copy.comment}</span><Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={saving} aria-label={`${copy.comment}: ${line.description}`} placeholder={copy.commentHint} value={lineComments[index] ?? ""} onChange={event => setLineComments(current => ({ ...current, [index]: event.target.value }))} /></label> : null}
               </div>;
             })}
+            {finalExtras.map(extra => <div key={extra.order_leistung_id} data-testid="patient-billing-final-extra" className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3">
+              <span />
+              <span className="min-w-0"><span className="block text-sm font-medium">{extra.description}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBillingQuantity(Number(extra.quantity))} × {formatMoneyAmount(extra.unit_price, activeCurrency)} · {de ? "MwSt." : "НДС"} {extra.vat_rate}% · {de ? "nicht im Angebot" : "вне сметы"}</span></span>
+              <span className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums">{formatMoneyAmount(String(finalServiceAmounts(extra, Number(extra.quantity)).gross), activeCurrency)}</span>
+            </div>)}
           </div>}
         </section>
 

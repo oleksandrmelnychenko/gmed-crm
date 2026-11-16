@@ -1207,3 +1207,100 @@ async fn advances_above_a_smaller_final_invoice_are_previewed_and_the_rest_stays
         "{closed:?}"
     );
 }
+
+#[tokio::test]
+async fn a_credited_final_above_the_quote_gives_back_its_lines_and_services() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case(&ctx, &ceo, 3).await;
+    report_hours(&ctx, &ceo, &case, 5.0, 1).await;
+    let transfer_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               status, delivered_at, approved_at
+           ) VALUES ($1, $2, 'Zusatztransfer Klinik', 1, 80, 'EUR', 19, 'approved', now(), now())
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let body = json!({
+        "invoice_type": "final",
+        "line_items": [{ "line_index": 0, "quantity": 5 }],
+        "order_services": [{ "order_leistung_id": transfer_id, "quantity": 1 }],
+    });
+    let (status, first) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{first:?}");
+    let first_id = first["id"].as_str().unwrap().to_string();
+    release_invoice(&ctx, &ceo, &first_id).await;
+    assert_eq!(service_status(&ctx.pool, transfer_id).await, "invoiced");
+
+    let (status, credit) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{first_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": money(&first["total_gross"]),
+            "reason": "Falsche Rechnung",
+            "issued_on": gmed_server::app_time::today().to_string(),
+            "portal_visible": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
+    let credit_id = credit["credit_note_transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // The quote and the service outside it are open again.
+    let quote = get_quote(&ctx, &ceo, &case.quote_id).await;
+    assert_eq!(
+        money(&quote["line_items"][0]["final_quantity"]),
+        Decimal::from(5)
+    );
+    assert_eq!(
+        quote["delivered_services_outside_quote"][0]["order_leistung_id"],
+        transfer_id.to_string(),
+        "{quote:?}"
+    );
+    let (status, second) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second:?}");
+    assert_eq!(money(&second["total_gross"]), money(&first["total_gross"]));
+
+    // Reversing the credit note now would bill the hours twice.
+    let (status, refused) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{first_id}/credit-notes/{credit_id}/reversal"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "reason": "Irrtum",
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
+    assert_eq!(refused["error"], "credit_note_rebilled");
+}

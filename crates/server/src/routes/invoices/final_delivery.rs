@@ -48,6 +48,8 @@ pub(crate) struct OrderServiceFact {
     pub is_cost_passthrough: bool,
     /// Active settlement invoices that bill the service (allocation or line).
     pub billing_invoice_ids: Vec<Uuid>,
+    /// Invoices that billed the service and are credited in full.
+    pub credited_invoice_ids: Vec<Uuid>,
 }
 
 impl OrderServiceFact {
@@ -56,9 +58,10 @@ impl OrderServiceFact {
         matches!(self.status.as_str(), "delivered" | "approved" | "invoiced")
     }
 
-    /// Billed by an active invoice other than `editing`.
+    /// Billed by an active invoice other than `editing`. An `invoiced`
+    /// service whose invoices are all credited in full is billable again.
     pub fn billed_besides(&self, editing: Option<Uuid>) -> bool {
-        self.status == "invoiced"
+        (self.status == "invoiced" && self.credited_invoice_ids.is_empty())
             || self
                 .billing_invoice_ids
                 .iter()
@@ -93,6 +96,14 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                     .unwrap_or_default()
                     .to_string()
             };
+            let ids = |key: &str| {
+                item.get(key)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|id| json_uuid(Some(id)))
+                    .collect::<Vec<_>>()
+            };
             Some(OrderServiceFact {
                 id: json_uuid(item.get("id"))?,
                 status: text("status"),
@@ -116,13 +127,8 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                     .get("is_cost_passthrough")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
-                billing_invoice_ids: item
-                    .get("billing_invoice_ids")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|id| json_uuid(Some(id)))
-                    .collect(),
+                billing_invoice_ids: ids("billing_invoice_ids"),
+                credited_invoice_ids: ids("credited_invoice_ids"),
             })
         })
         .collect()
@@ -453,7 +459,21 @@ pub(super) async fn ensure_order_services_unbilled_tx(
            FROM order_leistungen service
            WHERE service.id = ANY($1)
              AND (
-                 service.status IN ('invoiced', 'cancelled')
+                 service.status = 'cancelled'
+                 OR (
+                     service.status = 'invoiced'
+                     -- Invoices credited in full give the service back.
+                     AND NOT EXISTS (
+                         SELECT 1 FROM invoices credited
+                         WHERE credited.order_id = service.order_id
+                           AND credited.status <> 'cancelled'
+                           AND credited.total_gross > 0
+                           AND credited.credited_amount >= credited.total_gross
+                           AND credited.line_items @> jsonb_build_array(
+                               jsonb_build_object('source_order_leistung_id', service.id::text)
+                           )
+                     )
+                 )
                  OR EXISTS (
                      SELECT 1
                      FROM invoices invoice
@@ -512,6 +532,7 @@ mod tests {
             vat_rate: Decimal::from(19),
             is_cost_passthrough: false,
             billing_invoice_ids: Vec::new(),
+            credited_invoice_ids: Vec::new(),
         }
     }
 

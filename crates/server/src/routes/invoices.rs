@@ -13504,7 +13504,21 @@ async fn reverse_invoice_credit_note(
                       SELECT 1
                       FROM invoice_order_line_allocations own
                       JOIN quotes quote ON quote.id = own.quote_id
+                      CROSS JOIN LATERAL (
+                          SELECT COALESCE(SUM(again.quantity), 0) AS quantity
+                          FROM invoice_order_line_allocations again
+                          JOIN invoices rebilling ON rebilling.id = again.invoice_id
+                          WHERE again.quote_id = own.quote_id
+                            AND again.quote_line_index = own.quote_line_index
+                            AND again.invoice_id <> own.invoice_id
+                            AND rebilling.status <> 'cancelled'
+                            AND NOT invoice_quote_line_credited(
+                                rebilling.id, again.quote_line_index)
+                      ) rebilled
                       WHERE own.invoice_id = invoice.id
+                        -- A final invoice may bill more than the quote line
+                        -- (owner 2026-11-17): only billing again counts.
+                        AND rebilled.quantity > 0
                         AND own.quantity + (
                             SELECT COALESCE(SUM(again.quantity), 0)
                             FROM invoice_order_line_allocations again

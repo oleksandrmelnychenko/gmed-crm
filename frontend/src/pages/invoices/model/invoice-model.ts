@@ -328,6 +328,7 @@ export function blankCreateForm(quoteId = ""): CreateForm {
     lineComments: {},
     receivedPayment: blankReceivedPayment(),
     servicePeriod: null,
+    orderServiceQuantities: {},
   };
 }
 

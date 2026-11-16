@@ -30,6 +30,8 @@ export const billingUiDe = {
     "Eine unbezahlte Vorauszahlungsrechnung fordert diesen Betrag bereits. Bitte weniger Positionen wählen oder die Vorauszahlung zuerst verbuchen.",
   "api_billing_quote_behind_actual_services":
     "Die erbrachten Leistungen übersteigen dieses Angebot ({services_label}). Bitte ein neues Angebot mit den tatsächlichen Mengen erstellen.",
+  "api_billing_final_order_service_not_billable":
+    "Eine Leistung außerhalb des Angebots ist bereits abgerechnet oder nicht mehr erbracht. Bitte die Daten aktualisieren.",
   "api_billing_concierge_service_not_ready":
     "Die Concierge-Leistung „{service_label}“ ist nicht (mehr) abrechnungsbereit. Bitte die Daten aktualisieren.",
   "api_billing_concierge_service_without_price":
@@ -83,6 +85,8 @@ export const billingUiRu = {
     "Неоплаченный счёт на предоплату уже требует эту сумму. Выберите меньше позиций или сначала проведите оплату предоплаты.",
   "api_billing_quote_behind_actual_services":
     "Оказанные услуги превышают это предложение ({services_label}). Создайте новое предложение с фактическими количествами.",
+  "api_billing_final_order_service_not_billable":
+    "Услуга вне сметы уже выставлена или больше не оказана. Обновите данные.",
   "api_billing_concierge_service_not_ready":
     "Услуга Concierge «{service_label}» не готова (уже не готова) к выставлению счёта. Обновите данные.",
   "api_billing_concierge_service_without_price":
