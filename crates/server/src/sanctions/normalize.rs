@@ -23,7 +23,8 @@ pub struct NameToken {
 }
 
 impl NameToken {
-    fn from_canon(canon: String) -> Self {
+    /// A token from an already canonical form (see [`canonical_token`]).
+    pub fn from_canon(canon: String) -> Self {
         let skeleton = consonant_skeleton(&canon);
         let patronymic = is_patronymic(&canon);
         Self {
@@ -353,7 +354,91 @@ const BANK_GENERIC_WORDS: &[&str] = &[
     "коммерческий",
     "акціонерне",
     "товариство",
+    // Kinds of banks and credit institutions (QA fix-88).
+    "credit",
+    "kredit",
+    "кредитный",
+    "savings",
+    "sparkasse",
+    "sparkassen",
+    "banking",
+    "bankhaus",
+    "akb",
+    "акб",
+    "kb",
+    "кб",
+    "нко",
+    // Legal forms of banks that `organisation_tokens` keeps for other
+    // organisations (`sp. z o.o.`, `a.s.`, `eG`, `AD`, `d.d.`, `SE`, ...).
+    "cjsc",
+    "пат",
+    "ат",
+    "ab",
+    "sp",
+    "zoo",
+    "as",
+    "asa",
+    "oy",
+    "oyj",
+    "sas",
+    "sae",
+    "se",
+    "eg",
+    "kgaa",
+    "kft",
+    "zrt",
+    "nyrt",
+    "doo",
+    "dd",
+    "ad",
+    "ead",
+    "sro",
+    "spol",
+    "aktiengesellschaft",
+    "gesellschaft",
+    // Connectors.
+    "for",
+    "für",
+    "de",
+    "del",
+    "des",
+    "di",
+    "du",
+    "da",
+    "la",
+    "le",
+    "el",
+    "et",
+    "und",
+    "za",
+    "po",
 ];
+
+/// Generic words a bank's name is often glued to (`Sberbank`, `CMRBank`,
+/// `Commerzbank`), longest first, in canonical form.
+const GLUED_BANK_SUFFIXES: &[&str] = &["bankasi", "bankas", "banken", "banka", "banki", "bank"];
+
+/// The distinctive stem of a token glued to a generic bank word
+/// (`kmrbank` → `kmr`, `komerzbank` → `komerz`); the token itself when it
+/// carries no such suffix or the stem would be shorter than two letters.
+pub fn bank_stem(canon: &str) -> &str {
+    for suffix in GLUED_BANK_SUFFIXES {
+        if let Some(stem) = canon.strip_suffix(suffix)
+            && stem.chars().count() >= 2
+        {
+            return stem;
+        }
+    }
+    canon
+}
+
+/// Whether a canonical token has no vowel: an acronym (`kmr`, `tsmr`,
+/// `vtb`), which matches only when equal.
+pub fn is_acronym(canon: &str) -> bool {
+    !canon
+        .chars()
+        .any(|ch| matches!(ch, 'a' | 'e' | 'i' | 'o' | 'u'))
+}
 
 fn bank_generic_canons() -> &'static std::collections::HashSet<String> {
     static CANONS: std::sync::OnceLock<std::collections::HashSet<String>> =
@@ -565,6 +650,30 @@ mod tests {
         }
         assert!(is_bank_generic("bank"));
         assert!(!is_bank_generic("sberbank"));
+        assert_eq!(
+            distinctive("Bank \"Centre for International Settlements\" LLC"),
+            canon("Centre International Settlements")
+        );
+        assert_eq!(
+            distinctive("Volksbank Mittelhessen eG"),
+            canon("Volksbank Mittelhessen")
+        );
+        assert_eq!(distinctive("Credit Bank of Moscow"), canon("Moscow"));
+    }
+
+    #[test]
+    fn glued_bank_words_leave_the_distinctive_stem() {
+        let stem = |value: &str| bank_stem(&canon(value)[0]).to_string();
+        assert_eq!(stem("CMRBank"), "kmr");
+        assert_eq!(stem("ЦМРБанк"), "tsmr");
+        assert_eq!(stem("Commerzbank"), "komerz");
+        assert_eq!(stem("Сбербанк"), "sber");
+        assert_eq!(stem("Gazprombanka"), "gazprom");
+        // Nothing or a single letter left: the token stays whole.
+        assert_eq!(stem("Bank"), "bank");
+        assert_eq!(stem("mBank"), "mbank");
+        assert!(is_acronym("kmr") && is_acronym("tsmr") && is_acronym("vtb"));
+        assert!(!is_acronym("komerz") && !is_acronym("sber"));
     }
 
     #[test]

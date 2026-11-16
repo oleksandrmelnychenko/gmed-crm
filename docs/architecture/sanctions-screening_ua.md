@@ -316,6 +316,23 @@ Korneev) без додаткових ознак — «збігів немає».
   зайве слово з будь-якого боку — `EXTRA_SUBJECT_TOKEN_PENALTY`. Схожість
   слів, транслітерація і поріг `POSSIBLE_MATCH_THRESHOLD` — ті самі, що для
   організацій.
+- **Схожість слів організацій і банків** (QA fix-88, 2026-11-16: «Commerzbank»
+  дав 91 % проти EU.10350.3 «CMRBank» / «ЦМРБанк» / «TSMRBank»):
+  `matching::entity_token_similarity` для організацій і банків (людей це не
+  зачіпає, там лишається `token_similarity`):
+  - приклеєне загальне слово банку (`…bank`, `…banka`, `…banki`, `…banken`,
+    `…bankas`, `…bankasi`; `normalize::bank_stem`) порівнюється окремо: «CMRBank» /
+    «CMR Bank» → `kmr`, «Commerzbank» → `komerz`, «Сбербанк» / «Sber Bank» →
+    `sber`;
+  - слово без голосних (абревіатура `kmr`, `tsmr`, `vtb`;
+    `normalize::is_acronym`) збігається лише з точно таким самим;
+  - рівні кістяки приголосних (`SKELETON_SIMILARITY`) рахуються лише для слів,
+    довжини яких різняться щонайбільше на `SKELETON_MAX_LENGTH_GAP` (2) літери.
+
+  Загальні слова банку розширено (`credit`/`kredit`, `sparkasse`, `savings`,
+  `AKB`/`КБ`/`НКО`, правові форми `sp. z o.o.`, `a.s.`, `eG`, `SE`, `AD`, `d.d.`,
+  `Nyrt.`… і сполучники `for`, `für`, `de`, `und`…) — лише для порівняння банку,
+  не для інших організацій.
 - **Збіг**: звичайний `sanctions_hits` з `subject_kind = 'lead_bank'` і
   `subject_ref` `patient-bank` / `payer-bank` (перевірка БД
   `sanctions_hits_bank_ref_check`). CEO бачить його в списку збігів як «Банк
@@ -347,6 +364,12 @@ Korneev) без додаткових ознак — «збігів немає».
   `matching::a_listed_bank_matches_in_its_spellings_and_longer_or_shorter_names`,
   `matching::generic_bank_words_and_legal_forms_never_match_alone`,
   `matching::the_synthetic_bank_list_file_lists_its_banks`,
+  `normalize::glued_bank_words_leave_the_distinctive_stem`,
+  `matching::commerzbank_is_no_match_for_cmrbank`,
+  `matching::german_and_european_banks_match_no_listed_bank`,
+  `matching::listed_banks_still_match_in_their_spellings`,
+  `matching::acronyms_and_skeletons_do_not_reach_longer_words`,
+  `matching::person_matching_regression_set`,
   `screening::the_bank_of_the_payment_route_is_an_organisation_subject_of_whoever_pays`,
   інтеграційний `the_bank_of_the_payment_route_is_screened_held_and_decided_like_any_hit`
   (синтетичний наступний список

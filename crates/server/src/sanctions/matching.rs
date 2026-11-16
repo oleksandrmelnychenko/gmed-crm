@@ -23,7 +23,8 @@ use serde::Serialize;
 
 use super::fsf::{ListBirthDate, ListEntry, SubjectType};
 use super::normalize::{
-    NameToken, bank_distinctive_tokens, is_bank_noise, name_tokens, organisation_tokens,
+    NameToken, bank_distinctive_tokens, bank_stem, is_acronym, is_bank_noise, name_tokens,
+    organisation_tokens,
 };
 
 /// A token pair below this similarity does not count as matched.
@@ -34,6 +35,9 @@ pub const POSSIBLE_MATCH_THRESHOLD: f64 = 0.90;
 pub const SHORT_TOKEN_MAX_CHARS: usize = 3;
 /// Similarity of two long tokens with equal consonant skeletons.
 pub const SKELETON_SIMILARITY: f64 = 0.92;
+/// Organisation and bank names: equal consonant skeletons count only for
+/// words whose lengths differ by at most this many letters.
+pub const SKELETON_MAX_LENGTH_GAP: usize = 2;
 /// Upper bound when only one of two tokens is a patronymic
 /// (`Ivanov` / `Ivanovich`).
 pub const PATRONYMIC_MISMATCH_CAP: f64 = 0.80;
@@ -109,6 +113,10 @@ pub fn jaro_winkler(left: &str, right: &str) -> f64 {
 
 /// Similarity of two canonical name tokens.
 pub fn token_similarity(left: &NameToken, right: &NameToken) -> f64 {
+    scored_similarity(left, right, true)
+}
+
+fn scored_similarity(left: &NameToken, right: &NameToken, skeleton_allowed: bool) -> f64 {
     if left.canon == right.canon {
         return 1.0;
     }
@@ -118,7 +126,8 @@ pub fn token_similarity(left: &NameToken, right: &NameToken) -> f64 {
         return 0.0;
     }
     let mut similarity = jaro_winkler(&left.canon, &right.canon);
-    if left.canon.len() >= 5
+    if skeleton_allowed
+        && left.canon.len() >= 5
         && right.canon.len() >= 5
         && left.skeleton.len() >= 3
         && left.skeleton == right.skeleton
@@ -129,6 +138,37 @@ pub fn token_similarity(left: &NameToken, right: &NameToken) -> f64 {
         similarity = similarity.min(PATRONYMIC_MISMATCH_CAP);
     }
     similarity
+}
+
+/// Similarity of two canonical tokens of organisation or bank names (QA
+/// fix-88): a generic bank word glued to the name is compared apart
+/// ([`bank_stem`]: `CMRBank` / `CMR Bank` → `kmr`), so `Commerzbank` meets
+/// `CMRBank` as `komerz` against `kmr`, not as two words that both end in
+/// `bank`; an acronym ([`is_acronym`]) matches only when equal; equal
+/// consonant skeletons count only for words of comparable length. Person
+/// names keep [`token_similarity`].
+pub fn entity_token_similarity(left: &NameToken, right: &NameToken) -> f64 {
+    if left.canon == right.canon {
+        return 1.0;
+    }
+    let left_stem = bank_stem(&left.canon);
+    let right_stem = bank_stem(&right.canon);
+    if left_stem == right_stem {
+        return 1.0;
+    }
+    if is_acronym(left_stem) || is_acronym(right_stem) {
+        return 0.0;
+    }
+    let left = NameToken::from_canon(left_stem.to_string());
+    let right = NameToken::from_canon(right_stem.to_string());
+    // The skeleton bonus must not lift a short word to a long one.
+    let comparable = left
+        .canon
+        .chars()
+        .count()
+        .abs_diff(right.canon.chars().count())
+        <= SKELETON_MAX_LENGTH_GAP;
+    scored_similarity(&left, &right, comparable)
 }
 
 /// The person or organisation we screen.
@@ -269,7 +309,13 @@ impl SanctionsIndex {
             return Vec::new();
         }
         let prepared = PreparedSubject::new(subject);
-        let similarities = self.similarities(prepared.tokens.iter().map(|(token, _)| token));
+        let similarity = if subject.organisation {
+            entity_token_similarity
+        } else {
+            token_similarity
+        };
+        let similarities =
+            self.similarities(prepared.tokens.iter().map(|(token, _)| token), similarity);
         let wanted = if subject.organisation {
             SubjectType::Entity
         } else {
@@ -297,7 +343,7 @@ impl SanctionsIndex {
         if !bank_tokens_screenable(tokens.iter().map(|token| token.canon.as_str())) {
             return Vec::new();
         }
-        let similarities = self.similarities(tokens.iter());
+        let similarities = self.similarities(tokens.iter(), entity_token_similarity);
         self.collect_matches(subject, SubjectType::Entity, |token_ids| {
             let distinctive: Vec<u32> = token_ids
                 .iter()
@@ -317,13 +363,17 @@ impl SanctionsIndex {
 
     /// Similarity of each of our tokens to each dictionary token (0 below
     /// [`TOKEN_MATCH_MIN`]).
-    fn similarities<'a>(&self, tokens: impl Iterator<Item = &'a NameToken>) -> Vec<Vec<f64>> {
+    fn similarities<'a>(
+        &self,
+        tokens: impl Iterator<Item = &'a NameToken>,
+        similarity: fn(&NameToken, &NameToken) -> f64,
+    ) -> Vec<Vec<f64>> {
         tokens
             .map(|token| {
                 self.dictionary
                     .iter()
                     .map(|candidate| {
-                        let similarity = token_similarity(token, candidate);
+                        let similarity = similarity(token, candidate);
                         if similarity >= TOKEN_MATCH_MIN {
                             similarity
                         } else {
@@ -995,6 +1045,212 @@ mod tests {
         assert!(ids("Musterbank").is_empty());
         // Persons of the list are never a bank's match.
         assert!(ids("Testomir Korneev").is_empty());
+    }
+
+    /// Listed Russian banks in the shape of their EU list entries (QA
+    /// fix-88): EU.10350.3 with all four aliases, and the names of other
+    /// listed banks.
+    fn listed_banks_index() -> SanctionsIndex {
+        SanctionsIndex::build(vec![
+            entity(
+                "10350",
+                &[
+                    "CMRBank",
+                    "Bank \"Centre for International Settlements\" LLC",
+                    "ЦМРБанк",
+                    "TSMRBank",
+                ],
+            ),
+            entity(
+                "4001",
+                &["PJSC Sberbank", "Sberbank of Russia", "ПАО Сбербанк"],
+            ),
+            entity("4002", &["VTB Bank (PJSC)", "Bank VTB", "Банк ВТБ (ПАО)"]),
+            entity(
+                "4003",
+                &["Gazprombank JSC", "Bank GPB (JSC)", "Газпромбанк (АО)"],
+            ),
+            entity("4004", &["Alfa-Bank JSC", "АО «Альфа-Банк»"]),
+            entity("4005", &["Promsvyazbank PJSC", "ПАО «Промсвязьбанк»"]),
+            entity("4006", &["Sovcombank PJSC", "ПАО «Совкомбанк»"]),
+            entity("4007", &["Bank Rossiya", "АО «АБ «РОССИЯ»"]),
+            entity("4008", &["Credit Bank of Moscow", "МКБ"]),
+            entity("4009", &["Novikombank JSC", "АО АКБ «Новикомбанк»"]),
+            entity("4010", &["Rosbank PJSC", "ПАО Росбанк"]),
+            entity("4011", &["MTS Bank PJSC", "ПАО «МТС-Банк»"]),
+        ])
+    }
+
+    fn organisation_ids(index: &SanctionsIndex, name: &str) -> Vec<String> {
+        matched_ids(index, &bank(name))
+    }
+
+    #[test]
+    fn commerzbank_is_no_match_for_cmrbank() {
+        // The cause of the DEV hit (91 %): the glued words compared whole.
+        let glued = |value: &str| name_tokens(value).remove(0);
+        assert!(
+            jaro_winkler(&glued("Commerzbank").canon, &glued("CMRBank").canon)
+                >= POSSIBLE_MATCH_THRESHOLD
+        );
+        assert_eq!(
+            entity_token_similarity(&glued("Commerzbank"), &glued("CMRBank")),
+            0.0
+        );
+        assert_eq!(
+            entity_token_similarity(&glued("Commerzbank"), &glued("TSMRBank")),
+            0.0
+        );
+        let index = listed_banks_index();
+        for name in [
+            "Commerzbank",
+            "Commerzbank AG",
+            "COMMERZBANK AKTIENGESELLSCHAFT",
+            "Commerz Bank",
+            "Kommerzbank",
+            "Commercial Bank",
+        ] {
+            assert!(bank_ids(&index, name).is_empty(), "bank {name}");
+            assert!(
+                organisation_ids(&index, name).is_empty(),
+                "organisation {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn german_and_european_banks_match_no_listed_bank() {
+        let index = listed_banks_index();
+        for name in [
+            "Deutsche Bank",
+            "Deutsche Bank AG",
+            "Deutsche Kreditbank AG",
+            "DZ Bank AG",
+            "UniCredit Bank GmbH",
+            "HypoVereinsbank",
+            "Postbank",
+            "Berliner Sparkasse",
+            "Kreissparkasse Köln",
+            "Volksbank Mittelhessen eG",
+            "Targobank AG",
+            "ING-DiBa AG",
+            "Santander Consumer Bank AG",
+            "Comdirect Bank AG",
+            "N26 Bank SE",
+            "Raiffeisenbank Oberbayern eG",
+            "PKO Bank Polski",
+            "mBank S.A.",
+            "Bank Millennium",
+            "Komerční banka, a.s.",
+            "OTP Bank Nyrt.",
+            "Banca Transilvania S.A.",
+            "Banco Santander",
+            "BNP Paribas",
+            "Crédit Agricole",
+        ] {
+            assert!(bank_ids(&index, name).is_empty(), "bank {name}");
+        }
+    }
+
+    #[test]
+    fn listed_banks_still_match_in_their_spellings() {
+        let index = listed_banks_index();
+        for (name, id) in [
+            ("CMRBank", "10350"),
+            ("CMR Bank", "10350"),
+            ("ЦМРБанк", "10350"),
+            ("TsMR Bank", "10350"),
+            ("Bank Centre for International Settlements", "10350"),
+            ("Bank \"Centre for International Settlements\" LLC", "10350"),
+            ("Sberbank", "4001"),
+            ("Сбербанк", "4001"),
+            ("PAO Sberbank", "4001"),
+            ("Sber Bank", "4001"),
+            ("Sbernbank", "4001"),
+            ("VTB", "4002"),
+            ("VTB Bank", "4002"),
+            ("Банк ВТБ", "4002"),
+            ("Gazprombank", "4003"),
+            ("Gazprom Bank", "4003"),
+            ("Газпромбанк", "4003"),
+            ("Gazprombanka", "4003"),
+            ("Alfa-Bank", "4004"),
+            ("Альфа-Банк", "4004"),
+            ("Promsviazbank", "4005"),
+            ("Sovcombank", "4006"),
+            ("Credit Bank of Moscow", "4008"),
+            ("Rosbank", "4010"),
+            ("МТС-Банк", "4011"),
+        ] {
+            assert_eq!(bank_ids(&index, name), vec![id], "bank {name}");
+        }
+        // Organisations named like a listed bank (a payer company) too.
+        for (name, id) in [
+            ("CMRBank LLC", "10350"),
+            ("Sberbank PJSC", "4001"),
+            ("Gazprombank", "4003"),
+            ("Bank Centre for International Settlements", "10350"),
+        ] {
+            assert_eq!(
+                organisation_ids(&index, name),
+                vec![id],
+                "organisation {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn acronyms_and_skeletons_do_not_reach_longer_words() {
+        let token = |value: &str| name_tokens(value).remove(0);
+        // An acronym matches only itself.
+        assert_eq!(
+            entity_token_similarity(&token("TSMR"), &token("Tsimer")),
+            0.0
+        );
+        assert_eq!(
+            entity_token_similarity(&token("KMRB"), &token("Komerb")),
+            0.0
+        );
+        // Equal skeletons of words of very different length do not count.
+        assert!(
+            entity_token_similarity(&token("Selim"), &token("Asaliemai")) < SKELETON_SIMILARITY
+        );
+        // Spelling variants of one long word still do.
+        assert!(
+            entity_token_similarity(&token("Promsvyaz"), &token("Promsviaz"))
+                >= POSSIBLE_MATCH_THRESHOLD
+        );
+    }
+
+    /// Person matching is untouched by the organisation rules: the same
+    /// subjects match the same entries as before (QA fix-88 regression set).
+    #[test]
+    fn person_matching_regression_set() {
+        let index = synthetic_index();
+        for (first, last, expected) in [
+            ("Ivan", "Korneev", Some("1001")),
+            ("Iwan", "Kornejew", Some("1001")),
+            ("Иван", "Корнеев", Some("1001")),
+            ("Ivan", "Korneeff", Some("1001")),
+            ("Muhammad", "Al Farisi", Some("1003")),
+            ("Mohamed", "Al-Farisi", Some("1003")),
+            ("Aleksandra", "Svetlova", Some("1004")),
+            ("Zorana", "Miletić-Bauer", Some("1002")),
+            ("Ivan", "Kornienko", None),
+            ("Ivan", "Petrov", None),
+            ("Igor", "Korneev", None),
+            ("Anna", "Schmidt", None),
+            ("Commerz", "Bank", None),
+        ] {
+            let found = matched_ids(&index, &subject(first, last));
+            match expected {
+                Some(id) => assert_eq!(found, vec![id], "{first} {last}"),
+                None => assert!(found.is_empty(), "{first} {last}"),
+            }
+        }
+        // Person tokens keep the skeleton rule for vowel variants.
+        let token = |value: &str| name_tokens(value).remove(0);
+        assert!(token_similarity(&token("Mohammed"), &token("Muhammad")) >= SKELETON_SIMILARITY);
     }
 
     #[test]
