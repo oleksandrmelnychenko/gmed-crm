@@ -358,7 +358,10 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                         // One spelling for the limit: decimal comma, as in the catalogue and on the invoice.
                         const availableText = available.toLocaleString("de-DE", { maximumFractionDigits: 4 });
                         const name = agencyServiceNameLabel(undefined, line.description, t);
+                        // No «Описание услуги» over a description without any text
+                        // (markup or separators only, QA 2026-11-16 B-2).
                         const notes = line.notes?.trim();
+                        const hasNotes = /[\p{L}\p{N}]/u.test(notes?.replace(/<[^>]*>/g, "") ?? "");
                         return (
                           <div key={`${selectedQuote.id}-${index}`} className={cn("grid grid-cols-[1.25rem_minmax(0,1fr)] gap-x-2.5 gap-y-3 p-3 sm:grid-cols-[1.25rem_minmax(0,1fr)_6rem_6.5rem]", !selected && "bg-muted/30")}>
                             <input type="checkbox" aria-label={`${de ? "Position" : "Позиция"}: ${name}`}
@@ -373,7 +376,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                             <div className="min-w-0">
                               <p className="break-words text-sm font-medium">{name}</p>
                               <p className="mt-1 text-xs leading-5 text-muted-foreground">{de ? "Preis netto" : "Цена без НДС"}: {money(line.unit_price)} · {t.invoices_vat}: {line.vat_rate}%</p>
-                              {notes && notes !== line.description.trim() ? (
+                              {hasNotes && notes !== line.description.trim() ? (
                                 <details className="mt-1 text-xs text-muted-foreground">
                                   <summary className="w-fit cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">{descriptionLabel}</summary>
                                   <p className="mt-1 whitespace-pre-line break-words leading-5">{notes}</p>

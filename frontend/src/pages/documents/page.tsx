@@ -1023,7 +1023,7 @@ function StaffDocumentsPage({
   const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
   const l = (key: string) => t.uiText[key] ?? key;
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const text = {
     allPatients: l("documents_all_patients_filter"),
     allStatuses: l("documents_all_statuses_filter"),
@@ -1190,6 +1190,24 @@ function StaffDocumentsPage({
     financialStatus: searchParams.get("financial_status") ?? "",
     validity: parseValidityFilter(searchParams.get("validity")),
   }));
+  // The validity filter is a link staff share and open again
+  // (`?validity=attention`, QA 2026-11-16 S3-7).
+  const urlValidity = parseValidityFilter(searchParams.get("validity"));
+  const urlValidityRef = useRef(urlValidity);
+  urlValidityRef.current = urlValidity;
+  useEffect(() => {
+    // A link opened while the page is mounted (a notice, the back button).
+    setFilters((current) => (current.validity === urlValidity ? current : { ...current, validity: urlValidity }));
+  }, [urlValidity]);
+  useEffect(() => {
+    if (urlValidityRef.current === filters.validity) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (filters.validity) next.set("validity", filters.validity);
+      else next.delete("validity");
+      return next;
+    }, { replace: true });
+  }, [filters.validity, setSearchParams]);
   const deferredSearch = useDeferredValue(filters.search);
   const [mobileDocumentFiltersOpen, setMobileDocumentFiltersOpen] = useState(false);
   const legacyQueryDocumentId = searchParams.get("document") ?? "";
@@ -1692,6 +1710,9 @@ function StaffDocumentsPage({
     onRenewed: (created) => {
       refresh();
       if (detail?.id !== created.id) openDocument(created.id);
+      // «Передать клиенту» in the dialog: the open document's portal block
+      // and header show the release at once (QA 2026-11-16 S3-8).
+      else setDetailReloadNonce((value) => value + 1);
     },
     onNeedsForm: (previousId) => {
       const target = detail?.id === previousId ? detail : null;

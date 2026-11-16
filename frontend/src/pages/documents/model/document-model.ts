@@ -370,7 +370,43 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   treatment_plan: "Behandlungsplan",
   visa_invitation: "Einladungsschreiben (Visum)",
   visa_invitation_letter: "Einladungsschreiben (Visum)",
+  // Uploads: German names instead of the humanised English codes
+  // («DOK-Uploaded Document vom …», QA 2026-11-16 S3-2).
+  uploaded_document: "Dokument",
+  document: "Dokument",
+  identity: "Ausweisdokument",
+  passport_scan: "Reisepass",
+  passport: "Reisepass",
+  personal_passport: "Reisepass",
+  id_card: "Personalausweis",
+  residence_permit: "Aufenthaltstitel",
+  personal_residence_permit: "Aufenthaltstitel",
+  arztbrief: "Arztbrief",
+  befund: "Befund",
+  medical_report: "Arztbericht",
+  medical_document: "Medizinisches Dokument",
+  pathology_report: "Pathologiebefund",
+  imaging_report: "Bildgebungsbefund",
+  followup_plan: "Nachsorgeplan",
+  insurance_document: "Versicherungsunterlage",
+  insurance_guarantee: "Kostenzusage der Versicherung",
+  invoice_document: "Rechnung",
+  payment_proof: "Zahlungsnachweis",
+  dsgvo: "Datenschutzerklärung (DSGVO)",
+  translated_document: "Übersetzung",
+  patient_upload: "Upload des Patienten",
 };
+
+/** Types of identity documents: their standard name starts with PERS. */
+const IDENTITY_DOCUMENT_ARTS = new Set([
+  "identity",
+  "passport_scan",
+  "passport",
+  "personal_passport",
+  "id_card",
+  "residence_permit",
+  "personal_residence_permit",
+]);
 
 /**
  * Uploads of a person other than the patient: the payer on the payer link
@@ -543,6 +579,7 @@ function standardDocumentCategoryCode(input: StandardDocumentNameInput) {
   ) {
     return medicalDocumentCode(input);
   }
+  if (IDENTITY_DOCUMENT_ARTS.has(art)) return "PERS";
   if (art.match(/\b(visa|invitation|einladung|behoerde|amt)\b/)) return "AMT";
   if (art.match(/\b(cost|kosten|invoice|rechnung|coverage|uebernahme)\b/)) {
     return "FIN";
@@ -618,7 +655,8 @@ function formatDocumentArt(value?: string | null) {
 export function buildStandardDocumentName(input: StandardDocumentNameInput) {
   const categoryCode = standardDocumentCategoryCode(input);
   const date = formatDocumentDate(input.documentDate);
-  const documentType = formatDocumentArt(input.art);
+  // Without a type the name says «Dokument», never just «DOK-vom …».
+  const documentType = formatDocumentArt(input.art) || "Dokument";
   const typeAndDate = cleanDocumentNamePart(
     [documentType, date ? `vom ${date}` : ""].filter(Boolean).join(" "),
   );

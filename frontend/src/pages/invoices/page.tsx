@@ -403,6 +403,8 @@ const VAT_SOURCE_LABEL_KEYS = {
   tax_profile: "finance_catalog_vat_source_tax_profile",
   manual: "finance_catalog_vat_source_manual",
   legacy: "finance_catalog_vat_source_legacy",
+  // A receipt re-billed as a pass-through cost (QA 2026-11-16 B-1).
+  pass_through: "finance_catalog_vat_source_pass_through",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const STAFF_INVOICE_REALTIME_EVENTS = [
@@ -4787,6 +4789,9 @@ function useStaffInvoicesPageContent() {
                       <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
                         <SectionHeading icon={BellRing}>{text.dunningTitle}</SectionHeading>
                       </span>
+                      {/* Never on a draft: only the reason is said next to it, no
+                          disabled button beside it (F-C9, QA 2026-11-16 B-3). */}
+                      {detail.status === "draft" ? null : (
                       <Button
                         type="button"
                         size="sm"
@@ -4795,8 +4800,7 @@ function useStaffInvoicesPageContent() {
                           setDunningError(null);
                           setDunningDialogOpen(true);
                         }}
-                        // Never on a draft: the reason is said next to it (F-C9).
-                        disabled={!canCreateDunning || detail.status === "draft"}
+                        disabled={!canCreateDunning}
                         title={dunningBlockKey ? t[dunningBlockKey] : undefined}
                         aria-describedby={
                           dunningBlockKey
@@ -4808,6 +4812,7 @@ function useStaffInvoicesPageContent() {
                       >
                         {dunningActionLabel}
                       </Button>
+                      )}
                       <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
                     </>
                   }
@@ -5263,7 +5268,10 @@ function useStaffInvoicesPageContent() {
               </DialogTitle>
               <DialogDescription>
                 {detail
-                  ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} · ${detail.patient_name ?? detail.patient_pid ?? ""} · ${invoiceTypeLabel(detail.invoice_type)} · ${formatMoney(detail.total_gross, detail.currency)}`
+                  // The title already says «черновик»: no «Черновик (без номера)» again (QA B-3).
+                  ? [detail.invoice_number, detail.patient_name ?? detail.patient_pid, invoiceTypeLabel(detail.invoice_type), formatMoney(detail.total_gross, detail.currency)]
+                      .filter(Boolean)
+                      .join(" · ")
                   : null}
               </DialogDescription>
             </DialogHeader>

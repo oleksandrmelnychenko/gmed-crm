@@ -687,7 +687,8 @@ function usePatientDocumentsPageContent() {
                             {item.outdated ? (
                               // QA 2026-11-11, F4: an estimate the order no longer matches read «Aktiv».
                               <StatusBadge tone="neutral">{t.portal_documents_outdated}</StatusBadge>
-                            ) : (
+                            ) : item.status === "draft" ? null : (
+                              // «Черновик» is GMED's internal working state, never the client's (QA 2026-11-16 S3-9).
                               <StatusBadge status={item.status}>{portalStatusLabel(item.status)}</StatusBadge>
                             )}
                             <PortalDateChip title={t.portal_documents_released_at} timestamp={item.shared_at} />

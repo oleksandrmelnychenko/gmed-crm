@@ -480,6 +480,11 @@ export function DesktopCalendarSurface({
           slotMinTime={timeGridHours.slotMinTime}
           slotMaxTime={timeGridHours.slotMaxTime}
           dayMaxEvents={3}
+          // Visits at the same time sit side by side in their own columns,
+          // never cascading over each other; beyond four a «+N» link opens
+          // the rest instead of 1–3 px tiles (QA 2026-11-16 verify-D F1/F2).
+          slotEventOverlap={false}
+          eventMaxStack={4}
           now={berlinCalendarNow}
           nowIndicator
           eventMinHeight={eventHeights.eventMinHeight}

@@ -77,6 +77,24 @@ export function getAccessToken() {
   return getStoredAccessToken();
 }
 
+/**
+ * Reads that only a signed-in session makes (the portal's and the topbar's
+ * polling: `/me/*`, notices, messages, announcements). After the session
+ * ended in this tab they are refused here instead of answering 401 one by
+ * one (QA 2026-11-16 verify-D F3: 13 × 401 after «Выход»).
+ */
+const SESSION_ONLY_PATH = /^\/(?:me|notifications|messages|announcements)(?:[/?]|$)/;
+let apiSessionEnded = false;
+
+/** The session ended (sign-out) or started again (sign-in, refreshed tokens). */
+export function markApiSessionEnded(ended: boolean) {
+  apiSessionEnded = ended;
+}
+
+function sessionEndedError() {
+  return new ApiRequestError(uiText("api_request_cancelled"), { status: 401, code: "session_ended" });
+}
+
 function getRefreshToken() {
   return getStoredRefreshToken();
 }
@@ -147,6 +165,7 @@ function dispatchAuthSessionExpired() {
 
 async function clearAuthTokens(forceSessionExpiredEvent = false) {
   const hadTokens = hasStoredAuthTokens();
+  markApiSessionEnded(true);
   try {
     await clearPersistedAuthTokens();
   } finally {
@@ -202,6 +221,7 @@ async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promis
         return getAccessToken();
       }
       await persistAuthTokens(tokens.access_token, tokens.refresh_token);
+      markApiSessionEnded(false);
       jsonCache.clear();
       return tokens.access_token;
     } catch {
@@ -654,6 +674,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     timeoutMs = DEFAULT_API_TIMEOUT_MS,
     ...requestInit
   } = init;
+  if (apiSessionEnded && SESSION_ONLY_PATH.test(path)) throw sessionEndedError();
   const headers = buildApiHeaders(requestInit);
   const url = buildApiUrl(path);
   const method = requestMethod(requestInit);

@@ -1244,11 +1244,6 @@ function usePatientInvoicesPageContent() {
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                       <SectionHeading icon={Bell}>{lang === "de" ? "Zahlungserinnerungen und Mahnungen" : "Напоминания и требования об оплате"}</SectionHeading>
                     </h2>
-                    <p className={cn("mt-1", tokens.text.muted)}>
-                      {lang === "de"
-                        ? "Jedes Schreiben nennt den offenen Betrag und die neue Zahlungsfrist."
-                        : "В каждом письме указаны сумма к оплате и новый срок оплаты."}
-                    </p>
                     <div className="mt-3 space-y-2">
                       {detailDunningLetters.map((letter) => (
                         <div

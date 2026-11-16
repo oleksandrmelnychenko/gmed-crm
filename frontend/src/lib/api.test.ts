@@ -54,6 +54,26 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, "localStorage");
 });
 
+describe("ended session", () => {
+  it("stops the portal's session-only reads after sign-out without a request, until the next sign-in", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { apiFetch, markApiSessionEnded } = await loadApiModule();
+    markApiSessionEnded(true);
+    await expect(apiFetch("/me/documents")).rejects.toMatchObject({ status: 401, code: "session_ended" });
+    await expect(apiFetch("/notifications/unread-count")).rejects.toMatchObject({ code: "session_ended" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Public and sign-in requests still go out.
+    await apiFetch("/public/payer-link/abc");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    markApiSessionEnded(false);
+    await apiFetch("/me/documents");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("API validation errors", () => {
   it("scopes cached JSON, mutations and file downloads to the selected patient", async () => {
     setWindowOrigin("http://app.local:4173");

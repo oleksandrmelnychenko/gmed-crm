@@ -3,6 +3,7 @@ import { startTransition, useEffect, useReducer } from "react";
 import { apiFetch } from "@/lib/api";
 import { localizeBlockedAppointmentTitle } from "@/lib/blocked-appointment";
 import { uiText } from "@/lib/i18n";
+import { publishPatientDocumentValidity } from "@/pages/documents/data/use-document-validity-count";
 
 import type {
   PatientTimelineFacet,
@@ -237,6 +238,7 @@ export function usePatientDetailTabData({
           }
           case "documents": {
             const documents = await apiFetch<DocumentItem[]>(`/patients/${id}/documents`, { signal });
+            if (id && !signal.aborted && Array.isArray(documents)) publishPatientDocumentValidity(id, documents);
             const [orders, appointments, documentAlerts]: [
               OrderItem[],
               AppointmentItem[],

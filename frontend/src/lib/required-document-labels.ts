@@ -134,6 +134,21 @@ const DOCUMENT_ART_LABEL_CODES = [
   "patient_payer_statement",
   "payer_cost_estimate",
   "consent_data_release",
+  // Types the type list showed in English (QA 2026-11-16 S3-2).
+  "befund",
+  "followup_plan",
+  "insurance_guarantee",
+  "medical_document",
+  "pathology_report",
+  "payer_funds_proof",
+  "payer_identity",
+  "dsgvo",
+  "self_funds_proof",
+  "representative_identity",
+  "representative_authority",
+  "aml_asset_origin_evidence",
+  "consent_data_release_child",
+  "consent_data_release_single",
 ] as const;
 
 const DOC_LABEL_MAP: Record<string, string> = {

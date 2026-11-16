@@ -3754,14 +3754,21 @@ fn vat_source_explanation(
             format!("VAT is a legacy snapshot on this service line at {rate_label}.")
         }
         "quote" => format!("VAT comes from the quote at {rate_label}."),
+        "pass_through" => {
+            format!("Pass-through cost re-billed from a receipt at {rate_label}.")
+        }
         _ => format!("VAT source is not classified; invoice uses {rate_label}."),
     }
 }
 
 /// The VAT source of a line without an order service behind it: an advance
 /// line or a line copied from the quote takes the quote's VAT (money QA
-/// 2026-11-15, S3-2); only other lines are a legacy snapshot.
+/// 2026-11-15, S3-2); a receipt re-billed as a pass-through cost is its own
+/// source (QA 2026-11-16 B-1); only other lines are a legacy snapshot.
 fn fallback_vat_source(line: &serde_json::Map<String, Value>) -> &'static str {
+    if line.get("source").and_then(Value::as_str) == Some("external_invoice") {
+        return "pass_through";
+    }
     let from_quote = line.contains_key("quote_id")
         || line.contains_key("quote_line_index")
         || line
@@ -8123,7 +8130,15 @@ async fn get_patient_billing_workspace(
                 SELECT jsonb_agg(jsonb_build_object(
                     'id', external.id,
                     'external_invoice_number', external.external_invoice_number,
-                    'provider_name', COALESCE(NULLIF(BTRIM(provider.name), ''), external.supplier_name),
+                    -- A Concierge receipt names the vendor the concierge
+                    -- entered, as the expense review does, not the service's
+                    -- partner (QA 2026-11-16 B-3).
+                    'provider_name', COALESCE(
+                        (SELECT NULLIF(BTRIM(receipt_vendor.vendor_name), '')
+                         FROM concierge_expense_submissions receipt_vendor
+                         WHERE receipt_vendor.id = external.source_concierge_expense_id),
+                        NULLIF(BTRIM(provider.name), ''),
+                        external.supplier_name),
                     'invoice_date', external.invoice_date,
                     'status', external.status,
                     'paid_by', external.paid_by,

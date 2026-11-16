@@ -9,6 +9,7 @@ import {
   fetchWithApiTimeout,
   getAccessTokenExpiresAtMs,
   getAccessTokenSubject,
+  markApiSessionEnded,
   refreshAuthSession,
 } from "@/lib/api";
 import {
@@ -188,10 +189,12 @@ function getAccessToken() {
 
 async function saveTokens(tokens: AuthTokens) {
   await persistAuthTokens(tokens.access_token, tokens.refresh_token);
+  markApiSessionEnded(false);
   clearApiCache();
 }
 
 async function clearTokens() {
+  markApiSessionEnded(true);
   selectPortalPatient("", null);
   await clearPersistedAuthTokens();
   clearApiCache();
@@ -600,6 +603,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const endSession = async (reason: SignOutReason) => {
     const signedOutUserId = user?.id ?? null;
     const accessToken = getAccessToken();
+    // The portal and topbar stop polling now: their reads would only answer
+    // 401 while the server revokes the session (QA 2026-11-16 verify-D F3).
+    markApiSessionEnded(true);
 
     try {
       await fetchWithApiTimeout(buildApiUrl("/auth/logout"), {

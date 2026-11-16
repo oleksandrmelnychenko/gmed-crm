@@ -4583,6 +4583,17 @@ function useOrdersPageContent() {
                             orderDetail.total_estimated,
                             orderDetail.currency,
                           );
+                          // A patient's order whose Einzelauftrag exists: the
+                          // «Устарел» banner above offers its new version, or the
+                          // new version already waits for the signature — a
+                          // second «create a new version» card is noise (QA S3-4).
+                          const singleOrderCovered = Boolean(orderDetail.patient_id) && orderDocuments.some(
+                            (document) => document.order_id === orderDetail.id
+                              && document.generated_template_id === "single_order"
+                              && document.is_latest_version !== false
+                              && document.status !== "archived",
+                          );
+                          if (note?.tone === "warning" && singleOrderCovered) return null;
                           return note ? (
                             <>
                               <p
@@ -4974,7 +4985,12 @@ function useOrdersPageContent() {
                                         <OrderFinancialMetric
                                           label={lang === "de" ? "Tatsächliche Marge" : "Фактическая маржа"}
                                           value={
-                                            orderEconomics.economics_valid
+                                            // Without any recorded cost a «100 %» margin says
+                                            // nothing (QA 2026-11-16, verify-B fix-70 item).
+                                            !Number(orderEconomics.actual.partner_cost_net ?? 0)
+                                              && !Number(orderEconomics.actual.paid_to_partner_gross ?? 0)
+                                              ? "—"
+                                              : orderEconomics.economics_valid
                                               ? formatMoney(
                                                   orderEconomics.actual.margin_net,
                                                   orderEconomics.currency,

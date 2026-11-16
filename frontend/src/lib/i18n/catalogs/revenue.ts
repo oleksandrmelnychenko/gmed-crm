@@ -136,6 +136,7 @@ export interface RevenueTranslations {
   finance_catalog_vat_source_tax_profile: string;
   finance_catalog_vat_source_manual: string;
   finance_catalog_vat_source_legacy: string;
+  finance_catalog_vat_source_pass_through: string;
 
   revenue_table_group_identity: string;
   revenue_table_group_context: string;
@@ -1040,6 +1041,7 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_vat_source_tax_profile: "Налоговый профиль",
   finance_catalog_vat_source_manual: "Вручную",
   finance_catalog_vat_source_legacy: "Исторические данные",
+  finance_catalog_vat_source_pass_through: "Транзит по чеку",
 
   revenue_table_group_identity: "Идентификация",
   revenue_table_group_context: "Контекст",
@@ -1459,6 +1461,7 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_vat_source_tax_profile: "Steuerprofil",
   finance_catalog_vat_source_manual: "Manuell",
   finance_catalog_vat_source_legacy: "Altdaten",
+  finance_catalog_vat_source_pass_through: "Durchlaufender Posten (Beleg)",
 
   revenue_table_group_identity: "Identität",
   revenue_table_group_context: "Kontext",
