@@ -813,7 +813,26 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
             .await
         }
     });
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Both updates must have read the row and be queued behind the blocker
+    // before it lets go; a request that reads only after the first one
+    // committed sees the new version and rightly succeeds (CI under load).
+    support::wait_until(
+        "both external invoice updates wait for the row lock",
+        || {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT count(*) FROM pg_stat_activity
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+                    >= 2
+            }
+        },
+    )
+    .await;
     blocker.commit().await.unwrap();
     let first_status = first_update.await.unwrap().0;
     let second_status = second_update.await.unwrap().0;

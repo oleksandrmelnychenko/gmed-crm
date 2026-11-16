@@ -693,6 +693,13 @@ async fn start_docker_postgres() -> Result<TestDatabaseBackend, String> {
         "POSTGRES_PASSWORD=postgres",
         "-e",
         "POSTGRES_DB=postgres",
+        // Trust auth on the loopback-only port: a connection a finished test
+        // left half-opened would otherwise sit in the password handshake and
+        // DROP DATABASE would wait for it until authentication_timeout
+        // (60 s per test); a short timeout kills real handshakes under load
+        // instead (requests fail with 500/401). Same as scripts/ci-rust-tests.sh.
+        "-e",
+        "POSTGRES_HOST_AUTH_METHOD=trust",
         "-p",
         "127.0.0.1::5432",
         &image,
@@ -705,11 +712,6 @@ async fn start_docker_postgres() -> Result<TestDatabaseBackend, String> {
         "synchronous_commit=off",
         "-c",
         "full_page_writes=off",
-        // A connection left half-opened by a finished test sits in the login
-        // handshake; DROP DATABASE waits for it until this timeout (default
-        // 60 s, which made every test take a minute).
-        "-c",
-        "authentication_timeout=2s",
     ])?;
 
     let port_output = docker_stdout(&["port", &container_id, "5432/tcp"]).inspect_err(|_| {

@@ -33,15 +33,19 @@ done
 
 # A throwaway test server: durability buys nothing (same flags the harness
 # uses for its own container). Room for every parallel test process.
-# authentication_timeout: a connection a finished test left half-opened sits
-# in the login handshake, and DROP DATABASE waits for it (ProcSignalBarrier)
-# until this timeout; the default 60 s made every test take 60 s.
+# Trust auth (the port is bound to 127.0.0.1 only): with a password every
+# connection runs the SCRAM handshake, a connection a finished test left
+# half-opened sits in it, and DROP DATABASE waits for it (ProcSignalBarrier)
+# until authentication_timeout, 60 s per test. A short timeout instead kills
+# real handshakes of the debug-built tests under load (sqlx reads EOF, the
+# request fails with 500/401). With trust there is no handshake to wait in.
 docker run -d --rm --name "$container" --shm-size=1g \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=postgres \
+  -e POSTGRES_HOST_AUTH_METHOD=trust \
   -p 127.0.0.1:5432:5432 \
   "$postgres_image" \
   -c fsync=off -c synchronous_commit=off -c full_page_writes=off \
-  -c max_connections=500 -c authentication_timeout=2s >/dev/null
+  -c max_connections=500 >/dev/null
 for _ in $(seq 1 60); do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then
     break
