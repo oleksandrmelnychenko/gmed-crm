@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock3, FilePlus2, LoaderCircle, PencilLine, ShieldCheck } from "lucide-react";
+import { Clock3, FilePlus2, LoaderCircle, MessageSquare, PencilLine, ShieldCheck, Users } from "lucide-react";
 
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
@@ -12,9 +12,8 @@ import { useLang } from "@/lib/i18n";
 import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { cn } from "@/lib/utils";
 import { useOutdatedDocumentRenewal } from "@/pages/documents/ui/outdated-document-renewal";
-import { CONSENT_FORM_CHANNELS, type ConsentFormChoices, type StaffConsentRecord } from "@/pages/patient-lead/lead-request-api";
+import { CONSENT_FORM_CHANNELS, type ConsentFormChoices, type StaffConsentChannel, type StaffConsentRecord } from "@/pages/patient-lead/lead-request-api";
 import { consentFormText } from "@/pages/patient-lead/lead-request-consent-form-text";
-import { StaffConsentRecordFields } from "@/pages/patient-lead/lead-request-staff-consent";
 import { cabinetStaffText } from "@/pages/patient-lead/lead-request-staff-mode";
 import { TrustedPersonsEditor, TrustedPersonsList } from "@/pages/patient-lead/lead-trusted-persons-editor";
 import {
@@ -37,6 +36,7 @@ import {
   onlyWithdraws,
   type PatientConsentDraft,
 } from "../../model/patient-consent-choices";
+import { ConsentCard, ConsentRecordFields, focusConsentRecordHow } from "./patient-consent-parts";
 
 type Lang = "ru" | "de" | "uk" | "en";
 
@@ -134,12 +134,19 @@ export function PatientConsentChoicesDialog({
   const [error, setError] = useState("");
   const [showErrors, setShowErrors] = useState(false);
   const [serverProblem, setServerProblem] = useState<{ index: number; field: RecipientField } | null>(null);
+  const [how, setHow] = useState<StaffConsentChannel | "">("");
+  const [note, setNote] = useState("");
+  const [howMissing, setHowMissing] = useState(false);
+  const staff = patientId !== null;
   useEffect(() => {
     if (open) {
       setDraft(consentDraftOf(state));
       setError("");
       setShowErrors(false);
       setServerProblem(null);
+      setHow("");
+      setNote("");
+      setHowMissing(false);
     }
   }, [open, state]);
   const changed = draftChanged(draft, state);
@@ -147,13 +154,21 @@ export function PatientConsentChoicesDialog({
   const withdrawal = onlyWithdraws(sent.choices, sent.recipients, state);
   const needsConsent = sent.recipients.length > 0 && !withdrawal;
 
-  const save = async (recorded: StaffConsentRecord | null) => {
+  const save = async () => {
     setShowErrors(true);
+    // Staff: «Как клиент сообщил» is required; it is marked with the other missing answers.
+    if (staff && !how) setHowMissing(true);
     if (trustedPersonsProblem(draft.persons)) return;
     if (needsConsent && !draft.consentGiven) {
       setError(text.consentRequired);
       return;
     }
+    if (staff && !how) {
+      setError("");
+      focusConsentRecordHow("patient-consent");
+      return;
+    }
+    const recorded: StaffConsentRecord | null = staff && how ? { how, note } : null;
     setBusy(true);
     setError("");
     setServerProblem(null);
@@ -186,40 +201,45 @@ export function PatientConsentChoicesDialog({
         title={text.change}
         maxWidthClassName="sm:max-w-3xl"
         testId="patient-consent-dialog"
-        footer={patientId === null ? (
-          <div className="flex justify-end gap-2 px-4 py-3">
-            <Button type="button" disabled={busy || !changed} onClick={() => void save(null)} data-testid="patient-consent-save">
+        footer={(
+          <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3" data-testid="patient-consent-footer">
+            {error ? <p role="alert" className="mr-auto min-w-0 text-sm text-destructive" data-testid="patient-consent-error">{error}</p> : null}
+            <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)} data-testid="patient-consent-cancel">
+              {cabinetStaffText(lang).cancel}
+            </Button>
+            <Button type="button" disabled={busy || !changed} onClick={() => void save()} data-testid={staff ? "patient-consent-record-save" : "patient-consent-save"}>
               {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}{text.save}
             </Button>
           </div>
-        ) : null}
+        )}
       >
-        <fieldset className="space-y-1.5 rounded-lg border border-border/60 bg-card p-3 text-sm" data-testid="patient-consent-channels">
-          <legend className="px-1 font-mono text-xs font-medium text-foreground/80">{text.channels}</legend>
-          {shownChannels(state).map((key) => (
-            <label key={key} className="flex items-center gap-2">
-              <input type="checkbox" className={checkboxClass} checked={draft.choices[key]} disabled={busy}
-                onChange={() => toggle(key)} data-testid={`patient-consent-${key}`} />
-              <span>{formText.options[key]}</span>
-            </label>
-          ))}
-        </fieldset>
-        <section className="space-y-2" aria-label={text.persons}>
-          <h3 className="font-mono text-xs font-medium text-foreground/80">{text.persons}</h3>
+        <ConsentCard icon={MessageSquare} title={text.channels} fieldset testId="patient-consent-channels">
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            {shownChannels(state).map((key) => (
+              <label key={key} className="flex min-w-0 items-center gap-2">
+                <input type="checkbox" className={checkboxClass} checked={draft.choices[key]} disabled={busy}
+                  onChange={() => toggle(key)} data-testid={`patient-consent-${key}`} />
+                <span>{formText.options[key]}</span>
+              </label>
+            ))}
+          </div>
+        </ConsentCard>
+        <ConsentCard icon={Users} title={text.persons} testId="patient-consent-persons">
           <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} showErrors={showErrors} serverProblem={serverProblem}
-            onChange={(persons) => setDraft((current) => ({ ...current, persons }))} />
-        </section>
-        {needsConsent ? (
-          <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-card p-3 text-sm" data-testid="patient-consent-disclosure">
-            <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={draft.consentGiven} disabled={busy}
-              onChange={() => setDraft((current) => ({ ...current, consentGiven: !current.consentGiven }))} data-testid="patient-consent-given" />
-            <span><span className="font-medium">{text.consent}:</span> {state.disclosure_text}</span>
-          </label>
-        ) : null}
-        {error ? <p role="alert" className="text-sm text-destructive" data-testid="patient-consent-error">{error}</p> : null}
-        {patientId !== null ? (
-          <StaffConsentRecordFields lang={lang === "de" ? "de" : "ru"} testId="patient-consent" busy={busy} hint="" howLabel={text.howLabel}
-            actionLabel={text.save} actionDisabled={!changed} onRecord={(recorded) => void save(recorded)} onCancel={() => onOpenChange(false)} />
+            variant={staff ? "staff" : "cabinet"} onChange={(persons) => setDraft((current) => ({ ...current, persons }))} />
+          {needsConsent ? (
+            <label className="flex items-start gap-2 border-t border-border/60 pt-3" data-testid="patient-consent-disclosure">
+              <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={draft.consentGiven} disabled={busy}
+                onChange={() => setDraft((current) => ({ ...current, consentGiven: !current.consentGiven }))} data-testid="patient-consent-given" />
+              <span><span className="font-medium">{text.consent}:</span> {state.disclosure_text}</span>
+            </label>
+          ) : null}
+        </ConsentCard>
+        {staff ? (
+          <ConsentCard testId="patient-consent-record-card">
+            <ConsentRecordFields lang={lang} testId="patient-consent" howLabel={text.howLabel} how={how} note={note} disabled={busy}
+              missing={howMissing} onHow={(value) => { setHow(value); if (value) setHowMissing(false); }} onNote={setNote} />
+          </ConsentCard>
         ) : null}
       </AdminDialogScaffold>
     </Dialog>

@@ -294,6 +294,25 @@ describe("trusted persons independent of consent", () => {
     expect(clinic.match(/type="checkbox"[^>]*checked=""/g)).toHaveLength(1);
   });
 
+  it("the staff variant has short labels; «all» stays on its own row above the three it covers (fix-92)", () => {
+    const persons = [{ ...friend, scopeCodes: ["all"] }] satisfies RecipientDraft[];
+    const staff = renderToStaticMarkup(<TrustedPersonsEditor persons={persons} lang="ru" variant="staff" onChange={() => undefined} />);
+    for (const label of ["Телефон", "Кем приходится", "Гражданство"]) expect(staff).toContain(`>${label}</`);
+    expect(staff).not.toContain(trustedPersonsText("ru").phone);
+    expect(staff).not.toContain(trustedPersonsText("ru").relation);
+    expect(staff).not.toContain("если несколько");
+    expect(staff).not.toContain(scopeOptionLabel("medical", "ru"));
+    expect(staff).toContain(cabinetScopeSummary(["medical"], "ru"));
+    expect(staff).toContain('data-testid="trusted-person-scope-parts"');
+    // Same data: «all» still ticks every option.
+    expect(staff.match(/type="checkbox"[^>]*checked=""/g)).toHaveLength(CONSENT_RECIPIENT_SCOPES.length);
+    // The cabinet keeps its wording.
+    const cabinet = renderToStaticMarkup(<TrustedPersonsEditor persons={persons} lang="ru" onChange={() => undefined} />);
+    expect(cabinet).toContain(trustedPersonsText("ru").phone);
+    expect(cabinet).toContain(scopeOptionLabel("medical", "ru"));
+    expect(cabinet).not.toContain('data-testid="trusted-person-scope-parts"');
+  });
+
   it("after the send only withdraws: no for everybody, or fewer saved persons", () => {
     const request = { trusted_persons: [stored, { ...stored, name: "Max Muster" }] };
     const saved = disclosureDraft(request);

@@ -8,7 +8,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { checkboxClass, inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
-import { CONSENT_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, normalizeScopeCodes, scopeOptionLabel, toggleScopeCode } from "@/lib/consent-recipient-scope";
+import { CONSENT_RECIPIENT_SCOPES, PARTIAL_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, normalizeScopeCodes, scopeOptionLabel, toggleScopeCode, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import { isValidPersonPhone } from "@/lib/person-fields";
 import { cn } from "@/lib/utils";
 import { CONSENT_RECIPIENT_RELATIONS, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation } from "./lead-request-api";
@@ -63,6 +63,14 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
   </ul>;
 }
 
+/** Short field labels of the staff dialogs: staff need no hints (owner 2026-11-15, fix-92). */
+const STAFF_LABELS = {
+  ru: { phone: "Телефон", relation: "Кем приходится", citizenship: "Гражданство" },
+  de: { phone: "Telefon", relation: "Beziehung", citizenship: "Staatsangehörigkeit" },
+  uk: { phone: "Телефон", relation: "Ким доводиться", citizenship: "Громадянство" },
+  en: { phone: "Phone", relation: "Relationship", citizenship: "Citizenship" },
+} as const;
+
 /**
  * `showErrors` (after "Next" or a tab could not save the choice) marks each
  * missing or wrong entry at its field; a phone number that is not one is named
@@ -70,12 +78,20 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
  * refused. A saved person shown unchanged keeps its legacy contact (read-only)
  * and needs no phone or date of birth until it is edited (owner 2026-10-26).
  */
-export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false, showErrors = false, serverProblem = null }: {
+export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false, showErrors = false, serverProblem = null, variant = "cabinet" }: {
   persons: readonly RecipientDraft[]; onChange: (persons: RecipientDraft[]) => void; lang: string; disabled?: boolean; showErrors?: boolean;
   serverProblem?: { index: number; field: RecipientField } | null;
+  /** `staff`: the staff dialogs' short labels and scope options without the hints (fix-92). */
+  variant?: "cabinet" | "staff";
 }) {
   const text = consentFormText(lang);
   const fields = trustedPersonsText(lang);
+  const staff = variant === "staff";
+  const short = STAFF_LABELS[asLeadCabinetLang(lang) ?? "de"];
+  const relationLabel = staff ? short.relation : fields.relation;
+  const phoneLabel = staff ? short.phone : fields.phone;
+  const citizenshipLabel = staff ? short.citizenship : citizenshipFieldLabel(lang);
+  const scopeLabel = (code: ConsentRecipientScope) => (staff ? cabinetScopeSummary([code], lang) : scopeOptionLabel(code, lang));
   const today = appDateKey();
   const [leftPhone, setLeftPhone] = useState<ReadonlySet<number>>(() => new Set());
   const update = (index: number, patch: Partial<RecipientDraft>) => onChange(persons.map((person, at) => at === index ? { ...person, ...patch } : person));
@@ -133,14 +149,14 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         <Input className={inputClass} value={person.name} maxLength={120} disabled={disabled} autoComplete="off" aria-invalid={problems.has("name") || undefined} aria-describedby={describedBy("name")} onChange={(event) => update(index, { name: event.target.value })} />
         {message("name", problems, index)}
       </label>
-      <label className="min-w-0 space-y-1.5 text-xs"><span className="font-mono font-medium leading-5 text-foreground/75">{fields.relation}</span>
+      <label className="min-w-0 space-y-1.5 text-xs"><span className="font-mono font-medium leading-5 text-foreground/75">{relationLabel}</span>
         <NativeComboboxSelect className={selectClass} value={person.relation} disabled={disabled} aria-invalid={problems.has("relation") || undefined} aria-describedby={describedBy("relation")} onChange={(event) => update(index, { relation: event.target.value as ConsentRecipientRelation | "" })}>
           <option value="">—</option>{CONSENT_RECIPIENT_RELATIONS.map((relation) => <option key={relation} value={relation}>{text.recipientRelations[relation]}</option>)}
         </NativeComboboxSelect>
         {message("relation", problems, index)}
       </label>
       <div className="min-w-0 space-y-1.5 text-xs">
-        <label htmlFor={`trusted-person-phone-${index}`} className="block font-mono font-medium leading-5 text-foreground/75">{fields.phone}</label>
+        <label htmlFor={`trusted-person-phone-${index}`} className="block font-mono font-medium leading-5 text-foreground/75">{phoneLabel}</label>
         <Input id={`trusted-person-phone-${index}`} className={inputClass} type="tel" inputMode="tel" value={person.phone} maxLength={40} disabled={disabled} autoComplete="off" required
           aria-invalid={problems.has("phone") || undefined} aria-describedby={[describedBy("phone"), legacyContact ? `trusted-person-contact-${index}` : null].filter(Boolean).join(" ") || undefined}
           data-testid="trusted-person-phone"
@@ -160,24 +176,35 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
       </div>}
       {/* Optional, several possible (client decision 2026-11-02); never screened. */}
       {institution ? null : <div className="min-w-0 space-y-1.5 text-xs sm:col-span-2">
-        <label htmlFor={`trusted-person-citizenships-${index}`} className="font-mono font-medium leading-5 text-foreground/75">{citizenshipFieldLabel(lang)}</label>
+        <label htmlFor={`trusted-person-citizenships-${index}`} className="font-mono font-medium leading-5 text-foreground/75">{citizenshipLabel}</label>
         <CitizenshipMultiSelect id={`trusted-person-citizenships-${index}`} className={inputClass} value={person.citizenships ?? []} disabled={disabled}
           lang={asLeadCabinetLang(lang) ?? undefined} placeholder={fields.citizenshipsPlaceholder}
           onChange={(citizenships) => update(index, { citizenships })} />
       </div>}
       <fieldset className="min-w-0 space-y-1.5 text-xs sm:col-span-2" aria-invalid={problems.has("scope") || undefined} aria-describedby={describedBy("scope")} data-testid="trusted-person-scope">
         <legend className="mb-1.5 font-mono font-medium leading-5 text-foreground/75">{fields.scope}</legend>
-        <div className="grid gap-1.5 sm:grid-cols-2">
-          {CONSENT_RECIPIENT_SCOPES.map((code) => <label key={code} className={cn(
+        {(() => {
+          const allChosen = checked.includes("all");
+          const option = (code: ConsentRecipientScope) => <label key={code} className={cn(
             "flex min-h-11 min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-sm leading-5 sm:min-h-9 sm:py-1.5",
-            checked.includes(code) ? "border-primary/40 bg-primary/5" : "border-border/70 bg-card",
+            // Staff: with «all» the three others are part of it, not separate choices (fix-92).
+            staff && allChosen && code !== "all" ? "border-border/60 bg-muted/40 text-muted-foreground"
+              : checked.includes(code) ? "border-primary/40 bg-primary/5" : "border-border/70 bg-card",
             disabled && "cursor-not-allowed",
           )}>
             <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={checked.includes(code)} disabled={disabled}
               data-testid={`trusted-person-scope-${code}`} onChange={() => update(index, { scopeCodes: toggleScopeCode(person.scopeCodes, code) })} />
-            <span>{scopeOptionLabel(code, lang)}</span>
-          </label>)}
-        </div>
+            <span>{scopeLabel(code)}</span>
+          </label>;
+          return staff
+            ? <div className="space-y-1.5">
+              {option("all")}
+              <div className="ml-3 grid gap-1.5 border-l-2 border-border/70 pl-3 sm:grid-cols-3" data-testid="trusted-person-scope-parts">
+                {PARTIAL_RECIPIENT_SCOPES.map(option)}
+              </div>
+            </div>
+            : <div className="grid gap-1.5 sm:grid-cols-2">{CONSENT_RECIPIENT_SCOPES.map(option)}</div>;
+        })()}
         {person.scopeCodes.length === 0 && person.scope.trim()
           ? <p className="text-amber-700 dark:text-amber-400" data-testid="trusted-person-scope-legacy">{fields.scopeLegacy(person.scope.trim())}</p>
           : message("scope", problems, index)}
