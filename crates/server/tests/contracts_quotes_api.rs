@@ -3872,6 +3872,9 @@ async fn signed_contract_with_running_orders_cannot_go_back_and_expired_is_retir
     let audit_context: Value = sqlx::query_scalar(
         r#"SELECT context FROM audit_log
            WHERE action = 'update_framework_contract_status' AND entity_id = $1::uuid
+             -- The withdrawal itself, not the newest row by time: the test
+             -- database clock can step back between two requests.
+             AND context ->> 'previous_status' = 'signed'
            ORDER BY created_at DESC LIMIT 1"#,
     )
     .bind(&contract_id)
