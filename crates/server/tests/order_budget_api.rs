@@ -160,10 +160,34 @@ async fn budget_counts_own_services_against_the_signed_contract() {
     sign_order(&pool, order_id, "to_jsonb(now() - interval '2 hours')").await;
     let (_, budget) = get_budget(&app, order_id, &ceo).await;
     assert_eq!(budget["contract"]["source"], "order_signature");
+    assert!(
+        budget["contract"]["signed_at"].is_string(),
+        "signed_at parsed: {budget:?}"
+    );
     assert_eq!(
         money(&budget["contract_own_services_gross"]),
         Decimal::from(1190)
     );
+
+    // A planned medical visit is only projected by the planning grid: the
+    // plan itself stays the order lines.
+    sqlx::query(
+        r#"INSERT INTO appointments (patient_id, order_id, appointment_type, title, date,
+                                     status, created_by)
+           VALUES ($1, $2, 'medical', 'Kontrolle', CURRENT_DATE + 7, 'planned', $3)"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, with_visit) = get_budget(&app, order_id, &ceo).await;
+    assert_eq!(
+        money(&with_visit["planned_own_services_gross"]),
+        Decimal::from(1190)
+    );
+    assert_eq!(with_visit["free_visit_units"], 0);
     assert_eq!(
         money(&budget["contract_own_services_net"]),
         Decimal::from(1000)
@@ -319,9 +343,8 @@ async fn budget_counts_own_services_against_the_signed_contract() {
     .unwrap();
     let (_, budget) = get_budget(&app, order_id, &ceo).await;
     let concierge_rate = money(&budget["concierge_vat_rate"]);
-    let concierge_gross = (Decimal::from(100) * (Decimal::ONE_HUNDRED + concierge_rate)
-        / Decimal::ONE_HUNDRED)
-        .round_dp(2);
+    let concierge_gross =
+        Decimal::from(100) + gmed_server::money::vat_amount(Decimal::from(100), concierge_rate);
     assert_eq!(
         money(&budget["planned_parts"]["concierge_gross"]),
         concierge_gross

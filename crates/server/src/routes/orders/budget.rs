@@ -681,6 +681,7 @@ async fn get_order_budget(
         visits.try_get("completed").unwrap_or(0),
         visits.try_get("pending").unwrap_or(0),
     );
+    // Estimate only (not part of the plan, see below).
     let mut planned_visits = Amounts::default();
     if let Some(fee) = visit_fee {
         planned_visits = Amounts {
@@ -732,7 +733,9 @@ async fn get_order_budget(
     let contract = contract_sum(versions, &amendments, &|id| billed_lines.contains(&id));
     let mut planned = planned_services;
     planned.add(concierge_amounts);
-    planned.add(planned_visits);
+    // Pending visits stay out of the plan: whether a completed visit adds a
+    // line depends on its provider, doctor and service group at completion
+    // (`appointments.rs`). The estimate below only projects new grid visits.
     let invoiced = Amounts {
         net: invoiced
             .try_get::<Decimal, _>("net")
@@ -815,8 +818,8 @@ pub(crate) fn budget_payload(
         "planned_parts": {
             "services_gross": money_value(parts.services.gross),
             "concierge_gross": money_value(parts.concierge.gross),
-            "visits_gross": money_value(parts.visits.gross),
-            "uncovered_visits": parts.uncovered_visits,
+            "pending_visits_fee_gross": money_value(parts.visits.gross),
+            "pending_visits_uncovered": parts.uncovered_visits,
         },
         // For projections of an action before it is saved.
         "free_visit_units": parts.free_visit_units,
