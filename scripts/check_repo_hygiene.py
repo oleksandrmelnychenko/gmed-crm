@@ -43,6 +43,8 @@ FORBIDDEN_TRACKED_PATHS = (
 # 20261114120001 repairs legacy cancelled orders (cancelled_at, planned lines,
 # open checklist items and tasks) and audits them inside the migration
 # transaction (no handler insert).
+# 20261116150005 drops the stored key of the earlier mail provider and audits
+# the switch to eusend inside the migration transaction (no handler insert).
 AUDIT_INSERT_BUDGET = 6
 AUDIT_SEARCH_PATH = "crates/server/src/routes/"
 AUDIT_PATTERN = "INSERT INTO audit_log"
