@@ -2726,6 +2726,95 @@ async fn a_manual_split_after_a_pro_rata_payment_is_booked_and_deducted_as_enter
     // What the final asked: 2.000,00 − 500,00 = 1.500,00, VAT 159,66 − 36,33.
     assert!(text.contains("-1.500,00"), "{text}");
     assert!(text.contains("-123,33"), "{text}");
+
+    // The unpaid 300 was closed per category at the release (19 % 245,89,
+    // 0 % 54,11): the advance still holds exactly what each category was
+    // paid, and a new final deducts the same rows.
+    let detail = invoice_detail(&app, &billing, advance).await;
+    let categories = detail["advance_categories"]["categories"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let category = |kind: &str, field: &str| {
+        money(
+            &categories
+                .iter()
+                .find(|category| category["kind"] == kind)
+                .unwrap()[field],
+        )
+    };
+    assert_eq!(category("taxed", "gross"), dec("227.53"));
+    assert_eq!(category("taxed", "paid_gross"), dec("227.53"));
+    assert_eq!(category("zero_rated", "gross"), dec("272.47"));
+    assert_eq!(category("zero_rated", "paid_gross"), dec("272.47"));
+    let second_final: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) SELECT order_id, patient_id, 'final', 'draft', CURRENT_DATE + 14,
+                    total_net, total_vat, total_gross, 0, line_items, created_by
+             FROM invoices WHERE id = $1
+           RETURNING id"#,
+    )
+    .bind(final_invoice)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{second_final}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released:?}");
+    assert_eq!(money(&released["prepayment_applied_amount"]), dec("500"));
+    let vat_rows: Value = sqlx::query_scalar(
+        "SELECT vat_rows FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
+    )
+    .bind(second_final)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let taxed = vat_rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "taxed")
+        .unwrap()
+        .clone();
+    assert_eq!(money(&taxed["gross"]), dec("227.53"));
+    assert_eq!(money(&taxed["vat"]), dec("36.33"));
+
+    // Credit-note path: a full credit note on the final releases all of its
+    // deductions; the advance money is available again.
+    let (status, credited) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{second_final}/credit-notes"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{"line_index": 0}, {"line_index": 1}],
+            "reason": "Leistungen entfallen",
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credited:?}");
+    let left: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
+    )
+    .bind(second_final)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(
+        money(&credited["invoice"]["prepayment_applied_amount"]),
+        dec("0")
+    );
 }
 
 /// A payment recorded before splits were frozen keeps the former pro rata

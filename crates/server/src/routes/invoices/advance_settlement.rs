@@ -277,7 +277,17 @@ pub(super) async fn close_advance_rest_tx(
         &existing,
         context.total_gross,
     );
-    let Some(selection) = credit_notes::proportional_selection(&creditable, rest) else {
+    // A categorised advance closes, per VAT category, what each category
+    // has not paid (or deducted): its payments' splits are frozen, so a
+    // manual split leaves categories paid unevenly (QA 2026-11-16 S1-1).
+    let by_category = category_rest(transaction, advance_invoice_id, scope)
+        .await
+        .map_err(|error| failed_response(error, advance_invoice_id, "advance rest by category"))?
+        .filter(|rows| rows.iter().map(|row| row.gross).sum::<Decimal>() == rest)
+        .and_then(|rows| category_rest_selection(&creditable, &rows));
+    let Some(selection) =
+        by_category.or_else(|| credit_notes::proportional_selection(&creditable, rest))
+    else {
         tracing::warn!(
             invoice_id = %advance_invoice_id,
             rest = %rest,
@@ -314,6 +324,81 @@ pub(super) async fn close_advance_rest_tx(
     )
     .await?;
     Ok(Some(issued))
+}
+
+/// The rest of a categorised advance per VAT category: what each category
+/// still asks beyond what it was paid (`Unpaid`, or deducted when that is
+/// more) or deducted (`Unused`). `None` for an advance without line amounts.
+async fn category_rest(
+    conn: &mut PgConnection,
+    advance_id: Uuid,
+    scope: AdvanceRest,
+) -> Result<Option<Vec<super::document::VatBreakdownRow>>, sqlx::Error> {
+    if super::advance_rows::settlement_rows(conn, advance_id)
+        .await?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let (rows, paid) = super::advance_rows::advance_paid(conn, advance_id).await?;
+    let mut allocated = Vec::new();
+    for allocation in super::advance_rows::allocation_rows(conn, advance_id, true).await? {
+        super::advance_rows::add_rows(&mut allocated, &allocation.rows);
+    }
+    let used = rows
+        .iter()
+        .map(|row| {
+            let key = super::advance_rows::category_of(row);
+            let sum = |items: &[super::document::VatBreakdownRow]| {
+                items
+                    .iter()
+                    .filter(|item| super::advance_rows::category_of(item) == key)
+                    .fold((Decimal::ZERO, Decimal::ZERO), |(gross, vat), item| {
+                        (gross + item.gross, vat + item.vat)
+                    })
+            };
+            let (allocated_gross, allocated_vat) = sum(&allocated);
+            let (paid_gross, paid_vat) = sum(&paid);
+            let (gross, vat) = match scope {
+                AdvanceRest::Unpaid if paid_gross > allocated_gross => (paid_gross, paid_vat),
+                _ => (allocated_gross, allocated_vat),
+            };
+            super::document::VatBreakdownRow {
+                kind: key.0,
+                rate: key.1,
+                net: gross - vat,
+                vat,
+                gross,
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut rest = super::advance_rows::subtract_rows(&rows, &used);
+    rest.retain(|row| row.gross > Decimal::ZERO);
+    Ok(Some(rest))
+}
+
+/// A credit of `rest` per VAT category, each category shared over its own
+/// open lines; `None` when a category has no line to take it.
+fn category_rest_selection(
+    creditable: &[credit_notes::CreditableLine],
+    rest: &[super::document::VatBreakdownRow],
+) -> Option<credit_notes::CreditSelection> {
+    let mut selected = Vec::new();
+    for row in rest {
+        let key = super::advance_rows::category_of(row);
+        let lines = creditable
+            .iter()
+            .filter(|line| {
+                super::advance_rows::category_for(line.is_cost_passthrough, line.vat_rate) == key
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        match credit_notes::proportional_selection(&lines, row.gross)? {
+            credit_notes::CreditSelection::Lines(items) => selected.extend(items),
+            _ => return None,
+        }
+    }
+    (!selected.is_empty()).then_some(credit_notes::CreditSelection::Lines(selected))
 }
 
 /// After a final invoice was released (and the paid advances were credited

@@ -499,8 +499,46 @@ pub(super) fn paid_rows(
             }
         })
         .collect::<Vec<_>>();
-    let total: Decimal = paid.iter().map(|row| row.gross).sum();
     let cash = cash.round_cents().max(Decimal::ZERO);
+    // A credit note on the advance may leave a category below what its
+    // payments put there: that cash moves to the categories with room, so
+    // the reading still adds up to the retained cash.
+    let stored_total: Decimal = sum.iter().map(|row| row.gross).sum();
+    let capped_total: Decimal = paid.iter().map(|row| row.gross).sum();
+    let lost = (stored_total.min(cash) - capped_total).max(Decimal::ZERO);
+    let paid = if lost > Decimal::ZERO {
+        let rooms = advance_rows
+            .iter()
+            .zip(&paid)
+            .map(|(row, part)| (row.kind, (row.gross - part.gross).max(Decimal::ZERO)))
+            .collect::<Vec<_>>();
+        advance_rows
+            .iter()
+            .zip(paid)
+            .zip(split_within(lost, &rooms))
+            .map(|((row, part), extra)| {
+                if extra <= Decimal::ZERO {
+                    return part;
+                }
+                let gross = part.gross + extra;
+                let vat = (part.vat + vat_share(gross, row.gross, row.vat)
+                    - vat_share(part.gross, row.gross, row.vat))
+                .max(Decimal::ZERO)
+                .min(row.vat)
+                .min(gross);
+                VatBreakdownRow {
+                    kind: part.kind,
+                    rate: part.rate,
+                    net: gross - vat,
+                    vat,
+                    gross,
+                }
+            })
+            .collect::<Vec<_>>()
+    } else {
+        paid
+    };
+    let total: Decimal = paid.iter().map(|row| row.gross).sum();
     if cash >= total {
         return paid
             .into_iter()
@@ -1181,6 +1219,31 @@ mod tests {
             paid_rows(&advance, &payments, dec("400")),
             deducted_advance_rows(&advance, dec("400"))
         );
+    }
+
+    /// A credit note on a category below what was paid there: the cash
+    /// moves to the categories with room, the reading keeps the cash.
+    #[test]
+    fn cash_above_a_credited_category_moves_to_the_others() {
+        let advance = a1_advance();
+        let first = pro_rata_payment_rows(&advance, &[], dec("300"));
+        let manual = vec![
+            row(VatGroupKind::Taxed, "19", "7.98", "50"),
+            row(VatGroupKind::ZeroRated, "0", "0", "150"),
+        ];
+        let payments = [payment("300", Some(first)), payment("200", Some(manual))];
+        // 100 of the 0 % line credited: 226,58 left, 272,47 were paid there.
+        let credited = vec![
+            row(VatGroupKind::Taxed, "19", "75.59", "473.42"),
+            row(VatGroupKind::ZeroRated, "0", "0", "226.58"),
+        ];
+        let paid = paid_rows(&credited, &payments, dec("500"));
+        assert_eq!(
+            paid.iter().map(|row| row.gross).sum::<Decimal>(),
+            dec("500")
+        );
+        assert_eq!(paid[1].gross, dec("226.58"));
+        assert_eq!(paid[0].gross, dec("273.42"));
     }
 
     #[test]

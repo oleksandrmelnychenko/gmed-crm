@@ -4758,20 +4758,6 @@ function useOrdersPageContent() {
                             </p>
                           ) : null}
                           <OrderConciergeSales economics={orderEconomics} lang={lang} formatMoney={formatOptionalMoney} />
-                          {Number(orderEconomics.actual.advance_available_gross ?? 0) > 0 ||
-                          Number(orderEconomics.actual.patient_credit_gross ?? 0) > 0 ? (
-                            <p className="text-xs text-muted-foreground">
-                              {t.finance_order_held_hint
-                                .replace(
-                                  "{advance}",
-                                  formatMoney(orderEconomics.actual.advance_available_gross ?? 0, orderEconomics.currency),
-                                )
-                                .replace(
-                                  "{credit}",
-                                  formatMoney(orderEconomics.actual.patient_credit_gross ?? 0, orderEconomics.currency),
-                                )}
-                            </p>
-                          ) : null}
 
                           {orderEconomics.warnings.length > 0 ? (
                             <Banner tone="warning" withIcon>
