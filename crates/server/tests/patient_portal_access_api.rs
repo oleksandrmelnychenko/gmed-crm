@@ -1,6 +1,6 @@
 //! Integration tests for the login row of the patients table (owner request
 //! 2026-10-05): the patient's portal login with a generated password, its
-//! sign-in e-mail through Mittaro, and the order tariff that becomes the
+//! sign-in e-mail through eusend, and the order tariff that becomes the
 //! patient's account type. Synthetic data only.
 
 mod support;
@@ -87,13 +87,13 @@ async fn json_request(
 }
 
 #[derive(Clone, Default)]
-struct FakeMittaro {
+struct FakeMailApi {
     received: Arc<Mutex<Vec<Value>>>,
     accepted: Arc<Mutex<HashMap<String, String>>>,
 }
 
 async fn fake_send(
-    State(fake): State<FakeMittaro>,
+    State(fake): State<FakeMailApi>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, axum::Json<Value>) {
@@ -109,23 +109,20 @@ async fn fake_send(
     let mut accepted = fake.accepted.lock().unwrap();
     let id = format!("email_{}", accepted.len() + 1);
     accepted.entry(key).or_insert(id.clone());
-    (
-        StatusCode::ACCEPTED,
-        axum::Json(json!({ "id": id, "status": "queued" })),
-    )
+    (StatusCode::CREATED, axum::Json(json!({ "id": id })))
 }
 
-async fn start_fake_mittaro() -> (String, FakeMittaro) {
-    let fake = FakeMittaro::default();
+async fn start_fake_mail_api() -> (String, FakeMailApi) {
+    let fake = FakeMailApi::default();
     let router = Router::new()
-        .route("/v1/emails", post(fake_send))
+        .route("/emails", post(fake_send))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
-    (format!("http://{address}/v1/emails"), fake)
+    (format!("http://{address}"), fake)
 }
 
 fn listed(list: &Value, patient_id: Uuid) -> Value {
@@ -149,10 +146,10 @@ async fn the_patients_table_issues_and_emails_the_login_and_shows_the_order_tari
     let manager = bearer(manager_id, "patient_manager");
     let sales = bearer(sales_id, "sales");
 
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_test")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_test")),
+        api_url: Some(api_url),
         from: Some("zugang@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),

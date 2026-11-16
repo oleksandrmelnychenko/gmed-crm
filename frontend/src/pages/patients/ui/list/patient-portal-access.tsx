@@ -307,8 +307,8 @@ export function PatientPortalAccessDetail({
             <DialogDescription>
               {!mailReady
                 ? de
-                  ? "Der E-Mail-Versand ist nicht eingerichtet. Mittaro wird unter „API-Verbindungen“ → „E-Mail“ verbunden; bis dahin den Zugang per Nachricht weitergeben."
-                  : "Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail»; пока передайте доступ сообщением."
+                  ? "Der E-Mail-Versand ist nicht eingerichtet. eusend wird unter „API-Verbindungen“ → „E-Mail“ verbunden; bis dahin den Zugang per Nachricht weitergeben."
+                  : "Отправка e-mail не настроена. eusend подключается в разделе «API-подключения» → «E-Mail»; пока передайте доступ сообщением."
                 : canReset
                   ? de
                     ? `Das bisherige Passwort funktioniert danach nicht mehr. E-Mail an ${loginEmail}.`

@@ -668,7 +668,7 @@ test.describe("patients data-table", () => {
       (url) => url.pathname === `/api/v1/patients/${anna.id}/portal-login-email`,
       (route) => json(route, {
         available: false,
-        reason_code: "mittaro_api_key_missing",
+        reason_code: "mail_api_key_missing",
         can_send: true,
         default_language: "de",
         lead_language: "de",
@@ -697,7 +697,7 @@ test.describe("patients data-table", () => {
     await expect(row).toContainText("anna@example.com");
     // Patients have no GwG sheet in this row.
     await expect(row.getByText("Doku-Bogen GwG")).toHaveCount(0);
-    // Mittaro reported the access e-mail as undeliverable.
+    // The mail provider reported the access e-mail as undeliverable.
     await expect(row.getByTestId("portal-login-email-delivery")).toHaveAttribute("data-status", "bounced");
     await expect(row.getByTestId("portal-login-email-fact")).toContainText(/Unzustellbar|Не доставлено/);
     // A row without login data from the server has no chevron.

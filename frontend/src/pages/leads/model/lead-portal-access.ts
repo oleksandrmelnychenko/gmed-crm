@@ -123,21 +123,25 @@ const LOGIN_EMAIL_ERRORS: Record<string, { ru: string; de: string }> = {
     ru: "Домен адреса получателя не принимает почту. Проверьте адрес",
     de: "Die Domain der Empfängeradresse empfängt keine E-Mails. Bitte Adresse prüfen",
   },
+  mail_recipient_blocked: {
+    ru: "eusend блокирует этот адрес после прежнего отказа или жалобы на спам. Передайте доступ сообщением",
+    de: "eusend sperrt diese Adresse nach einer früheren Rückweisung oder Spam-Meldung. Zugang bitte per Nachricht weitergeben",
+  },
   mail_not_configured: {
-    ru: "Отправка e-mail не настроена (Mittaro). Передайте доступ сообщением",
-    de: "Der E-Mail-Versand ist nicht eingerichtet (Mittaro). Zugang bitte per Nachricht weitergeben",
+    ru: "Отправка e-mail не настроена (eusend). Передайте доступ сообщением",
+    de: "Der E-Mail-Versand ist nicht eingerichtet (eusend). Zugang bitte per Nachricht weitergeben",
   },
   mail_quota_reached: {
-    ru: "Лимит писем Mittaro исчерпан. Повторите позже",
-    de: "Das E-Mail-Kontingent bei Mittaro ist ausgeschöpft. Bitte später erneut versuchen",
+    ru: "Лимит писем eusend исчерпан. Повторите позже",
+    de: "Das E-Mail-Kontingent bei eusend ist ausgeschöpft. Bitte später erneut versuchen",
   },
   mail_rejected: {
-    ru: "Mittaro отклонил ключ или домен отправителя. Сообщите администратору",
-    de: "Mittaro hat den Schlüssel oder die Absenderdomain abgelehnt. Bitte die Administration informieren",
+    ru: "eusend отклонил ключ или домен отправителя. Сообщите администратору",
+    de: "eusend hat den Schlüssel oder die Absenderdomain abgelehnt. Bitte die Administration informieren",
   },
   mail_invalid_message: {
-    ru: "Mittaro не принял письмо. Сообщите администратору",
-    de: "Mittaro hat die E-Mail nicht angenommen. Bitte die Administration informieren",
+    ru: "eusend не принял письмо. Сообщите администратору",
+    de: "eusend hat die E-Mail nicht angenommen. Bitte die Administration informieren",
   },
   mail_unavailable: {
     ru: "Сервис e-mail временно недоступен. Повторите попытку",
@@ -171,7 +175,7 @@ const DELIVERY_LABELS: Record<LoginEmailDeliveryStatus, { ru: string; de: string
 };
 
 /**
- * Delivery state of the last sign-in e-mail (Mittaro, checked by the server):
+ * Delivery state of the last sign-in e-mail (eusend, checked by the server):
  * label, badge tone and, when the person did not get it, what to do.
  */
 export function loginEmailDelivery(status: LoginEmailDeliveryStatus, lang: Lang) {
@@ -186,8 +190,8 @@ export function loginEmailDelivery(status: LoginEmailDeliveryStatus, lang: Lang)
         label,
         tone: "warning" as const,
         hint: de
-          ? "Der Empfangsserver nimmt die E-Mail noch nicht an; Mittaro versucht es weiter."
-          : "Сервер получателя пока не принимает письмо; Mittaro пробует ещё.",
+          ? "Der Empfangsserver nimmt die E-Mail noch nicht an; eusend versucht es weiter."
+          : "Сервер получателя пока не принимает письмо; eusend пробует ещё.",
       };
     case "bounced":
     case "failed":
@@ -203,8 +207,8 @@ export function loginEmailDelivery(status: LoginEmailDeliveryStatus, lang: Lang)
         label,
         tone: "error" as const,
         hint: de
-          ? "Mittaro sendet nach einer Rückweisung oder Spam-Meldung nicht mehr an diese Adresse: Zugang per Nachricht weitergeben."
-          : "Mittaro больше не отправляет на этот адрес после отказа или жалобы на спам: передайте доступ сообщением.",
+          ? "eusend sendet nach einer Rückweisung oder Spam-Meldung nicht mehr an diese Adresse: Zugang per Nachricht weitergeben."
+          : "eusend больше не отправляет на этот адрес после отказа или жалобы на спам: передайте доступ сообщением.",
       };
     case "complained":
       return {

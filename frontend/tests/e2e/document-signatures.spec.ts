@@ -952,9 +952,9 @@ test("separate German connection dialog validates setup and clears the secret", 
   await expect(page.getByText("api_demo_fixture", { exact: true })).toBeVisible();
   await expect(page.getByLabel("API-Schlüssel", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Vertretungen einrichten", exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "E-Mail · Mittaro", exact: true }).click();
+  await page.getByRole("tab", { name: "E-Mail · eusend", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/api-connections\?tab=email$/);
-  await expect(page.getByTestId("mail-connection")).toContainText("Mittaro");
+  await expect(page.getByTestId("mail-connection")).toContainText("eusend");
   await expect(page.getByText("api_demo_fixture", { exact: true })).toHaveCount(0);
   // The former address of the signature page forwards here.
   await page.goto("/admin/signatures");
@@ -972,12 +972,12 @@ test("separate German connection dialog validates setup and clears the secret", 
   expect(fixture.submissions).toHaveLength(0);
 });
 
-test("the Mittaro tab saves the key without showing it again and sends a test letter", async ({ page }) => {
+test("the eusend tab saves the key without showing it again and sends a test letter", async ({ page }) => {
   await prepare(page);
   let connection: Record<string, unknown> = {
-    provider: "mittaro",
+    provider: "eusend",
     configured: false,
-    reason_code: "mittaro_api_key_missing",
+    reason_code: "mail_api_key_missing",
     source: "none",
     sender: null,
     reply_to: null,
@@ -995,29 +995,56 @@ test("the Mittaro tab saves the key without showing it again and sends a test le
   });
   await page.route("**/api/v1/mail/connection/test", async route => {
     testLetters.push(route.request().postDataJSON());
-    return route.fulfill({ json: { sent_to: "fixture@example.org", message_id: "email_01TEST" } });
+    return route.fulfill({ json: { sent_to: "fixture@example.org", message_id: "9a8b7c6d-5e4f-4a3b-8c1d-0e9f8a7b6c5d" } });
   });
 
   await page.goto("/admin/api-connections?tab=email");
   const section = page.getByTestId("mail-connection");
-  await expect(section).toContainText("Mittaro-Verbindung");
+  await expect(section).toContainText("eusend-Verbindung");
   const key = section.getByLabel("API-Schlüssel", { exact: true });
   await expect(key).toHaveAttribute("type", "password");
   await expect(section.getByRole("button", { name: "Speichern", exact: true })).toBeDisabled();
-  await key.fill("tx_live_fixtureAB12");
+  await key.fill("eu_live_fixtureAB12");
   await section.getByLabel("Absender", { exact: true }).fill("zugang@gmed-health.test");
   await section.getByRole("button", { name: "Speichern", exact: true }).click();
   await expect(section.getByRole("status")).toContainText("Verbindung gespeichert");
-  expect(saves).toEqual([{ api_key: "tx_live_fixtureAB12", sender: "zugang@gmed-health.test", reply_to: null }]);
+  expect(saves).toEqual([{ api_key: "eu_live_fixtureAB12", sender: "zugang@gmed-health.test", reply_to: null }]);
   // The key is not shown again and never kept in the browser.
   await expect(section.getByTestId("mail-connection-sender")).toHaveText("zugang@gmed-health.test");
   await expect(section).toContainText("…AB12");
   await expect(section.getByLabel("API-Schlüssel", { exact: true })).toHaveCount(0);
-  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).not.toContain("tx_live_fixtureAB12");
+  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).not.toContain("eu_live_fixtureAB12");
 
   await section.getByTestId("mail-connection-test").click();
   await expect(section.getByRole("status")).toHaveText("Test-E-Mail an fixture@example.org gesendet.");
   expect(testLetters).toEqual([{ to: null, language: "de" }]);
+});
+
+test("after the move to eusend the tab keeps the sender and asks for the eusend key", async ({ page }) => {
+  await prepare(page);
+  // The state migration 20261116150005 leaves: switched off, key dropped,
+  // sender and reply-to kept.
+  await page.route("**/api/v1/mail/connection", route => route.fulfill({
+    json: {
+      provider: "eusend",
+      configured: false,
+      reason_code: "mail_api_key_missing",
+      source: "disconnected",
+      sender: "zugang@gmed-health.test",
+      reply_to: "info@gmed-health.test",
+      key_hint: null,
+      console_url: "https://console.gmed-health.test",
+    },
+  }));
+  await page.goto("/admin/api-connections?tab=email");
+  const section = page.getByTestId("mail-connection");
+  await expect(section).toContainText("eusend-Verbindung");
+  await expect(section).toContainText("Der E-Mail-Versand läuft jetzt über eusend");
+  await expect(section).toContainText("Full access");
+  await expect(section.getByLabel("Absender", { exact: true })).toHaveValue("zugang@gmed-health.test");
+  await expect(section.getByLabel("Antworten an (optional)", { exact: true })).toHaveValue("info@gmed-health.test");
+  await expect(section.getByLabel("API-Schlüssel", { exact: true })).toHaveAttribute("placeholder", "eu_live_…");
+  await expect(section.getByRole("link", { name: "eusend-Konto öffnen", exact: true })).toHaveAttribute("href", "https://eusend.dev/overview");
 });
 
 

@@ -509,7 +509,7 @@ fn login_html(
     )
 }
 
-/// The test letter of the API connections page: proves that the saved Mittaro
+/// The test letter of the API connections page: proves that the saved e-mail
 /// key and sender work, without any personal data of patients.
 #[derive(Debug, Clone)]
 pub struct ConnectionTestEmail<'a> {
@@ -539,7 +539,7 @@ fn test_copy(language: MailLanguage) -> TestCopy {
             subject: "GMED: Testnachricht des E-Mail-Versands",
             label: "E-Mail-Versand",
             heading: "Der E-Mail-Versand funktioniert.",
-            body: "Diese Testnachricht wurde über Mittaro mit dem in der GMED-Konsole gespeicherten Zugang versendet. So sehen auch die Nachrichten an Patientinnen und Patienten aus.",
+            body: "Diese Testnachricht wurde über eusend mit dem in der GMED-Konsole gespeicherten Zugang versendet. So sehen auch die Nachrichten an Patientinnen und Patienten aus.",
             requested: "Angefordert von {name} am {at}.",
             sender: "Absender: {sender}",
             automatic: "Diese E-Mail wurde automatisch versendet.",
@@ -548,7 +548,7 @@ fn test_copy(language: MailLanguage) -> TestCopy {
             subject: "GMED: e-mail delivery test",
             label: "E-mail delivery",
             heading: "E-mail delivery works.",
-            body: "This test message was sent through Mittaro with the access saved in the GMED console. Messages to patients look the same.",
+            body: "This test message was sent through eusend with the access saved in the GMED console. Messages to patients look the same.",
             requested: "Requested by {name} on {at}.",
             sender: "Sender: {sender}",
             automatic: "This e-mail was sent automatically.",
@@ -557,7 +557,7 @@ fn test_copy(language: MailLanguage) -> TestCopy {
             subject: "GMED: тестовое письмо",
             label: "Отправка e-mail",
             heading: "Отправка e-mail работает.",
-            body: "Это тестовое письмо отправлено через Mittaro с доступом, сохранённым в консоли GMED. Так же выглядят письма пациентам.",
+            body: "Это тестовое письмо отправлено через eusend с доступом, сохранённым в консоли GMED. Так же выглядят письма пациентам.",
             requested: "Запросил(а) {name}, {at}.",
             sender: "Отправитель: {sender}",
             automatic: "Это письмо отправлено автоматически.",
@@ -566,7 +566,7 @@ fn test_copy(language: MailLanguage) -> TestCopy {
             subject: "GMED: тестовий лист",
             label: "Надсилання e-mail",
             heading: "Надсилання e-mail працює.",
-            body: "Цей тестовий лист надіслано через Mittaro з доступом, збереженим у консолі GMED. Так само виглядають листи пацієнтам.",
+            body: "Цей тестовий лист надіслано через eusend з доступом, збереженим у консолі GMED. Так само виглядають листи пацієнтам.",
             requested: "Запит від {name}, {at}.",
             sender: "Відправник: {sender}",
             automatic: "Цей лист надіслано автоматично.",

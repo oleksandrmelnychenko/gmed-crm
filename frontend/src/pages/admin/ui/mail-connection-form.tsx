@@ -28,38 +28,42 @@ import {
   type MailConnection,
 } from "../data/mail-connection-api";
 
-const MITTARO_APP = "https://app.mittaro.de/";
-const MITTARO_DOCS = "https://mittaro.de/dokumentation";
+const PROVIDER_APP = "https://eusend.dev/overview";
+const PROVIDER_DOCS = "https://eusend.dev/docs/getting-started/quick-start";
 
 const ERRORS: Record<string, [ru: string, de: string]> = {
-  mail_api_key_required: ["Введите API-ключ Mittaro.", "Bitte den Mittaro-API-Schlüssel eingeben."],
+  mail_api_key_required: ["Введите API-ключ eusend.", "Bitte den eusend-API-Schlüssel eingeben."],
   mail_api_key_invalid: [
-    "Ключ Mittaro начинается с tx_live_ или tx_test_.",
-    "Ein Mittaro-Schlüssel beginnt mit tx_live_ oder tx_test_.",
+    "Ключ eusend начинается с eu_live_ или eu_test_.",
+    "Ein eusend-Schlüssel beginnt mit eu_live_ oder eu_test_.",
   ],
   mail_sender_invalid: ["Укажите адрес отправителя.", "Bitte eine Absenderadresse angeben."],
   mail_reply_to_invalid: ["Адрес для ответов указан неверно.", "Die Antwortadresse ist ungültig."],
   mail_test_recipient_invalid: ["Укажите адрес получателя.", "Bitte eine Empfängeradresse angeben."],
   mail_not_configured: ["Отправка e-mail не настроена.", "Der E-Mail-Versand ist nicht eingerichtet."],
   mail_rejected: [
-    "Mittaro отклонил ключ или домен отправителя. Проверьте ключ и подтверждение домена в Mittaro.",
-    "Mittaro hat den Schlüssel oder die Absenderdomain abgelehnt. Bitte Schlüssel und Domainbestätigung bei Mittaro prüfen.",
+    "eusend отклонил ключ или домен отправителя. Проверьте ключ и подтверждение домена в eusend.",
+    "eusend hat den Schlüssel oder die Absenderdomain abgelehnt. Bitte Schlüssel und Domainbestätigung bei eusend prüfen.",
   ],
   mail_invalid_message: [
-    "Mittaro не принял письмо. Проверьте адрес отправителя.",
-    "Mittaro hat die E-Mail nicht angenommen. Bitte die Absenderadresse prüfen.",
+    "eusend не принял письмо. Проверьте адрес отправителя.",
+    "eusend hat die E-Mail nicht angenommen. Bitte die Absenderadresse prüfen.",
   ],
   mail_quota_reached: [
-    "Лимит писем Mittaro исчерпан. Повторите позже.",
-    "Das E-Mail-Kontingent bei Mittaro ist ausgeschöpft. Bitte später erneut versuchen.",
+    "Лимит писем eusend исчерпан. Повторите позже.",
+    "Das E-Mail-Kontingent bei eusend ist ausgeschöpft. Bitte später erneut versuchen.",
   ],
   mail_recipient_domain_no_mail: [
     "Домен адреса получателя не принимает почту. Проверьте адрес.",
     "Die Domain der Empfängeradresse empfängt keine E-Mails. Bitte Adresse prüfen.",
   ],
+  mail_recipient_blocked: [
+    "eusend блокирует этот адрес после прежнего отказа или жалобы. Укажите другой адрес.",
+    "eusend sperrt diese Adresse nach einer früheren Unzustellbarkeit oder Beschwerde. Bitte eine andere Adresse angeben.",
+  ],
   mail_unavailable: [
-    "Mittaro временно недоступен. Повторите попытку.",
-    "Mittaro ist vorübergehend nicht erreichbar. Bitte erneut versuchen.",
+    "eusend временно недоступен. Повторите попытку.",
+    "eusend ist vorübergehend nicht erreichbar. Bitte erneut versuchen.",
   ],
 };
 
@@ -82,7 +86,7 @@ function Section({ icon, title, action, children }: { icon: LucideIcon; title: s
 }
 
 /**
- * The Mittaro e-mail connection on the API connections page: key, sender and
+ * The e-mail connection (eusend) on the API connections page: key, sender and
  * reply-to (the key is stored encrypted and never shown again) and a test
  * letter. A connection saved here takes precedence over the server
  * configuration.
@@ -205,13 +209,13 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
       ) : null}
     </>
   );
-  const mittaroLink = (
-    <a href={MITTARO_APP} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 shrink-0 rounded-md")}>
-      {tx("Кабинет Mittaro", "Mittaro-Konto öffnen")}
+  const providerLink = (
+    <a href={PROVIDER_APP} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 shrink-0 rounded-md")}>
+      {tx("Кабинет eusend", "eusend-Konto öffnen")}
       <ExternalLink className="size-3.5" aria-hidden="true" />
     </a>
   );
-  const title = tx("Подключение Mittaro", "Mittaro-Verbindung");
+  const title = tx("Подключение eusend", "eusend-Verbindung");
   const savedKey = connection?.source === "database";
 
   if (!canConfigure) {
@@ -249,7 +253,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
               <Mail aria-hidden="true" className="size-5" />
             </span>
             <p className="min-w-0 text-sm font-medium">
-              {tx("Письма отправляются через Mittaro", "E-Mails werden über Mittaro versendet")}
+              {tx("Письма отправляются через eusend", "E-Mails werden über eusend versendet")}
             </p>
           </div>
           <dl className="grid min-w-0 gap-x-5 gap-y-3 rounded-md border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
@@ -295,7 +299,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
           {feedback}
         </div>
         <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center">
-          {mittaroLink}
+          {providerLink}
           <Button
             type="button"
             variant="outline"
@@ -321,10 +325,16 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
       <Section icon={Settings2} title={connection?.configured ? tx("Изменить подключение", "Verbindung ändern") : title}>
         <div className="space-y-3 p-3.5">
           <p className="text-xs leading-5 text-muted-foreground">
-            {connection?.source === "disconnected"
-              ? <>{tx("Отправка e-mail отключена. Введите ключ, чтобы подключить снова.", "Der E-Mail-Versand ist getrennt. Geben Sie einen Schlüssel ein, um ihn wieder zu verbinden.")}{" "}</>
-              : null}
-            <a href={MITTARO_DOCS} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">
+            {connection?.source === "disconnected" && connection.reason_code === "mail_api_key_missing"
+              ? <>{tx("Отправка e-mail переведена на eusend. Введите API-ключ eusend; отправитель сохранён.", "Der E-Mail-Versand läuft jetzt über eusend. Bitte den eusend-API-Schlüssel eingeben; der Absender ist übernommen.")}{" "}</>
+              : connection?.source === "disconnected"
+                ? <>{tx("Отправка e-mail отключена. Введите ключ, чтобы подключить снова.", "Der E-Mail-Versand ist getrennt. Geben Sie einen Schlüssel ein, um ihn wieder zu verbinden.")}{" "}</>
+                : null}
+            {tx(
+              "Нужен ключ с полным доступом (Full access): ключ только для отправки не видит статус доставки.",
+              "Benötigt wird ein Schlüssel mit vollem Zugriff (Full access): ein reiner Sende-Schlüssel sieht den Zustellstatus nicht.",
+            )}{" "}
+            <a href={PROVIDER_DOCS} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">
               {tx("Документация", "Dokumentation")}
             </a>
           </p>
@@ -338,7 +348,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
                 maxLength={512}
                 value={apiKey}
                 required={!savedKey}
-                placeholder={savedKey ? tx(`Сохранён (${connection?.key_hint ?? ""}) — пусто, чтобы оставить`, `Gespeichert (${connection?.key_hint ?? ""}) – leer lassen, um ihn zu behalten`) : "tx_live_…"}
+                placeholder={savedKey ? tx(`Сохранён (${connection?.key_hint ?? ""}) — пусто, чтобы оставить`, `Gespeichert (${connection?.key_hint ?? ""}) – leer lassen, um ihn zu behalten`) : "eu_live_…"}
                 onChange={(event) => setApiKey(event.target.value)}
                 data-testid="mail-connection-key"
               />
@@ -396,7 +406,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
               </Button>
             </>
           ) : (
-            <span className="sm:mr-auto">{mittaroLink}</span>
+            <span className="sm:mr-auto">{providerLink}</span>
           )}
           <Button type="submit" size="sm" className="h-9 rounded-md sm:h-8" disabled={busy || !sender.trim() || (!savedKey && !apiKey.trim())} data-testid="mail-connection-save">
             {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}

@@ -14,7 +14,7 @@ type ApiTab = "signature" | "email";
 /**
  * API connections: the one menu item for external services (owner decision
  * 2026-10-05). One tab per service: the electronic signature (Skribble access
- * and who signs for GMED) and the outgoing e-mail (Mittaro).
+ * and who signs for GMED) and the outgoing e-mail (eusend).
  */
 export function AdminApiConnectionsPage() {
   const { user } = useAuth();
@@ -44,7 +44,7 @@ export function AdminApiConnectionsPage() {
         <TabsList className="w-max max-w-full flex-wrap justify-start gap-1 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-auto">
           {([
             ["signature", FileSignature, tx("Электронная подпись · Skribble", "Elektronische Signatur · Skribble")],
-            ["email", Mail, "E-Mail · Mittaro"],
+            ["email", Mail, "E-Mail · eusend"],
           ] as const).map(([value, Icon, label]) => (
             <TabsTrigger
               key={value}

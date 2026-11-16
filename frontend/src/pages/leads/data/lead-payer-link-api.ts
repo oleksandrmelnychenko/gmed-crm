@@ -94,7 +94,7 @@ export const PAYER_LINK_DELIVERY_STATUSES = [
 ] as const;
 export type PayerLinkDeliveryStatus = (typeof PAYER_LINK_DELIVERY_STATUSES)[number];
 
-/** One e-mail of the link: whether Mittaro took it and what it reported later. */
+/** One e-mail of the link: whether the mail provider took it and what it reported later. */
 export type PayerLinkEmail = {
   kind: "invitation" | "code";
   status: "sent" | "failed";
@@ -266,7 +266,7 @@ export type LeadPayerLinkState = {
    * older server) while it may go out.
    */
   risk_hold?: PayerLinkRiskHold | null;
-  /** E-mail sending (Mittaro) is set up. */
+  /** E-mail sending (eusend) is set up. */
   mail_available: boolean;
   link: PayerLinkInfo | null;
   questionnaire: StaffPayerQuestionnaire | null;

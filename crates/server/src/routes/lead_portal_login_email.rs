@@ -5,7 +5,7 @@
 //! for a minor's request, or a patient's login (the patients table has the
 //! same login row as the leads table). The password is stored only as a hash,
 //! so the dialog hands it back; the server sends it only while it is still
-//! the login's current password. The e-mail goes through Mittaro
+//! the login's current password. The e-mail goes through the mail provider
 //! ([`crate::mail`]); `portal_login_emails` keeps who sent what to whom and
 //! when, never the content, and goes with the lead or the patient.
 
@@ -77,7 +77,7 @@ fn internal(
 }
 
 /// The same password, language and address never go out twice: a repeat
-/// click returns the first message (Mittaro idempotency).
+/// click returns the first message (provider idempotency).
 fn idempotency_key(user_id: Uuid, password_hash: &str, language: MailLanguage, to: &str) -> String {
     let digest = Sha256::digest(
         format!(
@@ -119,7 +119,7 @@ async fn login_email_history(
                 "error_code": row.try_get::<Option<String>, _>("error_code").ok().flatten(),
                 "sent_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok(),
                 "sent_by_name": row.try_get::<Option<String>, _>("sent_by_name").ok().flatten(),
-                // What Mittaro reported later (`crate::mail::delivery`).
+                // What the mail provider reported later (`crate::mail::delivery`).
                 "delivery_status": row.try_get::<Option<String>, _>("delivery_status").ok().flatten(),
                 "delivery_updated_at": row
                     .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivery_updated_at")
@@ -679,7 +679,7 @@ async fn deliver(
         Subject::Patient(id) => (None, Some(id)),
     };
     // A repeat of an already accepted message is not logged twice. A replay
-    // whose first attempt is not on record as sent (Mittaro took the message,
+    // whose first attempt is not on record as sent (the provider took the message,
     // but its answer never arrived and the try was logged as failed) is
     // logged now, so the history shows it and the delivery check follows it.
     let replay_logged = match (&message_id, replayed) {

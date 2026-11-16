@@ -5,7 +5,7 @@
 //! and of a company end to end, the lifecycle edges of a request (purge,
 //! archive and reopen) and a switch from joint to sole custody. Every step
 //! goes through the HTTP API the way the cabinet, the payer page and the
-//! staff wizard call it; a local stand-in for the Mittaro API records the
+//! staff wizard call it; a local stand-in for the eusend API records the
 //! e-mails. Synthetic data only.
 
 mod support;
@@ -54,15 +54,15 @@ fn unique(name: &str) -> String {
     format!("{name}.{}@example.com", Uuid::new_v4().simple())
 }
 
-/// What the stand-in Mittaro API received.
+/// What the stand-in eusend API received.
 #[derive(Clone, Default)]
-struct FakeMittaro {
+struct FakeMailApi {
     received: Arc<Mutex<Vec<Value>>>,
     accepted: Arc<Mutex<HashMap<String, String>>>,
 }
 
 async fn fake_send(
-    State(fake): State<FakeMittaro>,
+    State(fake): State<FakeMailApi>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
@@ -78,11 +78,7 @@ async fn fake_send(
     let mut accepted = fake.accepted.lock().unwrap();
     let id = format!("email_{}", accepted.len() + 1);
     accepted.insert(key, id.clone());
-    (
-        StatusCode::ACCEPTED,
-        axum::Json(json!({ "id": id, "status": "queued" })),
-    )
-        .into_response()
+    (StatusCode::CREATED, axum::Json(json!({ "id": id }))).into_response()
 }
 
 async fn seed_user(pool: &PgPool, role: &str) -> Uuid {
@@ -100,7 +96,7 @@ async fn seed_user(pool: &PgPool, role: &str) -> Uuid {
 struct Scn {
     suite: support::TestSuiteContext,
     app: Router,
-    fake: FakeMittaro,
+    fake: FakeMailApi,
     pm_id: Uuid,
     ceo_id: Uuid,
 }
@@ -110,9 +106,9 @@ impl Scn {
         let suite = support::suite_context(SECRET).await?;
         let pm_id = seed_user(&suite.pool, "patient_manager").await;
         let ceo_id = seed_user(&suite.pool, "ceo").await;
-        let fake = FakeMittaro::default();
+        let fake = FakeMailApi::default();
         let router = Router::new()
-            .route("/v1/emails", post(fake_send))
+            .route("/emails", post(fake_send))
             .with_state(fake.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -120,8 +116,8 @@ impl Scn {
             axum::serve(listener, router).await.unwrap();
         });
         let state = suite.state.clone().with_mailer(MailConfig {
-            mittaro_api_key: Some(SecretString::from("tx_live_test")),
-            mittaro_api_url: Some(format!("http://{address}/v1/emails")),
+            api_key: Some(SecretString::from("eu_live_test")),
+            api_url: Some(format!("http://{address}")),
             from: Some("zugang@gmed-health.test".into()),
             reply_to: None,
             console_url: Some("https://console.gmed-health.test".into()),

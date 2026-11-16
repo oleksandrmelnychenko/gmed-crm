@@ -2,7 +2,7 @@
 //! section 10, phase 3a): sending, resending and revoking the link, the
 //! e-mail code and the session, the questionnaire with its validation, the
 //! payer's uploads, the check level, the submit with the adoption into the
-//! declaration, the resets and the purge. A local stand-in for the Mittaro
+//! declaration, the resets and the purge. A local stand-in for the eusend
 //! API records what would have been sent. Every request carries a peer
 //! address of its own, so the tight limiter of the link never interferes.
 //! Synthetic data only.
@@ -57,18 +57,18 @@ fn bearer(user_id: Uuid, role: &str) -> String {
     format!("Bearer {token}")
 }
 
-/// What the stand-in Mittaro API received; `fail` answers 503.
+/// What the stand-in eusend API received; `fail` answers 503.
 #[derive(Clone, Default)]
-struct FakeMittaro {
+struct FakeMailApi {
     received: Arc<Mutex<Vec<Value>>>,
     accepted: Arc<Mutex<HashMap<String, String>>>,
     fail: Arc<AtomicBool>,
-    /// The delivery status reported per message id (`GET /v1/emails/{id}`).
+    /// The delivery status reported per message id (`GET /emails/{id}`).
     statuses: Arc<Mutex<HashMap<String, Value>>>,
 }
 
 async fn fake_status(
-    State(fake): State<FakeMittaro>,
+    State(fake): State<FakeMailApi>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
     match fake.statuses.lock().unwrap().get(&id) {
@@ -78,7 +78,7 @@ async fn fake_status(
 }
 
 async fn fake_send(
-    State(fake): State<FakeMittaro>,
+    State(fake): State<FakeMailApi>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
@@ -102,31 +102,27 @@ async fn fake_send(
     let mut accepted = fake.accepted.lock().unwrap();
     let id = format!("email_{}", accepted.len() + 1);
     accepted.insert(key, id.clone());
-    (
-        StatusCode::ACCEPTED,
-        axum::Json(json!({ "id": id, "status": "queued" })),
-    )
-        .into_response()
+    (StatusCode::CREATED, axum::Json(json!({ "id": id }))).into_response()
 }
 
-async fn start_fake_mittaro() -> (String, FakeMittaro) {
-    let fake = FakeMittaro::default();
+async fn start_fake_mail_api() -> (String, FakeMailApi) {
+    let fake = FakeMailApi::default();
     let router = Router::new()
-        .route("/v1/emails", post(fake_send))
-        .route("/v1/emails/{id}", axum::routing::get(fake_status))
+        .route("/emails", post(fake_send))
+        .route("/emails/{id}", axum::routing::get(fake_status))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
-    (format!("http://{address}/v1/emails"), fake)
+    (format!("http://{address}"), fake)
 }
 
 struct PayerApp {
     suite: support::TestSuiteContext,
     app: Router,
-    fake: FakeMittaro,
+    fake: FakeMailApi,
     users: Vec<(&'static str, Uuid)>,
     /// The state with the stand-in mailer, for the delivery sync.
     state: gmed_server::state::AppState,
@@ -211,10 +207,10 @@ async fn payer_app() -> Option<PayerApp> {
         .unwrap();
         users.push((role, id));
     }
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_test")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_test")),
+        api_url: Some(api_url),
         from: Some("zugang@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),

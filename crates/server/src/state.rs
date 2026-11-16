@@ -27,7 +27,7 @@ pub struct AppState {
     pub audit_sender: AuditSender,
     pub medication_ai: Arc<MedicationAiProvider>,
     pub machine_translation: Arc<MachineTranslator>,
-    /// Mailer from the `GMED_MITTARO_*` environment. Senders use
+    /// Mailer from the `GMED_MAIL_*` environment. Senders use
     /// [`crate::mail::connection::current_mailer`], which prefers the
     /// connection saved on the API connections page.
     pub mailer: Arc<Mailer>,

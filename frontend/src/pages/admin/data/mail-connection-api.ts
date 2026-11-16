@@ -1,15 +1,17 @@
 import { apiFetch } from "@/lib/api";
 
 /**
- * The Mittaro e-mail connection of the API connections page. The key is never
+ * The e-mail connection (eusend) of the API connections page. The key is never
  * returned, only `key_hint` ("…" and its last four characters).
  */
 export type MailConnection = {
-  provider: "mittaro";
+  provider: "eusend";
   configured: boolean;
   reason_code: string;
   /** `database`: saved on this page; `environment`: server configuration;
-   *  `disconnected`: switched off here; `none`: nothing set up. */
+   *  `disconnected`: switched off here, or the key was dropped at the move to
+   *  eusend (`reason_code` `mail_api_key_missing`, sender kept); `none`:
+   *  nothing set up. */
   source: "database" | "environment" | "disconnected" | "none";
   sender: string | null;
   reply_to: string | null;

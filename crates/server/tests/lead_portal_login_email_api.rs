@@ -1,5 +1,5 @@
-//! Integration tests for e-mailing a lead's sign-in data through Mittaro
-//! (owner decision 2026-10-05). A local stand-in for the Mittaro API records
+//! Integration tests for e-mailing a lead's sign-in data through eusend
+//! (owner decision 2026-10-05). A local stand-in for the eusend API records
 //! what would have been sent. Synthetic data only.
 
 mod support;
@@ -73,10 +73,10 @@ async fn json_request(
     )
 }
 
-/// What the stand-in Mittaro API received, the idempotency keys it knows and
+/// What the stand-in eusend API received, the idempotency keys it knows and
 /// the delivery status it reports per message id.
 #[derive(Clone, Default)]
-struct FakeMittaro {
+struct FakeMailApi {
     received: Arc<Mutex<Vec<(HeaderMap, Value)>>>,
     accepted: Arc<Mutex<HashMap<String, String>>>,
     statuses: Arc<Mutex<HashMap<String, Value>>>,
@@ -84,7 +84,7 @@ struct FakeMittaro {
 }
 
 async fn fake_status(
-    State(fake): State<FakeMittaro>,
+    State(fake): State<FakeMailApi>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
     fake.status_requests.lock().unwrap().push(id.clone());
@@ -95,7 +95,7 @@ async fn fake_status(
 }
 
 async fn fake_send(
-    State(fake): State<FakeMittaro>,
+    State(fake): State<FakeMailApi>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, axum::Json<Value>) {
@@ -110,31 +110,25 @@ async fn fake_send(
         .push((headers, serde_json::from_slice(&body).unwrap()));
     let mut accepted = fake.accepted.lock().unwrap();
     if let Some(id) = accepted.get(&key) {
-        return (
-            StatusCode::OK,
-            axum::Json(json!({ "id": id, "status": "queued" })),
-        );
+        return (StatusCode::OK, axum::Json(json!({ "id": id })));
     }
     let id = format!("email_{}", accepted.len() + 1);
     accepted.insert(key, id.clone());
-    (
-        StatusCode::ACCEPTED,
-        axum::Json(json!({ "id": id, "status": "queued" })),
-    )
+    (StatusCode::CREATED, axum::Json(json!({ "id": id })))
 }
 
-async fn start_fake_mittaro() -> (String, FakeMittaro) {
-    let fake = FakeMittaro::default();
+async fn start_fake_mail_api() -> (String, FakeMailApi) {
+    let fake = FakeMailApi::default();
     let router = Router::new()
-        .route("/v1/emails", post(fake_send))
-        .route("/v1/emails/{id}", get(fake_status))
+        .route("/emails", post(fake_send))
+        .route("/emails/{id}", get(fake_status))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
-    (format!("http://{address}/v1/emails"), fake)
+    (format!("http://{address}"), fake)
 }
 
 #[tokio::test]
@@ -148,10 +142,10 @@ async fn managers_email_the_current_sign_in_data_once_and_the_log_goes_with_the_
     let manager = bearer(manager_id, "patient_manager");
     let sales = bearer(sales_id, "sales");
 
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_test")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_test")),
+        api_url: Some(api_url),
         from: Some("zugang@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),
@@ -249,7 +243,7 @@ async fn managers_email_the_current_sign_in_data_once_and_the_log_goes_with_the_
         let received = fake.received.lock().unwrap();
         assert_eq!(received.len(), 1);
         let (headers, message) = &received[0];
-        assert_eq!(headers["authorization"], "Bearer tx_live_test");
+        assert_eq!(headers["authorization"], "Bearer eu_live_test");
         assert!(
             headers["idempotency-key"]
                 .to_str()
@@ -337,7 +331,7 @@ async fn managers_email_the_current_sign_in_data_once_and_the_log_goes_with_the_
     })
     .await;
 
-    // Without the Mittaro settings nothing is sent.
+    // Without the mail settings nothing is sent.
     let (status, body) = json_request(
         &suite.app,
         "POST",
@@ -369,7 +363,7 @@ async fn managers_email_the_current_sign_in_data_once_and_the_log_goes_with_the_
 }
 
 #[tokio::test]
-async fn the_delivery_status_is_read_back_from_mittaro_and_shown_with_the_login() {
+async fn the_delivery_status_is_read_back_from_the_provider_and_shown_with_the_login() {
     let Some(suite) = support::suite_context(TEST_SECRET).await else {
         return;
     };
@@ -377,10 +371,10 @@ async fn the_delivery_status_is_read_back_from_mittaro_and_shown_with_the_login(
     let manager_id = seed_user(pool, "login-delivery", "patient_manager").await;
     let manager = bearer(manager_id, "patient_manager");
 
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_test")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_test")),
+        api_url: Some(api_url),
         from: Some("zugang@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),
@@ -591,6 +585,30 @@ async fn the_delivery_status_is_read_back_from_mittaro_and_shown_with_the_login(
     let (_, info) = json_request(&app, "GET", &path, &manager, None).await;
     assert_eq!(info["sent"][0]["delivery_status"], "unknown", "{info}");
     assert_eq!(info["sent"][1]["delivery_status"], "bounced", "{info}");
+
+    // Every message records the provider it went through; a message of an
+    // earlier provider is never sent to the current one's status endpoint
+    // (migration 20261116150005).
+    let providers: Vec<String> = sqlx::query_scalar(
+        "SELECT provider FROM portal_login_emails WHERE lead_id = $1 ORDER BY created_at",
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(providers, ["eusend", "eusend"]);
+    sqlx::query(
+        "UPDATE portal_login_emails
+         SET provider = 'earlier', delivery_final = false, delivery_checked_at = NULL
+         WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let asked = fake.status_requests.lock().unwrap().len();
+    gmed_server::mail::delivery::sync_due(&state).await;
+    assert_eq!(fake.status_requests.lock().unwrap().len(), asked);
 }
 
 #[tokio::test]
@@ -604,10 +622,10 @@ async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment()
     let ceo = bearer(ceo_id, "ceo");
     let manager = bearer(manager_id, "patient_manager");
 
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_envkey0000")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_envkey0000")),
+        api_url: Some(api_url),
         from: Some("env@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),
@@ -655,7 +673,7 @@ async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment()
         "/api/v1/mail/connection",
         &ceo,
         Some(json!({
-            "api_key": "tx_live_dbkeyAB12",
+            "api_key": "eu_live_dbkeyAB12",
             "sender": " Zugang@GMED-health.test ",
             "reply_to": "info@gmed-health.test",
         })),
@@ -666,7 +684,7 @@ async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment()
     assert_eq!(info["sender"], "zugang@gmed-health.test");
     assert_eq!(info["reply_to"], "info@gmed-health.test");
     assert_eq!(info["key_hint"], "…AB12");
-    assert!(!info.to_string().contains("tx_live_dbkeyAB12"));
+    assert!(!info.to_string().contains("eu_live_dbkeyAB12"));
     let ciphertext: Vec<u8> = sqlx::query_scalar("SELECT ciphertext FROM mail_provider_connection")
         .fetch_one(pool)
         .await
@@ -690,7 +708,7 @@ async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment()
     {
         let received = fake.received.lock().unwrap();
         let (headers, message) = received.last().unwrap();
-        assert_eq!(headers["authorization"], "Bearer tx_live_dbkeyAB12");
+        assert_eq!(headers["authorization"], "Bearer eu_live_dbkeyAB12");
         assert_eq!(message["from"], "zugang@gmed-health.test");
         assert_eq!(message["reply_to"], "info@gmed-health.test");
         assert_eq!(message["subject"], "GMED: тестовое письмо");
@@ -720,7 +738,7 @@ async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment()
     {
         let received = fake.received.lock().unwrap();
         let (headers, message) = received.last().unwrap();
-        assert_eq!(headers["authorization"], "Bearer tx_live_dbkeyAB12");
+        assert_eq!(headers["authorization"], "Bearer eu_live_dbkeyAB12");
         assert_eq!(message["from"], "portal@gmed-health.test");
         assert_eq!(message["to"], "someone@example.com");
     }
@@ -747,9 +765,68 @@ async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment()
     .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["code"], "mail_not_configured");
+    assert_eq!(info["reason_code"], "mail_disconnected");
+    assert_eq!(info["sender"], Value::Null);
+
+    // A key of the earlier provider is refused.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection",
+        &ceo,
+        Some(json!({ "api_key": "tx_live_oldkey1234", "sender": "zugang@gmed-health.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "mail_api_key_invalid");
+
+    // The state the provider change left behind (migration 20261116150005):
+    // switched off without a key, sender and reply-to kept for the form.
+    sqlx::query(
+        "UPDATE mail_provider_connection
+         SET enabled = false, sender = 'zugang@gmed-health.test',
+             reply_to = 'info@gmed-health.test', revision = gen_random_uuid()",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, info) = json_request(&app, "GET", "/api/v1/mail/connection", &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["provider"], "eusend");
+    assert_eq!(info["source"], "disconnected");
+    assert_eq!(info["configured"], false);
+    assert_eq!(info["reason_code"], "mail_api_key_missing");
+    assert_eq!(info["sender"], "zugang@gmed-health.test");
+    assert_eq!(info["reply_to"], "info@gmed-health.test");
+    assert_eq!(info["key_hint"], Value::Null);
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection",
+        &ceo,
+        Some(json!({ "sender": "zugang@gmed-health.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "mail_api_key_required");
+    let (status, info) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection",
+        &ceo,
+        Some(json!({
+            "api_key": "eu_test_newkeyCD34",
+            "sender": "zugang@gmed-health.test",
+            "reply_to": "info@gmed-health.test",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["configured"], true);
+    assert_eq!(info["key_hint"], "…CD34");
 }
 
-/// Mittaro took the first message but its answer was lost, so that try is on
+/// The provider took the first message but its answer was lost, so that try is on
 /// record as failed. The repeat click is a replay of the accepted message: it
 /// is logged as sent then, so staff see it went out and its delivery is
 /// followed. A replay of a message already on record stays a single row.
@@ -762,10 +839,10 @@ async fn a_replay_of_a_message_logged_as_failed_is_logged_as_sent() {
     let tag = Uuid::new_v4().simple().to_string();
     let manager_id = seed_user(pool, &format!("login-replay-{tag}"), "patient_manager").await;
     let manager = bearer(manager_id, "patient_manager");
-    let (api_url, _fake) = start_fake_mittaro().await;
+    let (api_url, _fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_test")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_test")),
+        api_url: Some(api_url),
         from: Some("zugang@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),
@@ -843,10 +920,10 @@ async fn the_lead_is_reminded_once_before_the_deletion() {
     let tag = Uuid::new_v4().simple().to_string();
     let manager_id = seed_user(pool, &format!("reminder-{tag}"), "patient_manager").await;
     let manager = bearer(manager_id, "patient_manager");
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_test")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_test")),
+        api_url: Some(api_url),
         from: Some("zugang@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),
@@ -1066,10 +1143,10 @@ async fn a_parent_s_login_e_mail_defaults_to_the_parent_s_language() {
     let tag = Uuid::new_v4().simple().to_string();
     let manager_id = seed_user(pool, &format!("login-parent-{tag}"), "patient_manager").await;
     let manager = bearer(manager_id, "patient_manager");
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let state = suite.state.clone().with_mailer(MailConfig {
-        mittaro_api_key: Some(SecretString::from("tx_live_test")),
-        mittaro_api_url: Some(api_url),
+        api_key: Some(SecretString::from("eu_live_test")),
+        api_url: Some(api_url),
         from: Some("zugang@gmed-health.test".into()),
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),

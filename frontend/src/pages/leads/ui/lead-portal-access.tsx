@@ -90,7 +90,7 @@ export function PortalFact({
   );
 }
 
-/** Date of the last sign-in e-mail and what Mittaro reported for it. */
+/** Date of the last sign-in e-mail and what the mail provider reported for it. */
 export function LoginEmailFact({
   emailedAt,
   delivery,
@@ -569,7 +569,7 @@ export type PortalCredentials = {
 
 /**
  * Shows a one-time password exactly once, with copy actions, a ready text in
- * the patient's language and, where Mittaro is set up, "send by e-mail".
+ * the patient's language and, where e-mail is set up, "send by e-mail".
  * Closing it discards the password.
  */
 export function PortalCredentialsDialog({
@@ -781,8 +781,8 @@ function PortalCredentialsContent({
         {canEmail && emailInfo && !emailInfo.available ? (
           <p className="text-xs text-muted-foreground">
             {de
-              ? "Der E-Mail-Versand (Mittaro) ist nicht eingerichtet – Zugang bitte per Nachricht weitergeben."
-              : "Отправка e-mail (Mittaro) не настроена — передайте доступ сообщением."}
+              ? "Der E-Mail-Versand (eusend) ist nicht eingerichtet – Zugang bitte per Nachricht weitergeben."
+              : "Отправка e-mail (eusend) не настроена — передайте доступ сообщением."}
           </p>
         ) : null}
         <p className="text-xs empty:hidden" role="status" aria-live="polite" data-testid="portal-credentials-email-status">

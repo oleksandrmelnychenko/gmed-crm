@@ -1,9 +1,10 @@
-//! The Mittaro connection entered on the API connections page (owner decision
+//! The e-mail connection (eusend, a Resend-compatible API) entered on the API
+//! connections page (owner decision
 //! 2026-10-05: every external key on one page, `/admin/api-connections`).
 //!
 //! The API key is stored encrypted with the server key registry, like the
 //! Skribble connection, and never returned. A saved connection takes
-//! precedence over the `GMED_MITTARO_*` environment; "disconnect" stores a
+//! precedence over the `GMED_MAIL_*` environment; "disconnect" stores a
 //! disabled row, which switches e-mail off even when the environment still
 //! has a key. API and console URL always come from the environment.
 
@@ -31,7 +32,9 @@ use crate::{audit, auth::middleware::AuthUser, state::AppState};
 
 pub type Cache = Mutex<Option<(Uuid, Arc<Mailer>)>>;
 
-const SERVICE: &str = "mail-mittaro-v1";
+/// Tag inside the encrypted credentials. Keys of the earlier provider were
+/// dropped by the migration of 2026-11-16 (`20261116150005`).
+const SERVICE: &str = "mail-resend-api-v1";
 const MAX_KEY_LENGTH: usize = 512;
 
 pub fn router() -> Router<AppState> {
@@ -51,7 +54,12 @@ struct StoredCredentials {
 
 enum Source {
     Database,
-    Disconnected,
+    /// Switched off on this page, or a connection of an earlier provider
+    /// whose key was dropped (sender and reply-to kept for the form).
+    Disconnected {
+        sender: Option<String>,
+        reply_to: Option<String>,
+    },
     Environment,
 }
 
@@ -73,9 +81,20 @@ async fn resolve(state: &AppState) -> Result<(Arc<Mailer>, Source), &'static str
         return Ok((state.mailer.clone(), Source::Environment));
     };
     if !row.get::<bool, _>("enabled") {
+        let sender: Option<String> = row.get("sender");
+        // "Disconnect" clears the sender too; a sender without a key is the
+        // connection of the earlier provider, waiting for an eusend key.
+        let reason = if sender.is_some() {
+            "mail_api_key_missing"
+        } else {
+            "mail_disconnected"
+        };
         return Ok((
-            Arc::new(Mailer::off("mail_disconnected")),
-            Source::Disconnected,
+            Arc::new(Mailer::off(reason)),
+            Source::Disconnected {
+                sender,
+                reply_to: row.get("reply_to"),
+            },
         ));
     }
     let revision: Uuid = row.get("revision");
@@ -102,8 +121,8 @@ async fn resolve(state: &AppState) -> Result<(Arc<Mailer>, Source), &'static str
         return Err("mail_connection_invalid");
     }
     let mailer = Arc::new(Mailer::new(MailConfig {
-        mittaro_api_key: Some(credentials.api_key),
-        mittaro_api_url: state.mail_config.mittaro_api_url.clone(),
+        api_key: Some(credentials.api_key),
+        api_url: state.mail_config.api_url.clone(),
         from: row.get("sender"),
         reply_to: row.get("reply_to"),
         console_url: state.mail_config.console_url.clone(),
@@ -134,18 +153,23 @@ async fn info(state: &AppState) -> Result<Value, Response> {
     let (mailer, source) = resolve(state).await.map_err(connection_error)?;
     let capability = mailer.capability();
     let summary = mailer.summary();
+    let (sender, reply_to) = match (&source, &summary) {
+        (Source::Disconnected { sender, reply_to }, _) => (sender.clone(), reply_to.clone()),
+        (_, Some(summary)) => (Some(summary.sender.clone()), summary.reply_to.clone()),
+        (_, None) => (None, None),
+    };
     Ok(json!({
         "provider": super::PROVIDER_ID,
         "configured": capability.available,
         "reason_code": capability.reason_code,
         "source": match source {
             Source::Database => "database",
-            Source::Disconnected => "disconnected",
+            Source::Disconnected { .. } => "disconnected",
             Source::Environment if summary.is_some() => "environment",
             Source::Environment => "none",
         },
-        "sender": summary.as_ref().map(|summary| summary.sender.clone()),
-        "reply_to": summary.as_ref().and_then(|summary| summary.reply_to.clone()),
+        "sender": sender,
+        "reply_to": reply_to,
         "key_hint": summary.as_ref().map(|summary| summary.key_hint.clone()),
         // Links in e-mails point here; it comes from the server configuration.
         "console_url": state.mail_config.console_url,
@@ -172,19 +196,20 @@ struct SaveBody {
     reply_to: Option<String>,
 }
 
-/// Mittaro keys look like `tx_live_…` / `tx_test_…`.
+/// eusend keys look like `eu_live_…` / `eu_test_…` (a test key runs the
+/// whole pipeline without delivering).
 fn valid_key(key: &str) -> bool {
-    key.starts_with("tx_")
+    (key.starts_with("eu_live_") || key.starts_with("eu_test_"))
         && key.len() <= MAX_KEY_LENGTH
-        && key.len() > 8
+        && key.len() > 9
         && key
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
-/// `POST /mail/connection`: saves key, sender and reply-to. Mittaro has no
-/// endpoint that checks a key without sending, so the page offers a test
-/// letter right after saving.
+/// `POST /mail/connection`: saves key, sender and reply-to. A send-only key
+/// cannot read anything, so the key is not checked here; the page offers a
+/// test letter right after saving.
 async fn save(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -224,7 +249,7 @@ async fn save(
         return Err(coded(
             StatusCode::UNPROCESSABLE_ENTITY,
             "mail_api_key_invalid",
-            "A Mittaro API key starts with tx_",
+            "An eusend API key starts with eu_live_ or eu_test_",
         ));
     }
 
@@ -248,7 +273,7 @@ async fn save(
                     coded(
                         StatusCode::UNPROCESSABLE_ENTITY,
                         "mail_api_key_required",
-                        "Enter the Mittaro API key",
+                        "Enter the eusend API key",
                     )
                 })?;
             let plaintext = state
@@ -444,24 +469,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_mittaro_shaped_keys_are_accepted() {
-        assert!(valid_key("tx_live_AbC123xyz"));
-        assert!(valid_key("tx_test_abc-123.def"));
+    fn only_eusend_shaped_keys_are_accepted() {
+        assert!(valid_key("eu_live_AbC123xyz"));
+        assert!(valid_key("eu_test_abc-123.def"));
         for invalid in [
             "",
-            "tx_",
+            "eu_live_",
+            "eu_other_abc123",
             "live_abc123456",
-            "tx_live abc",
-            "tx_live_ä123456",
+            "eu_live abc",
+            "eu_live_ä123456",
+            // A key of the earlier provider.
+            "tx_live_AbC123xyz",
         ] {
             assert!(!valid_key(invalid), "{invalid}");
         }
-        assert!(!valid_key(&format!("tx_live_{}", "a".repeat(600))));
+        assert!(!valid_key(&format!("eu_live_{}", "a".repeat(600))));
     }
 
     #[test]
     fn the_key_hint_shows_only_the_last_four_characters() {
-        assert_eq!(super::super::key_hint("tx_live_secretABCD"), "…ABCD");
+        assert_eq!(super::super::key_hint("eu_live_secretABCD"), "…ABCD");
         assert_eq!(super::super::key_hint("abc"), "…abc");
     }
 }

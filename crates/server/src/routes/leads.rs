@@ -1930,7 +1930,7 @@ fn lead_portal_account_summary(row: &sqlx::postgres::PgRow) -> Value {
                 .ok()
                 .flatten()
                 .map(|value| value.to_rfc3339()),
-            // Delivery status of that last e-mail, once Mittaro reported one.
+            // Delivery status of that last e-mail, once the mail provider reported one.
             "login_email_delivery": row
                 .try_get::<Option<String>, _>("portal_login_email_delivery")
                 .ok()
@@ -14268,7 +14268,7 @@ struct ReminderRecipient {
 /// The reminder e-mail to the lead before the deletion (owner decision
 /// 2026-10-24): [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline, while
 /// the DSGVO package is unsigned and the sweep would really delete the
-/// request, the lead's own login gets one neutral e-mail through Mittaro; a
+/// request, the lead's own login gets one neutral e-mail through the mail provider; a
 /// minor's request goes to each parent with active access instead, each in
 /// the parent's language. No e-mail without an address. Nothing is marked
 /// while e-mail cannot be sent, so the reminder follows once it can (if the

@@ -1,22 +1,26 @@
 //! Delivery status of sign-in e-mails (owner request 2026-10-05: staff see
 //! whether the access e-mail arrived, bounced or was blocked).
 //!
-//! Mittaro documents `GET /v1/emails/{id}` for the status of an accepted
-//! message; its signed webhooks have no public format yet, so the server
-//! asks. Every minute the scheduler claims the messages that are due — the
-//! first hour every minute, then every 15 minutes, after a day hourly, for
-//! three days — and stores the status in `portal_login_emails` and, since
-//! 2026-10-24, in `lead_payer_link_emails` (the payer's invitation and code)
-//! and `lead_retention_reminder_emails` (the reminder before the deletion).
+//! The provider documents `GET /emails/{id}` for the status of an accepted
+//! message, so the server asks (no inbound webhook endpoint is needed). Every
+//! minute the scheduler claims the messages that are due — the first hour
+//! every minute, then every 15 minutes, after a day hourly, for three days —
+//! and stores the status in `portal_login_emails` and, since 2026-10-24, in
+//! `lead_payer_link_emails` (the payer's invitation and code) and
+//! `lead_retention_reminder_emails` (the reminder before the deletion). Only
+//! messages sent through the current provider ([`PROVIDER_ID`]) are asked
+//! about; messages of an earlier provider keep their last status.
 //! A message stops being checked once it is delivered, bounced, failed,
 //! suppressed or reported as spam, or when the provider does not know it.
 //! The first problem state of a message (bounced, failed, suppressed,
 //! complained) is audited and told once to the staff member who sent it
 //! (for a payer's code: who sent the link), without the address.
 //!
-//! The provider's status words are only partly documented (`queued`,
-//! `sent`); the mapping accepts the usual names for the states the Mittaro
-//! dashboard shows and keeps the original word next to the result.
+//! eusend's status words are `queued`, `scheduled`, `canceled`, `sending`,
+//! `sent`, `delivered`, `bounced`, `complained`, `suppressed` and `failed`
+//! (docs/emails/statuses); Resend's `last_event` adds `delivery_delayed`. The
+//! mapping also accepts the usual synonyms and keeps the original word next to
+//! the result.
 
 use std::time::Duration;
 
@@ -62,10 +66,12 @@ impl DeliveryStatus {
             "sending" | "processing" | "handing_over" => Self::Sending,
             "sent" | "handed_over" => Self::Sent,
             "delivered" => Self::Delivered,
-            "deferred" | "delayed" | "soft_bounce" | "soft_bounced" | "retrying" => Self::Deferred,
+            "deferred" | "delayed" | "delivery_delayed" | "soft_bounce" | "soft_bounced"
+            | "retrying" => Self::Deferred,
             "bounced" | "bounce" | "hard_bounce" | "hard_bounced" | "undeliverable"
             | "rejected" => Self::Bounced,
-            "failed" | "error" => Self::Failed,
+            // GMED schedules nothing, so a cancelled message did not go out.
+            "failed" | "error" | "canceled" | "cancelled" => Self::Failed,
             "suppressed" | "blocked" => Self::Suppressed,
             "complained" | "complaint" | "spam" | "spam_complaint" => Self::Complained,
             // An unknown word: the SMTP code still tells a refusal from a delay.
@@ -168,6 +174,7 @@ impl Log {
                {subject}, {kind} AS email_kind
         FROM {from}
         WHERE x.status = 'sent'
+          AND x.provider = '{PROVIDER_ID}'
           AND x.provider_message_id IS NOT NULL
           AND NOT x.delivery_final
           AND x.created_at > now() - interval '3 days'
@@ -196,8 +203,8 @@ impl Log {
                SET delivery_status = $2,
                    provider_status = $3,
                    smtp_code = $4,
-                   -- Mittaro reports `sent` once the receiving server took
-                   -- the message and often never says more: a `sent` that
+                   -- A provider may report `sent` once the receiving server
+                   -- took the message and never say more: a `sent` that
                    -- stayed unchanged for a day is final, so the message
                    -- leaves the queue instead of being asked about for the
                    -- whole three days (DEV audit 2026-10-23).
@@ -495,6 +502,8 @@ mod tests {
             let claim = log.claim_sql();
             assert!(claim.contains(log.table()), "{claim}");
             assert!(claim.contains("SKIP LOCKED"), "{claim}");
+            // Messages of an earlier provider are never asked about.
+            assert!(claim.contains("x.provider = 'eusend'"), "{claim}");
             assert!(log.update_sql().contains(log.table()));
         }
         assert_eq!(Log::Login.notification_kind(), "login_email_undelivered");
@@ -527,6 +536,11 @@ mod tests {
             ("suppressed", None, DeliveryStatus::Suppressed),
             ("complaint", None, DeliveryStatus::Complained),
             ("failed", None, DeliveryStatus::Failed),
+            ("sending", None, DeliveryStatus::Sending),
+            ("scheduled", None, DeliveryStatus::Queued),
+            ("canceled", None, DeliveryStatus::Failed),
+            ("delivery_delayed", None, DeliveryStatus::Deferred),
+            ("complained", None, DeliveryStatus::Complained),
             // Unknown words fall back to the SMTP code.
             ("rejected_by_policy", Some("554"), DeliveryStatus::Bounced),
             ("greylisted", Some("450"), DeliveryStatus::Deferred),

@@ -45,11 +45,11 @@ services:
       DOCUMENT_SIGNATURES_MODE: "${GMED_DOCUMENT_SIGNATURES_MODE:-demo}"
       SKRIBBLE_USERNAME: "${GMED_SKRIBBLE_USERNAME:-}"
       SKRIBBLE_API_KEY: "${GMED_SKRIBBLE_API_KEY:-}"
-      # Outgoing e-mail (lead sign-in data) through Mittaro, hosted in Germany.
+      # Outgoing e-mail through eusend (Resend-compatible API, hosted in Germany).
       # Without the key no e-mail is sent. The console URL defaults to the
       # first https:// entry of CORS_ORIGIN.
-      GMED_MITTARO_API_KEY: "${GMED_MITTARO_API_KEY:-}"
-      GMED_MITTARO_API_URL: "${GMED_MITTARO_API_URL:-}"
+      GMED_MAIL_API_KEY: "${GMED_MAIL_API_KEY:-}"
+      GMED_MAIL_API_URL: "${GMED_MAIL_API_URL:-}"
       GMED_MAIL_FROM: "${GMED_MAIL_FROM:-}"
       GMED_MAIL_REPLY_TO: "${GMED_MAIL_REPLY_TO:-}"
       GMED_CONSOLE_URL: "${GMED_CONSOLE_URL:-}"

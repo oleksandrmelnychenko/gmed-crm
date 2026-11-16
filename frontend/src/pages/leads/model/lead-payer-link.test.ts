@@ -55,7 +55,7 @@ function link(patch: Partial<PayerLinkInfo> = {}): PayerLinkInfo {
 }
 
 describe("payer link: delivery of its e-mails (2026-10-24)", () => {
-  it("shows the invitation and the code with what Mittaro reported and when", () => {
+  it("shows the invitation and the code with what the mail provider reported and when", () => {
     const state = normalizeLeadPayerLinkState({
       mode: "link",
       can_send: true,
@@ -340,7 +340,7 @@ describe("payer link: what may be done", () => {
     const noMail = payerLinkActions(state({ can_send: false, mail_available: false }), false, de);
     expect(noMail.sendEnabled).toBe(false);
     expect(noMail.sendBlockedText).toBe(
-      "Der E-Mail-Versand ist nicht eingerichtet. Mittaro wird unter „API-Verbindungen“ → „E-Mail“ verbunden.",
+      "Der E-Mail-Versand ist nicht eingerichtet. eusend wird unter „API-Verbindungen“ → „E-Mail“ verbunden.",
     );
     // A blocked reason comes first.
     expect(
@@ -392,7 +392,7 @@ describe("payer link: errors of the writes", () => {
       "Ссылка больше не действует. Закройте окно и подготовьте новую ссылку.",
     );
     expect(payerLinkErrorText(error(503, "mail_not_configured"), ru)).toBe(
-      "Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail».",
+      "Отправка e-mail не настроена. eusend подключается в разделе «API-подключения» → «E-Mail».",
     );
     expect(payerLinkErrorText(error(503, "mail_unavailable"), de)).toBe(
       "Der E-Mail-Dienst ist vorübergehend nicht erreichbar. Bitte erneut versuchen",

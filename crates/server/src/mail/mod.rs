@@ -1,18 +1,24 @@
-//! Outgoing e-mail through Mittaro, a transactional e-mail API hosted in
-//! Germany (Falkenstein / Nürnberg). Mittaro deletes the content after the
-//! hand-off to the receiving server and keeps only metadata; it adds no
-//! tracking pixels and rewrites no links.
+//! Outgoing e-mail through a Resend-compatible HTTP API. The service in use
+//! is eusend (owner decision 2026-11-16): API in Nuremberg, mail servers in
+//! Falkenstein, database in Frankfurt; no data leaves the EU. The client only
+//! speaks the protocol (`POST {base}/emails`, `GET {base}/emails/{id}`,
+//! `Authorization: Bearer`, `Idempotency-Key`), so another Resend-compatible
+//! service needs a new base URL and [`PROVIDER_ID`], not a new client.
 //!
-//! Every message is sent as HTML with a plain-text alternative. The only
-//! remote resource of the HTML is the GMED logo from the console's own server
-//! (one URL for everyone, no tracking); no fonts or styles load from anywhere.
-//! Messages never carry health data.
+//! Every message is sent as HTML with a plain-text alternative, with open and
+//! click tracking switched off explicitly (links in sign-in and payer e-mails
+//! must reach the recipient unchanged). The only remote resource of the HTML
+//! is the GMED logo from the console's own server (one URL for everyone, no
+//! tracking); no fonts or styles load from anywhere. Messages never carry
+//! health data. eusend keeps the delivery record and the rendered message for
+//! its log-retention window (30 days on the smaller plans).
 //!
-//! The delivery status of accepted messages is read back from Mittaro
-//! (`GET /v1/emails/{id}`, [`delivery`]).
+//! The delivery status of accepted messages is read back from the provider
+//! (`GET /emails/{id}`, [`delivery`]); that needs a key with read access
+//! (eusend `full_access`), a send-only key answers 403.
 //!
-//! Without `GMED_MITTARO_API_KEY`, `GMED_MAIL_FROM` and a console URL the
-//! mailer reports `not_configured` and nothing is sent.
+//! Without an API key, a sender and a console URL the mailer reports
+//! `not_configured` and nothing is sent.
 
 pub mod connection;
 pub mod delivery;
@@ -25,12 +31,17 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::config::{MITTARO_DEFAULT_API_URL, MailConfig};
+use crate::config::{MAIL_DEFAULT_API_URL, MailConfig};
 
-pub const PROVIDER_ID: &str = "mittaro";
+/// The service the messages go through, stored with every message
+/// (`portal_login_emails.provider`, …) and in audit events. The delivery
+/// check asks only about messages of this provider.
+pub const PROVIDER_ID: &str = "eusend";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-/// Attempts for a temporarily unavailable API or a short quota wait.
+/// `GET /emails/{id}` returns the rendered HTML and text with the status.
+const MAX_STATUS_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+/// Attempts for a temporarily unavailable API or a short rate-limit wait.
 const MAX_ATTEMPTS: u32 = 3;
 /// A `Retry-After` longer than this is reported instead of waited for: the
 /// staff member who clicked "send" should not wait on a quota window.
@@ -50,8 +61,8 @@ pub struct OutgoingEmail {
     pub subject: String,
     pub text: String,
     pub html: String,
-    /// The same key never sends twice: Mittaro answers a repeat with the id
-    /// of the first message.
+    /// The same key never sends twice: the provider answers a repeat with the
+    /// id of the first message (at most 255 characters).
     pub idempotency_key: String,
 }
 
@@ -90,6 +101,8 @@ pub enum MailError {
     NotFound,
     #[error("the domain of the recipient address accepts no mail")]
     RecipientDomainNoMail,
+    #[error("the provider blocks the recipient address after an earlier bounce or complaint")]
+    RecipientBlocked,
 }
 
 impl MailError {
@@ -102,6 +115,7 @@ impl MailError {
             Self::Unavailable(_) | Self::Request | Self::InvalidResponse => "mail_unavailable",
             Self::NotFound => "mail_message_not_found",
             Self::RecipientDomainNoMail => "mail_recipient_domain_no_mail",
+            Self::RecipientBlocked => "mail_recipient_blocked",
         }
     }
 }
@@ -146,7 +160,9 @@ pub fn error_response(error: &MailError) -> axum::response::Response {
     let status = match error {
         MailError::NotConfigured => StatusCode::SERVICE_UNAVAILABLE,
         MailError::QuotaReached => StatusCode::TOO_MANY_REQUESTS,
-        MailError::RecipientDomainNoMail => StatusCode::UNPROCESSABLE_ENTITY,
+        MailError::RecipientDomainNoMail | MailError::RecipientBlocked => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
         MailError::Unavailable(_) | MailError::Request | MailError::InvalidResponse => {
             StatusCode::SERVICE_UNAVAILABLE
         }
@@ -198,6 +214,7 @@ enum MailerState {
     },
     Ready {
         client: reqwest::Client,
+        /// Base URL without a trailing slash, e.g. `https://api.eusend.dev`.
         api_url: String,
         api_key: SecretString,
         from: String,
@@ -213,14 +230,26 @@ struct AcceptedResponse {
 
 #[derive(Deserialize)]
 struct StatusResponse {
-    status: String,
-    /// A string in the documentation; a number is accepted too.
+    /// eusend: the current status of the message.
+    #[serde(default)]
+    status: Option<String>,
+    /// Resend: the last event of the message (`delivered`, `bounced`, …).
+    #[serde(default)]
+    last_event: Option<String>,
+    /// Not part of the eusend answer; read when a compatible service adds it.
     #[serde(default)]
     smtp_code: Option<serde_json::Value>,
 }
 
-/// Message ids as Mittaro issues them (`email_01…`); anything else is not
-/// put into a request path.
+/// The `code` of an error answer (`{"error": "…", "code": "DAILY_LIMIT_EXCEEDED"}`).
+#[derive(Deserialize)]
+struct ErrorResponse {
+    #[serde(default)]
+    code: Option<String>,
+}
+
+/// Message ids as the provider issues them (UUIDs at eusend); anything else
+/// is not put into a request path.
 fn is_message_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -236,9 +265,9 @@ fn bounded(value: &str, max: usize) -> String {
 
 impl Mailer {
     pub fn new(config: MailConfig) -> Self {
-        let state = match (config.mittaro_api_key, config.from, config.console_url) {
+        let state = match (config.api_key, config.from, config.console_url) {
             (None, _, _) => MailerState::NotConfigured {
-                reason_code: "mittaro_api_key_missing",
+                reason_code: "mail_api_key_missing",
             },
             (Some(_), None, _) => MailerState::NotConfigured {
                 reason_code: "mail_from_missing",
@@ -255,8 +284,10 @@ impl Mailer {
                 Ok(client) => MailerState::Ready {
                     client,
                     api_url: config
-                        .mittaro_api_url
-                        .unwrap_or_else(|| MITTARO_DEFAULT_API_URL.to_string()),
+                        .api_url
+                        .unwrap_or_else(|| MAIL_DEFAULT_API_URL.to_string())
+                        .trim_end_matches('/')
+                        .to_string(),
                     api_key,
                     from,
                     reply_to: config.reply_to,
@@ -342,15 +373,20 @@ impl Mailer {
             "subject": email.subject,
             "text": email.text,
             "html": email.html,
+            // Sign-in, payer and reminder links must not be rewritten, and no
+            // pixel is added, whatever the dashboard default says.
+            "track_opens": false,
+            "track_clicks": false,
         });
         if let Some(reply_to) = reply_to {
             body["reply_to"] = json!(reply_to);
         }
         let body = serde_json::to_vec(&body).map_err(|_| MailError::InvalidResponse)?;
+        let endpoint = format!("{api_url}/emails");
 
         let mut attempt = 1;
         loop {
-            let result = post_once(client, api_url, api_key, &email.idempotency_key, &body).await;
+            let result = post_once(client, &endpoint, api_key, &email.idempotency_key, &body).await;
             let retry_in = match &result {
                 Err(Attempt::Retry { wait, .. }) if attempt < MAX_ATTEMPTS => *wait,
                 _ => None,
@@ -370,7 +406,7 @@ impl Mailer {
 }
 
 impl Mailer {
-    /// The provider's status of an accepted message (`GET /v1/emails/{id}`).
+    /// The provider's status of an accepted message (`GET /emails/{id}`).
     /// One attempt: the delivery sync asks again on its next run.
     pub async fn status(&self, message_id: &str) -> Result<ProviderStatus, MailError> {
         let MailerState::Ready {
@@ -386,7 +422,7 @@ impl Mailer {
             return Err(MailError::NotFound);
         }
         let response = client
-            .get(format!("{}/{message_id}", api_url.trim_end_matches('/')))
+            .get(format!("{api_url}/emails/{message_id}"))
             .header(
                 reqwest::header::AUTHORIZATION,
                 format!("Bearer {}", api_key.expose_secret()),
@@ -401,11 +437,15 @@ impl Mailer {
                     .bytes()
                     .await
                     .map_err(|_| MailError::InvalidResponse)?;
-                if bytes.len() > MAX_RESPONSE_BYTES {
+                if bytes.len() > MAX_STATUS_RESPONSE_BYTES {
                     return Err(MailError::InvalidResponse);
                 }
                 let found: StatusResponse =
                     serde_json::from_slice(&bytes).map_err(|_| MailError::InvalidResponse)?;
+                let word = found
+                    .status
+                    .or(found.last_event)
+                    .ok_or(MailError::InvalidResponse)?;
                 let smtp_code = match found.smtp_code {
                     Some(serde_json::Value::String(code)) => Some(code),
                     Some(serde_json::Value::Number(code)) => Some(code.to_string()),
@@ -414,7 +454,7 @@ impl Mailer {
                 .map(|code| bounded(&code, 16))
                 .filter(|code| !code.is_empty());
                 Ok(ProviderStatus {
-                    status: bounded(&found.status, 64).to_ascii_lowercase(),
+                    status: bounded(&word, 64).to_ascii_lowercase(),
                     smtp_code,
                 })
             }
@@ -436,15 +476,74 @@ enum Attempt {
     Final(MailError),
 }
 
+/// What an error answer means, by its documented `code` first and the HTTP
+/// status second (eusend error codes, docs/reference/error-codes).
+fn classify_error(status: u16, code: Option<&str>, retry_after: Option<Duration>) -> Attempt {
+    match code {
+        Some("RECIPIENT_DOMAIN_UNDELIVERABLE") => {
+            return Attempt::Final(MailError::RecipientDomainNoMail);
+        }
+        Some("ALL_SUPPRESSED") => return Attempt::Final(MailError::RecipientBlocked),
+        // Daily or monthly volume, plan limits: waiting seconds does not help.
+        Some("DAILY_LIMIT_EXCEEDED" | "MONTHLY_LIMIT_EXCEEDED" | "PLAN_LIMIT_EXCEEDED") => {
+            return Attempt::Final(MailError::QuotaReached);
+        }
+        // Key, sender domain or account state: the administrator has to act.
+        Some(
+            "UNAUTHORIZED"
+            | "FORBIDDEN"
+            | "DOMAIN_NOT_VERIFIED"
+            | "SENDING_SUSPENDED"
+            | "ACCOUNT_RESTRICTED"
+            | "WORKSPACE_INACTIVE"
+            | "SENDER_NOT_PERMITTED"
+            | "LIST_SEND_HELD",
+        ) => return Attempt::Final(MailError::Rejected(status)),
+        Some("SERVICE_PAUSED" | "INTERNAL_ERROR" | "ATTACHMENT_STORAGE_ERROR") => {
+            return Attempt::Retry {
+                error: MailError::Unavailable(status),
+                wait: Some(
+                    retry_after
+                        .unwrap_or(Duration::from_millis(500))
+                        .min(MAX_RETRY_AFTER),
+                ),
+            };
+        }
+        _ => {}
+    }
+    match status {
+        401 | 403 => Attempt::Final(MailError::Rejected(status)),
+        400 | 409 | 413 | 422 => Attempt::Final(MailError::InvalidMessage(status)),
+        // `RATE_LIMITED` (100 requests per 10 s) or an unknown 429.
+        429 => Attempt::Retry {
+            error: MailError::QuotaReached,
+            wait: match retry_after {
+                Some(wait) if wait <= MAX_RETRY_AFTER => Some(wait),
+                Some(_) => None,
+                None => Some(Duration::from_secs(1)),
+            },
+        },
+        500..=599 => Attempt::Retry {
+            error: MailError::Unavailable(status),
+            wait: Some(
+                retry_after
+                    .unwrap_or(Duration::from_millis(500))
+                    .min(MAX_RETRY_AFTER),
+            ),
+        },
+        _ => Attempt::Final(MailError::InvalidMessage(status)),
+    }
+}
+
 async fn post_once(
     client: &reqwest::Client,
-    api_url: &str,
+    endpoint: &str,
     api_key: &SecretString,
     idempotency_key: &str,
     body: &[u8],
 ) -> Result<SentEmail, Attempt> {
     let response = client
-        .post(api_url)
+        .post(endpoint)
         .header(
             reqwest::header::AUTHORIZATION,
             format!("Bearer {}", api_key.expose_secret()),
@@ -465,37 +564,30 @@ async fn post_once(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
         .map(Duration::from_secs);
+    let bytes = response.bytes().await.ok();
+    let bytes = bytes.filter(|bytes| bytes.len() <= MAX_RESPONSE_BYTES);
     match status {
-        200 | 202 => {
-            let bytes = response
-                .bytes()
-                .await
-                .map_err(|_| Attempt::Final(MailError::InvalidResponse))?;
-            if bytes.len() > MAX_RESPONSE_BYTES {
-                return Err(Attempt::Final(MailError::InvalidResponse));
-            }
+        // eusend: 201 for a new message, 200 for a repeat of an idempotency
+        // key (the id of the first message).
+        200..=202 => {
+            let bytes = bytes.ok_or(Attempt::Final(MailError::InvalidResponse))?;
             let accepted: AcceptedResponse = serde_json::from_slice(&bytes)
                 .map_err(|_| Attempt::Final(MailError::InvalidResponse))?;
+            if !is_message_id(&accepted.id) {
+                return Err(Attempt::Final(MailError::InvalidResponse));
+            }
             Ok(SentEmail {
                 message_id: accepted.id,
                 replayed: status == 200,
             })
         }
-        401 | 403 => Err(Attempt::Final(MailError::Rejected(status))),
-        400 | 409 | 413 | 422 => Err(Attempt::Final(MailError::InvalidMessage(status))),
-        429 => Err(Attempt::Retry {
-            error: MailError::QuotaReached,
-            wait: retry_after.filter(|wait| *wait <= MAX_RETRY_AFTER),
-        }),
-        500..=599 => Err(Attempt::Retry {
-            error: MailError::Unavailable(status),
-            wait: Some(
-                retry_after
-                    .unwrap_or(Duration::from_millis(500))
-                    .min(MAX_RETRY_AFTER),
-            ),
-        }),
-        _ => Err(Attempt::Final(MailError::InvalidMessage(status))),
+        _ => {
+            let code = bytes
+                .as_deref()
+                .and_then(|bytes| serde_json::from_slice::<ErrorResponse>(bytes).ok())
+                .and_then(|error| error.code);
+            Err(classify_error(status, code.as_deref(), retry_after))
+        }
     }
 }
 
@@ -513,10 +605,16 @@ mod tests {
 
     use super::*;
 
+    const MESSAGE_ID: &str = "9a8b7c6d-5e4f-4a3b-8c1d-0e9f8a7b6c5d";
+
+    /// HTTP status and optional error `code` of a stand-in answer.
+    type Answer = (u16, Option<&'static str>);
+
     #[derive(Clone, Default)]
     struct Captured {
         requests: Arc<Mutex<Vec<(HeaderMap, serde_json::Value)>>>,
-        statuses: Arc<Mutex<Vec<u16>>>,
+        /// HTTP status and optional error `code` of the next answers.
+        answers: Arc<Mutex<Vec<Answer>>>,
     }
 
     async fn receive(
@@ -526,23 +624,24 @@ mod tests {
     ) -> axum::response::Response {
         let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
         captured.requests.lock().unwrap().push((headers, json));
-        let status = {
-            let mut statuses = captured.statuses.lock().unwrap();
-            if statuses.is_empty() {
-                202
+        let (status, code) = {
+            let mut answers = captured.answers.lock().unwrap();
+            if answers.is_empty() {
+                (201, None)
             } else {
-                statuses.remove(0)
+                answers.remove(0)
             }
         };
         let status = axum::http::StatusCode::from_u16(status).unwrap();
         if status.is_success() {
+            (status, axum::Json(json!({ "id": MESSAGE_ID }))).into_response()
+        } else {
             (
                 status,
-                axum::Json(json!({ "id": "email_01TEST", "status": "queued" })),
+                [("Retry-After", "0")],
+                axum::Json(json!({ "error": "refused", "code": code.unwrap_or("INTERNAL_ERROR") })),
             )
                 .into_response()
-        } else {
-            (status, [("Retry-After", "0")], "busy").into_response()
         }
     }
 
@@ -557,42 +656,57 @@ mod tests {
             .unwrap()
             .push((headers, json!({ "get": id })));
         match id.as_str() {
-            "email_01SENT" => axum::Json(json!({
+            // The eusend shape: camelCase, rendered body, events, no SMTP code.
+            "sent-1" => axum::Json(json!({
                 "id": id,
+                "from": "zugang@gmed-health.com",
+                "to": ["anna@example.test"],
+                "subject": "Ihr Zugang",
+                "html": "<p>x</p>".repeat(20_000),
+                "text": "x",
                 "status": "Sent",
-                "created_at": "2026-08-14T09:14:07Z",
-                "sent_at": "2026-08-14T09:14:09Z",
-                "smtp_code": "250",
+                "tags": {},
+                "testMode": false,
+                "createdAt": "2026-11-16T09:14:07.000Z",
+                "events": [{ "type": "sent", "createdAt": "2026-11-16T09:14:09.000Z" }],
             }))
             .into_response(),
-            "email_01NUMBER" => {
-                axum::Json(json!({ "id": id, "status": "bounced", "smtp_code": 550 }))
-                    .into_response()
+            // The Resend shape: `last_event` instead of `status`.
+            "resend-1" => {
+                axum::Json(json!({ "id": id, "last_event": "delivered" })).into_response()
             }
-            "email_01DENIED" => axum::http::StatusCode::FORBIDDEN.into_response(),
+            "number-1" => axum::Json(json!({ "id": id, "status": "bounced", "smtp_code": 550 }))
+                .into_response(),
+            "empty-1" => axum::Json(json!({ "id": id })).into_response(),
+            "denied-1" => (
+                axum::http::StatusCode::FORBIDDEN,
+                axum::Json(json!({ "error": "Forbidden", "code": "FORBIDDEN" })),
+            )
+                .into_response(),
             _ => axum::http::StatusCode::NOT_FOUND.into_response(),
         }
     }
 
-    async fn fake_mittaro(statuses: Vec<u16>) -> (String, Captured) {
+    /// A local stand-in for the eusend API; nothing leaves the machine.
+    async fn fake_api(answers: Vec<Answer>) -> (String, Captured) {
         let captured = Captured::default();
-        *captured.statuses.lock().unwrap() = statuses;
+        *captured.answers.lock().unwrap() = answers;
         let app = Router::new()
-            .route("/v1/emails", post(receive))
-            .route("/v1/emails/{id}", get(report))
+            .route("/emails", post(receive))
+            .route("/emails/{id}", get(report))
             .with_state(captured.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        (format!("http://{address}/v1/emails"), captured)
+        (format!("http://{address}/"), captured)
     }
 
     fn mailer(api_url: String) -> Mailer {
         Mailer::new(MailConfig {
-            mittaro_api_key: Some(SecretString::from("tx_live_test")),
-            mittaro_api_url: Some(api_url),
+            api_key: Some(SecretString::from("eu_test_key")),
+            api_url: Some(api_url),
             from: Some("zugang@gmed-health.com".into()),
             reply_to: Some("info@gmed-health.com".into()),
             console_url: Some("https://console.gmed-health.com/".into()),
@@ -613,16 +727,33 @@ mod tests {
     fn missing_settings_keep_the_mailer_off() {
         let off = Mailer::new(MailConfig::default());
         assert!(!off.capability().available);
-        assert_eq!(off.capability().reason_code, "mittaro_api_key_missing");
+        assert_eq!(off.capability().reason_code, "mail_api_key_missing");
+        assert_eq!(off.capability().provider, "eusend");
         let no_sender = Mailer::new(MailConfig {
-            mittaro_api_key: Some(SecretString::from("tx_live_test")),
+            api_key: Some(SecretString::from("eu_test_key")),
             console_url: Some("https://console.gmed-health.com".into()),
             ..MailConfig::default()
         });
         assert_eq!(no_sender.capability().reason_code, "mail_from_missing");
-        let ready = mailer("https://api.mittaro.de/v1/emails".into());
+        let ready = mailer(MAIL_DEFAULT_API_URL.into());
         assert!(ready.capability().available);
         assert_eq!(ready.console_url(), Some("https://console.gmed-health.com"));
+    }
+
+    #[test]
+    fn the_default_api_is_eusend() {
+        assert_eq!(MAIL_DEFAULT_API_URL, "https://api.eusend.dev");
+        let MailerState::Ready { api_url, .. } = Mailer::new(MailConfig {
+            api_key: Some(SecretString::from("eu_test_key")),
+            from: Some("zugang@gmed-health.com".into()),
+            console_url: Some("https://console.gmed-health.com".into()),
+            ..MailConfig::default()
+        })
+        .state
+        else {
+            panic!("ready");
+        };
+        assert_eq!(api_url, "https://api.eusend.dev");
     }
 
     #[tokio::test]
@@ -633,52 +764,78 @@ mod tests {
 
     #[tokio::test]
     async fn sends_html_and_text_with_bearer_key_and_idempotency_key() {
-        let (url, captured) = fake_mittaro(vec![]).await;
+        let (url, captured) = fake_api(vec![]).await;
         let sent = mailer(url).send(&message()).await.unwrap();
-        assert_eq!(sent.message_id, "email_01TEST");
+        assert_eq!(sent.message_id, MESSAGE_ID);
         assert!(!sent.replayed);
         let requests = captured.requests.lock().unwrap();
         let (headers, body) = &requests[0];
-        assert_eq!(headers["authorization"], "Bearer tx_live_test");
+        assert_eq!(headers["authorization"], "Bearer eu_test_key");
         assert_eq!(headers["idempotency-key"], "key-1");
         assert_eq!(body["from"], "zugang@gmed-health.com");
         assert_eq!(body["to"], "anna@example.test");
         assert_eq!(body["reply_to"], "info@gmed-health.com");
         assert_eq!(body["text"], "Text");
         assert_eq!(body["html"], "<p>Text</p>");
+        assert_eq!(body["track_opens"], false);
+        assert_eq!(body["track_clicks"], false);
         assert!(body.get("attachments").is_none());
     }
 
     #[tokio::test]
     async fn a_repeat_with_the_same_key_is_reported_as_replayed() {
-        let (url, _) = fake_mittaro(vec![200]).await;
+        let (url, _) = fake_api(vec![(200, None)]).await;
         assert!(mailer(url).send(&message()).await.unwrap().replayed);
     }
 
     #[tokio::test]
     async fn a_temporary_outage_is_retried() {
-        let (url, captured) = fake_mittaro(vec![503, 202]).await;
+        let (url, captured) = fake_api(vec![(503, Some("SERVICE_PAUSED")), (201, None)]).await;
         assert!(mailer(url).send(&message()).await.is_ok());
         assert_eq!(captured.requests.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]
-    async fn a_rejected_key_is_not_retried() {
-        let (url, captured) = fake_mittaro(vec![401]).await;
-        let error = mailer(url).send(&message()).await.unwrap_err();
-        assert_eq!(error, MailError::Rejected(401));
-        assert_eq!(error.code(), "mail_rejected");
-        assert_eq!(captured.requests.lock().unwrap().len(), 1);
+    async fn a_rejected_key_or_domain_is_not_retried() {
+        for (status, code) in [
+            (401, "UNAUTHORIZED"),
+            (403, "DOMAIN_NOT_VERIFIED"),
+            (403, "SENDING_SUSPENDED"),
+        ] {
+            let (url, captured) = fake_api(vec![(status, Some(code))]).await;
+            let error = mailer(url).send(&message()).await.unwrap_err();
+            assert_eq!(error, MailError::Rejected(status), "{code}");
+            assert_eq!(error.code(), "mail_rejected");
+            assert_eq!(captured.requests.lock().unwrap().len(), 1);
+        }
     }
 
     #[tokio::test]
-    async fn an_invalid_message_and_a_quota_are_reported() {
-        let (url, _) = fake_mittaro(vec![422]).await;
-        assert_eq!(
-            mailer(url).send(&message()).await,
-            Err(MailError::InvalidMessage(422))
-        );
-        let (url, captured) = fake_mittaro(vec![429, 429, 429]).await;
+    async fn provider_error_codes_map_to_our_codes() {
+        for (status, code, expected) in [
+            (422, "VALIDATION_ERROR", MailError::InvalidMessage(422)),
+            (400, "VALIDATION_ERROR", MailError::InvalidMessage(400)),
+            (
+                422,
+                "RECIPIENT_DOMAIN_UNDELIVERABLE",
+                MailError::RecipientDomainNoMail,
+            ),
+            (422, "ALL_SUPPRESSED", MailError::RecipientBlocked),
+            (429, "DAILY_LIMIT_EXCEEDED", MailError::QuotaReached),
+            (429, "MONTHLY_LIMIT_EXCEEDED", MailError::QuotaReached),
+        ] {
+            let (url, captured) = fake_api(vec![(status, Some(code))]).await;
+            assert_eq!(mailer(url).send(&message()).await, Err(expected), "{code}");
+            // None of these is retried.
+            assert_eq!(captured.requests.lock().unwrap().len(), 1, "{code}");
+        }
+        assert_eq!(MailError::RecipientBlocked.code(), "mail_recipient_blocked");
+        let (url, captured) = fake_api(vec![
+            (429, Some("RATE_LIMITED")),
+            (429, Some("RATE_LIMITED")),
+            (429, Some("RATE_LIMITED")),
+        ])
+        .await;
         assert_eq!(
             mailer(url).send(&message()).await,
             Err(MailError::QuotaReached)
@@ -688,44 +845,44 @@ mod tests {
 
     #[tokio::test]
     async fn reads_the_status_of_an_accepted_message() {
-        let (url, captured) = fake_mittaro(vec![]).await;
+        let (url, captured) = fake_api(vec![]).await;
         let mailer = mailer(url);
         assert_eq!(
-            mailer.status("email_01SENT").await,
+            mailer.status("sent-1").await,
             Ok(ProviderStatus {
                 status: "sent".into(),
-                smtp_code: Some("250".into()),
+                smtp_code: None,
             })
         );
+        assert_eq!(mailer.status("resend-1").await.unwrap().status, "delivered");
         assert_eq!(
-            mailer.status("email_01NUMBER").await.unwrap().smtp_code,
+            mailer.status("number-1").await.unwrap().smtp_code,
             Some("550".into())
         );
         assert_eq!(
-            mailer.status("email_01DENIED").await,
-            Err(MailError::Rejected(403))
+            mailer.status("empty-1").await,
+            Err(MailError::InvalidResponse)
         );
         assert_eq!(
-            mailer.status("email_01OTHER").await,
-            Err(MailError::NotFound)
+            mailer.status("denied-1").await,
+            Err(MailError::Rejected(403))
         );
+        assert_eq!(mailer.status("other-1").await, Err(MailError::NotFound));
         let requests = captured.requests.lock().unwrap();
-        assert_eq!(requests[0].0["authorization"], "Bearer tx_live_test");
-        assert_eq!(requests[0].1["get"], "email_01SENT");
+        assert_eq!(requests[0].0["authorization"], "Bearer eu_test_key");
+        assert_eq!(requests[0].1["get"], "sent-1");
     }
 
     #[tokio::test]
     async fn an_odd_message_id_never_reaches_the_request_path() {
-        let (url, captured) = fake_mittaro(vec![]).await;
+        let (url, captured) = fake_api(vec![]).await;
         let mailer = mailer(url);
         for id in ["", "../keys", "email_01?x=1", "email 01"] {
             assert_eq!(mailer.status(id).await, Err(MailError::NotFound), "{id}");
         }
         assert!(captured.requests.lock().unwrap().is_empty());
         assert_eq!(
-            Mailer::new(MailConfig::default())
-                .status("email_01SENT")
-                .await,
+            Mailer::new(MailConfig::default()).status(MESSAGE_ID).await,
             Err(MailError::NotConfigured)
         );
     }

@@ -5,7 +5,7 @@
 //! payer's copy of the cost estimate without any line text), sending them as
 //! one QES request signed by the payer and GMED only, the outdated reasons,
 //! completion (live and DEMO), what the payer and the paying parent see, the
-//! roles, conversion and purge. A local stand-in for the Mittaro API carries
+//! roles, conversion and purge. A local stand-in for the eusend API carries
 //! the payer link's e-mails and a mock Skribble server on loopback stands in
 //! for the signature provider; the real APIs are never called. Synthetic data
 //! only (Viktor Zahler, Mia/Anna/Ben Muster, Beispiel GmbH, example.com).
@@ -67,35 +67,31 @@ fn bearer(user_id: Uuid, role: &str) -> String {
     format!("Bearer {token}")
 }
 
-// ---------------------------------------------------------------- Mittaro
+// ---------------------------------------------------------------- mail API
 
 #[derive(Clone, Default)]
-struct FakeMittaro {
+struct FakeMailApi {
     received: Arc<Mutex<Vec<Value>>>,
 }
 
-async fn fake_send(State(fake): State<FakeMittaro>, body: axum::body::Bytes) -> Response {
+async fn fake_send(State(fake): State<FakeMailApi>, body: axum::body::Bytes) -> Response {
     let mut received = fake.received.lock().unwrap();
     received.push(serde_json::from_slice(&body).unwrap());
     let id = format!("email_{}", received.len());
-    (
-        StatusCode::ACCEPTED,
-        axum::Json(json!({ "id": id, "status": "queued" })),
-    )
-        .into_response()
+    (StatusCode::CREATED, axum::Json(json!({ "id": id }))).into_response()
 }
 
-async fn start_fake_mittaro() -> (String, FakeMittaro) {
-    let fake = FakeMittaro::default();
+async fn start_fake_mail_api() -> (String, FakeMailApi) {
+    let fake = FakeMailApi::default();
     let router = Router::new()
-        .route("/v1/emails", post(fake_send))
+        .route("/emails", post(fake_send))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
-    (format!("http://{address}/v1/emails"), fake)
+    (format!("http://{address}"), fake)
 }
 
 // ---------------------------------------------------------------- Skribble
@@ -268,7 +264,7 @@ struct App {
     /// The state with the mock provider; the worker polls through it.
     state: AppState,
     app: Router,
-    fake: FakeMittaro,
+    fake: FakeMailApi,
     mock: Mock,
     users: Vec<(&'static str, Uuid)>,
 }
@@ -343,7 +339,7 @@ async fn app(demo: bool) -> Option<App> {
         .unwrap();
         users.push((role, id));
     }
-    let (api_url, fake) = start_fake_mittaro().await;
+    let (api_url, fake) = start_fake_mail_api().await;
     let owner = if demo {
         "api_demo_test"
     } else {
@@ -371,8 +367,8 @@ async fn app(demo: bool) -> Option<App> {
         .state
         .clone()
         .with_mailer(MailConfig {
-            mittaro_api_key: Some(SecretString::from("tx_live_test")),
-            mittaro_api_url: Some(api_url),
+            api_key: Some(SecretString::from("eu_live_test")),
+            api_url: Some(api_url),
             from: Some("zugang@gmed-health.test".into()),
             reply_to: None,
             console_url: Some("https://console.gmed-health.test".into()),

@@ -3373,7 +3373,7 @@ test.describe("lead onboarding wizard", () => {
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toContain("Passwort: Kq7-mP2x-Rw9t");
 
-    // With Mittaro set up, the same sign-in data goes out by e-mail on a click.
+    // With e-mail set up, the same sign-in data goes out by e-mail on a click.
     await credentials.getByRole("button", { name: "EN", exact: true }).click();
     const emailRequest = page.waitForRequest((emailCall) =>
       emailCall.method() === "POST" &&

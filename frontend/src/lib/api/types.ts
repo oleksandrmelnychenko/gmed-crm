@@ -83,11 +83,11 @@ export interface LeadPortalAccountSummary {
   last_login_at: string | null;
   /** Last sign-in e-mail sent to the lead's own login. */
   login_emailed_at?: string | null;
-  /** What Mittaro reported for that e-mail; null until the first check. */
+  /** What the mail provider reported for that e-mail; null until the first check. */
   login_email_delivery?: LoginEmailDeliveryStatus | null;
 }
 
-/** Delivery state of a sign-in e-mail, read back from Mittaro. */
+/** Delivery state of a sign-in e-mail, read back from the mail provider. */
 export type LoginEmailDeliveryStatus =
   | "queued"
   | "sending"

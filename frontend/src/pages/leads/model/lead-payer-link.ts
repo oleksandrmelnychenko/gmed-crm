@@ -217,7 +217,7 @@ const DELIVERY_LABELS: Record<PayerLinkDeliveryStatus, [string, string]> = {
 const PROBLEM_DELIVERY: readonly PayerLinkDeliveryStatus[] = ["bounced", "failed", "suppressed", "complained"];
 
 /**
- * One line per e-mail of the link (invitation, code): what Mittaro reported
+ * One line per e-mail of the link (invitation, code): what the mail provider reported
  * and when (owner request 2026-10-24). `problem` marks a line to highlight.
  */
 export function payerLinkEmailLines(
@@ -306,8 +306,8 @@ export function payerRepresentativeNote(tx: Tx): string {
  */
 export function payerLinkMailMissingText(tx: Tx): string {
   return tx(
-    "Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail».",
-    "Der E-Mail-Versand ist nicht eingerichtet. Mittaro wird unter „API-Verbindungen“ → „E-Mail“ verbunden.",
+    "Отправка e-mail не настроена. eusend подключается в разделе «API-подключения» → «E-Mail».",
+    "Der E-Mail-Versand ist nicht eingerichtet. eusend wird unter „API-Verbindungen“ → „E-Mail“ verbunden.",
   );
 }
 

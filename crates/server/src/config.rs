@@ -32,7 +32,7 @@ pub struct Config {
     /// Optional offline machine-translation drafts for the document
     /// translation workspace, served by the internal translation service.
     pub machine_translation: MachineTranslationConfig,
-    /// Outgoing e-mail through Mittaro (transactional e-mail API hosted in
+    /// Outgoing e-mail through a Resend-compatible API (eusend, hosted in
     /// Germany). Without an API key no e-mail is sent.
     pub mail: MailConfig,
     /// Explicit DEV-only test onboarding; never grants legal signature effects.
@@ -42,16 +42,18 @@ pub struct Config {
     pub dev_skip_totp: bool,
 }
 
-/// Default send endpoint of the Mittaro API.
-pub const MITTARO_DEFAULT_API_URL: &str = "https://api.mittaro.de/v1/emails";
+/// Base URL of the e-mail API: eusend (API in Nuremberg, mail servers in
+/// Falkenstein, data in Frankfurt). Requests go to `{base}/emails` and
+/// `{base}/emails/{id}`.
+pub const MAIL_DEFAULT_API_URL: &str = "https://api.eusend.dev";
 
 #[derive(Clone, Default)]
 pub struct MailConfig {
-    /// `tx_live_…` key from the Mittaro dashboard.
-    pub mittaro_api_key: Option<SecretString>,
-    /// Send endpoint; [`MITTARO_DEFAULT_API_URL`] unless overridden.
-    pub mittaro_api_url: Option<String>,
-    /// Sender on a domain verified at Mittaro, e.g. `zugang@gmed-health.com`.
+    /// `eu_live_…` key from the eusend dashboard.
+    pub api_key: Option<SecretString>,
+    /// API base URL; [`MAIL_DEFAULT_API_URL`] unless overridden (tests only).
+    pub api_url: Option<String>,
+    /// Sender on a domain verified at the provider, e.g. `zugang@gmed-health.com`.
     pub from: Option<String>,
     pub reply_to: Option<String>,
     /// Origin of the staff/patient console the e-mails link to, e.g.
@@ -200,7 +202,7 @@ impl Config {
 
         let cors_origin =
             std::env::var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".into());
-        let mittaro_api_url = env_text("GMED_MITTARO_API_URL");
+        let mail_api_url = env_text("GMED_MAIL_API_URL");
         let console_url = console_url_from(env_text("GMED_CONSOLE_URL"), &cors_origin);
         let dev_skip_totp = env_flag("GMED_DEV_SKIP_TOTP").0;
         if dev_skip_totp
@@ -209,7 +211,7 @@ impl Config {
             panic!("GMED_DEV_SKIP_TOTP is only allowed on DEV or a local console");
         }
         for (name, url) in [
-            ("GMED_MITTARO_API_URL", &mittaro_api_url),
+            ("GMED_MAIL_API_URL", &mail_api_url),
             ("GMED_CONSOLE_URL", &console_url),
         ] {
             if let Some(url) = url
@@ -219,8 +221,8 @@ impl Config {
             }
         }
         let mail = MailConfig {
-            mittaro_api_key: env_text("GMED_MITTARO_API_KEY").map(SecretString::from),
-            mittaro_api_url,
+            api_key: env_text("GMED_MAIL_API_KEY").map(SecretString::from),
+            api_url: mail_api_url,
             from: env_text("GMED_MAIL_FROM"),
             reply_to: env_text("GMED_MAIL_REPLY_TO"),
             console_url,

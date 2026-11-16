@@ -48,7 +48,7 @@ const leads = [
 
 type MailMock = {
   reusedParent?: boolean;
-  /** Mittaro is connected. */
+  /** E-mail (eusend) is connected. */
   available?: boolean;
   /** The provider refuses the e-mail. */
   failSend?: boolean;

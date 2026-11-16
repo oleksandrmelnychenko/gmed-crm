@@ -198,12 +198,12 @@ export type LeadLoginEmailRecord = {
   error_code: string | null;
   sent_at: string;
   sent_by_name: string | null;
-  /** What Mittaro reported later; null until the first check. */
+  /** What the mail provider reported later; null until the first check. */
   delivery_status?: LoginEmailDeliveryStatus | null;
   delivery_updated_at?: string | null;
 };
 
-/** Whether sign-in data can be e-mailed (Mittaro), and what was sent so far. */
+/** Whether sign-in data can be e-mailed (eusend), and what was sent so far. */
 export type LeadLoginEmailInfo = {
   available: boolean;
   reason_code: string;

@@ -5061,7 +5061,7 @@ async fn mail_available(state: &AppState) -> bool {
         .is_ok_and(|mailer| mailer.capability().available && mailer.console_url().is_some())
 }
 
-/// The newest invitation and code e-mail of a link with what Mittaro
+/// The newest invitation and code e-mail of a link with what the mail provider
 /// reported about their delivery (owner request 2026-10-24), for the wizard's
 /// payer panel. Metadata only: no address, no content.
 async fn link_emails(conn: &mut PgConnection, link_id: Uuid) -> Result<Vec<Value>, sqlx::Error> {
