@@ -79,6 +79,16 @@ import { splitTranslationTree } from "@/components/data-table/document-translati
 import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
 import {
+  isPatientConsentFormRow,
+  parseSignatureStateFilter,
+  signatureStateFilterOptions,
+} from "./model/document-versions";
+import {
+  canChangePatientConsents,
+  PatientConsentChangeHost,
+  PatientConsentChangeRowButton,
+} from "@/pages/patients/ui/sections/patient-consent-choices";
+import {
   localizeDocumentCategory,
   localizeDocumentCode,
 } from "@/lib/required-document-labels";
@@ -1190,7 +1200,10 @@ function StaffDocumentsPage({
     accessCategory: searchParams.get("access_category") ?? "",
     financialStatus: searchParams.get("financial_status") ?? "",
     validity: parseValidityFilter(searchParams.get("validity")),
+    signatureState: parseSignatureStateFilter(searchParams.get("signature_state")),
   }));
+  // «Изменить согласия» from an Einverständniserklärung row (fix-98).
+  const [consentChangePatientId, setConsentChangePatientId] = useState<string | null>(null);
   // The validity filter is a link staff share and open again
   // (`?validity=attention`, QA 2026-11-16 S3-7).
   const urlValidity = parseValidityFilter(searchParams.get("validity"));
@@ -4022,6 +4035,26 @@ function StaffDocumentsPage({
                 </option>
               ))}
             </NativeComboboxSelect>
+            {/* Signature state of the current version (fix-98). */}
+            <NativeComboboxSelect
+              value={filters.signatureState ?? ""}
+              data-readonly="exempt"
+              aria-label={lang === "de" ? "Unterschrift" : "Подпись"}
+              data-testid="documents-signature-state-filter"
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  signatureState: parseSignatureStateFilter(event.target.value),
+                }))
+              }
+              className={cn(selectClassName, documentFilterControlClassName)}
+            >
+              {signatureStateFilterOptions(lang).map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeComboboxSelect>
             <Button
               variant="ghost"
               size="sm"
@@ -4045,6 +4078,7 @@ function StaffDocumentsPage({
                   accessCategory: "",
                   financialStatus: "",
                   validity: "",
+                  signatureState: "",
                 })
               }
             >
@@ -4093,6 +4127,18 @@ function StaffDocumentsPage({
           <EmptyCell>{t.documents_no_documents_match}</EmptyCell>
         ) : (
           <DocumentsGrid
+            rowActions={
+              canChangePatientConsents(user?.role)
+                ? (item) =>
+                    isPatientConsentFormRow(item, item.patient_id) && item.patient_id ? (
+                      <PatientConsentChangeRowButton
+                        title={localizeDocumentCode(item.auto_name, l)}
+                        onOpen={() => setConsentChangePatientId(item.patient_id ?? null)}
+                      />
+                    ) : null
+                : undefined
+            }
+            rowActionsWidth={canChangePatientConsents(user?.role) ? 40 : undefined}
             onSigned={refresh}
             onTranslateDocument={
               canUpdateTranslation
@@ -4141,6 +4187,13 @@ function StaffDocumentsPage({
             formatDateTime={formatDateTime}
           />
         )}
+        {canChangePatientConsents(user?.role) ? (
+          <PatientConsentChangeHost
+            patientId={consentChangePatientId}
+            onClose={() => setConsentChangePatientId(null)}
+            onChanged={refresh}
+          />
+        ) : null}
         {!busy && documentsHaveMore ? (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
             <span>

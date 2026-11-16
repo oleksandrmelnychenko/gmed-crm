@@ -15,6 +15,8 @@ type DocumentPreviewColumnOptions<T> = {
   canSign?: (row: T) => boolean;
   /** Optional third action: open the document translation dialog. */
   onTranslate?: (row: T) => void;
+  /** Rows without the translation action (an earlier version is read-only). */
+  canTranslate?: (row: T) => boolean;
   translateLabel?: string;
 };
 
@@ -26,6 +28,7 @@ export function createDocumentPreviewColumn<T>({
   onSigned,
   canSign,
   onTranslate,
+  canTranslate,
   translateLabel,
 }: DocumentPreviewColumnOptions<T>): ColumnDef<T> {
   return {
@@ -59,7 +62,7 @@ export function createDocumentPreviewColumn<T>({
         {canSign && !canSign(row) ? null : (
           <DocumentSignatureAction documentId={getId(row)} title={title} iconOnly onDone={onSigned} />
         )}
-        {onTranslate ? (
+        {onTranslate && (!canTranslate || canTranslate(row)) ? (
           <Button
             type="button"
             variant="ghost"

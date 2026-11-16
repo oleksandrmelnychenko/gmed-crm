@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DataTablePager } from "@/components/data-table/data-table-pager";
@@ -27,6 +27,19 @@ import { documentPartyUploadTypeLabel } from "@/pages/documents/model/document-m
 import { isOutdatedCurrentVersion } from "@/pages/documents/model/outdated-document-version";
 import type { DocumentValidityStatus } from "@/pages/documents/model/document-validity";
 import { DocumentValidityChip } from "@/pages/documents/ui/document-validity";
+import {
+  isPreviousVersionRow,
+  previousVersionChip,
+  previousVersionRows,
+  signatureStateChip,
+  withPreviousVersionRows,
+  type DocumentSignatureState,
+} from "@/pages/documents/model/document-versions";
+import {
+  DocumentStateChip,
+  DocumentVersionToggle,
+  PreviousVersionLabel,
+} from "@/pages/documents/ui/document-version-cells";
 import {
   DEFAULT_DOCUMENT_PAGE_SIZE,
   DOCUMENT_PAGE_SIZE_OPTIONS,
@@ -62,6 +75,15 @@ type DocumentsGridItem = {
   uploaded_by_name: string | null;
   updated_at: string;
   needs_categorization: boolean;
+  signed_at?: string | null;
+  patient_id?: string | null;
+  lead_id?: string | null;
+  generated_template_id?: string | null;
+  /** `not_sent` / `sent` / `signed` of a document made to be signed (fix-98). */
+  signature_state?: DocumentSignatureState | null;
+  signature_sent_at?: string | null;
+  /** The earlier versions the caller may open, newest first (fix-98). */
+  previous_versions?: DocumentsGridItem[];
 };
 
 type DocumentsGridLabels = {
@@ -121,6 +143,11 @@ type DocumentsGridProps = {
   formatDateTime: (value?: string | null) => string;
   paginated?: boolean;
   paginationResetKey?: string;
+  /** Actions of a current version's row, e.g. «Изменить согласия» (fix-98). */
+  rowActions?: (item: DocumentsGridItem) => ReactNode;
+  rowActionsWidth?: number;
+  /** Documents whose earlier versions start opened. */
+  initialExpandedVersions?: readonly string[];
 };
 
 type PaginatedDocumentsTableProps = {
@@ -132,7 +159,13 @@ type PaginatedDocumentsTableProps = {
   selectedDocumentIds: string[];
   selectedId: string | null;
   showSelection: boolean;
+  expandedVersions: ReadonlySet<string>;
+  rowActions?: (item: DocumentsGridItem) => ReactNode;
+  rowActionsWidth?: number;
 };
+
+const versionRowId = (item: DocumentsGridItem) =>
+  isPreviousVersionRow(item) ? `${item.previous_version_of}:${item.id}` : item.id;
 
 function PaginatedDocumentsTable({
   columns,
@@ -143,6 +176,9 @@ function PaginatedDocumentsTable({
   selectedDocumentIds,
   selectedId,
   showSelection,
+  expandedVersions,
+  rowActions,
+  rowActionsWidth,
 }: PaginatedDocumentsTableProps) {
   const { t, lang } = useLang();
   const [filters, setFilters] = useState<FilterPredicate[]>([]);
@@ -231,10 +267,14 @@ function PaginatedDocumentsTable({
       const roots = buildDocumentPage(visibleRows, pageIndex, pageSize);
       return {
         ...roots,
-        rows: withTranslationChildren(roots.rows, tree.childrenByParent),
+        // Earlier versions open under their document; the counts stay per document.
+        rows: withPreviousVersionRows(
+          withTranslationChildren(roots.rows, tree.childrenByParent),
+          expandedVersions,
+        ),
       };
     },
-    [pageIndex, pageSize, tree.childrenByParent, visibleRows],
+    [expandedVersions, pageIndex, pageSize, tree.childrenByParent, visibleRows],
   );
   const pageIdSet = useMemo(
     () => new Set(page.rows.map((document) => document.id)),
@@ -337,8 +377,11 @@ function PaginatedDocumentsTable({
           !effectiveFrozenColumns.includes(column.id) &&
           effectiveFrozenColumns.length >= 3
         }
-        rowId={(document) => document.id}
+        rowId={versionRowId}
         activeRowId={selectedId}
+        rowBackground={(document) => (isPreviousVersionRow(document) ? "bg-muted/30" : null)}
+        rowActions={rowActions ? (document) => (isPreviousVersionRow(document) ? null : rowActions(document)) : undefined}
+        rowActionsWidth={rowActionsWidth}
         selectionEnabled={showSelection}
         selectedIds={pageSelectedIds}
         onSelectedIdsChange={updatePageSelection}
@@ -372,8 +415,24 @@ export function DocumentsGrid({
   formatDateTime,
   paginated = false,
   paginationResetKey = "",
+  rowActions,
+  rowActionsWidth,
+  initialExpandedVersions,
 }: DocumentsGridProps) {
   const { lang } = useLang();
+  const [expandedVersions, setExpandedVersions] = useState<ReadonlySet<string>>(
+    () => new Set(initialExpandedVersions ?? []),
+  );
+  const toggleVersions = useCallback(
+    (id: string) =>
+      setExpandedVersions((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
   const {
     preview: previewLabel,
     filename: filenameLabel,
@@ -401,6 +460,8 @@ export function DocumentsGrid({
               item.original_filename ?? localizeCode(item.auto_name),
             label: previewLabel,
             onSigned,
+            canSign: (item) => !isPreviousVersionRow(item),
+            canTranslate: (item) => !isPreviousVersionRow(item),
             onPreview: (item) =>
               onPreviewDocument(
                 item.id,
@@ -427,7 +488,14 @@ export function DocumentsGrid({
       required: true,
       pinned: "left",
       width: 300,
-      render: (item) => (
+      render: (item) => isPreviousVersionRow(item) ? (
+        <div className="flex min-w-0 items-center gap-2" title={item.original_filename ?? undefined}>
+          <PreviousVersionLabel document={item} />
+          <span className="truncate text-xs text-muted-foreground">
+            {localizeCode(item.auto_name)}
+          </span>
+        </div>
+      ) : (
         <div
           className="flex min-w-0 items-center gap-2"
           style={{ paddingLeft: translationIndent(tree.depthById.get(item.id)) }}
@@ -439,6 +507,12 @@ export function DocumentsGrid({
           <span className="truncate text-xs font-medium text-foreground">
             {localizeCode(item.auto_name)}
           </span>
+          <DocumentVersionToggle
+            document={item}
+            expanded={expandedVersions.has(item.id)}
+            onToggle={toggleVersions}
+            lang={lang}
+          />
           {item.translation_source_document_id ? (
             <Badge
               variant="outline"
@@ -511,7 +585,11 @@ export function DocumentsGrid({
       accessor: (item) => item.status,
       sortable: true,
       width: 170,
-      render: (item) => (
+      render: (item) => isPreviousVersionRow(item) ? (
+        <div className="flex min-w-0 items-center gap-1">
+          <DocumentStateChip chip={previousVersionChip(item, lang)} documentId={item.id} />
+        </div>
+      ) : (
         <div className="flex min-w-0 items-center gap-1">
           <Badge
             variant="outline"
@@ -530,6 +608,8 @@ export function DocumentsGrid({
               {lang === "de" ? "Veraltet" : "Устарел"}
             </Badge>
           ) : null}
+          {/* Not sent / sent / signed (fix-98); only documents made to be signed. */}
+          <DocumentStateChip chip={signatureStateChip(item, lang)} documentId={item.id} />
           {/* Optional validity date (owner 2026-11-15); nothing without one. */}
           <DocumentValidityChip document={item} compact className="min-w-0" />
         </div>
@@ -594,6 +674,8 @@ export function DocumentsGrid({
   ], [
     categoryLabel,
     currentVersionLabel,
+    expandedVersions,
+    toggleVersions,
     filenameLabel,
     formatDateTime,
     formatSensitivityLabel,
@@ -633,6 +715,9 @@ export function DocumentsGrid({
         selectedDocumentIds={selectedDocumentIds}
         selectedId={selectedId}
         showSelection={showSelection}
+        expandedVersions={expandedVersions}
+        rowActions={rowActions}
+        rowActionsWidth={rowActionsWidth}
       />
     );
   }
@@ -640,11 +725,21 @@ export function DocumentsGrid({
   return (
     <DataTableSurface
       rows={tree.roots}
-      expandRow={(item) => tree.childrenByParent.get(item.id) ?? null}
+      expandRow={(item) => {
+        if (isPreviousVersionRow(item)) return null;
+        const children = [
+          ...previousVersionRows(item, expandedVersions),
+          ...(tree.childrenByParent.get(item.id) ?? []),
+        ];
+        return children.length > 0 ? children : null;
+      }}
+      rowBackground={(item) => (isPreviousVersionRow(item) ? "bg-muted/30" : null)}
+      rowActions={rowActions ? (item) => (isPreviousVersionRow(item) ? null : rowActions(item)) : undefined}
+      rowActionsWidth={rowActionsWidth}
       columns={columns}
       defaultHiddenColumns={["updated_at"]}
       defaultSort={[{ field: "updated_at", dir: "desc" }]}
-      rowId={(item) => item.id}
+      rowId={versionRowId}
       activeRowId={selectedId}
       selectionEnabled={showSelection}
       selectedIds={selectedDocumentIds}

@@ -1,5 +1,5 @@
 import { Download, FilePlus2, FileSearch, FileWarning, LoaderCircle, PencilLine, ScanText } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -85,6 +85,26 @@ import {
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { DocumentPortalReleaseAction } from "@/pages/documents/ui/document-portal-release-action";
 import { documentUploadFormReplacing, type DocumentUploadFormState } from "../../model/sheet-forms";
+import { useAuth } from "@/lib/auth";
+import {
+  countNotSentForSignature,
+  isPatientConsentFormRow,
+  isPreviousVersionRow,
+  notSentCountLabel,
+  previousVersionChip,
+  previousVersionRows,
+  signatureStateChip,
+} from "@/pages/documents/model/document-versions";
+import {
+  DocumentStateChip,
+  DocumentVersionToggle,
+  PreviousVersionLabel,
+} from "@/pages/documents/ui/document-version-cells";
+import {
+  canChangePatientConsents,
+  PatientConsentChangeHost,
+  PatientConsentChangeRowButton,
+} from "./patient-consent-choices";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -299,6 +319,25 @@ export function PatientDocumentsTab({
   const [translationDocument, setTranslationDocument] = useState<DocumentItem | null>(null);
   const [translationEditing, setTranslationEditing] = useState<DocumentTranslationEditTarget | null>(null);
   const { staffGo } = useStaffNavigate();
+  const { user } = useAuth();
+  // Earlier versions open under their document (fix-98); «Изменить согласия»
+  // from an Einverständniserklärung row opens the patient card's dialog.
+  const [expandedVersions, setExpandedVersions] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleVersions = useCallback(
+    (id: string) =>
+      setExpandedVersions((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
+  const [consentChangePatientId, setConsentChangePatientId] = useState<string | null>(null);
+  const canChangeConsents = canManageDocuments && canChangePatientConsents(user?.role);
+  const [notSentOnly, setNotSentOnly] = useState(false);
+  const notSentCount = useMemo(() => countNotSentForSignature(documents), [documents]);
+  const [previewIsPreviousVersion, setPreviewIsPreviousVersion] = useState(false);
   // A converted patient's order documents whose terms changed after they were
   // made: a new version from the current data, then the signature dialog
   // (owner request 2026-11-15). The lead wizard is frozen after conversion.
@@ -363,8 +402,13 @@ export function PatientDocumentsTab({
     [documents],
   );
   const validityFilteredDocuments = useMemo(
-    () => filteredDocuments.filter((doc) => matchesValidityFilter(doc, validityFilter)),
-    [filteredDocuments, validityFilter],
+    () =>
+      filteredDocuments.filter(
+        (doc) =>
+          matchesValidityFilter(doc, validityFilter) &&
+          (!notSentOnly || doc.signature_state === "not_sent"),
+      ),
+    [filteredDocuments, validityFilter, notSentOnly],
   );
   const documentTree = useMemo(
     () => splitTranslationTree(validityFilteredDocuments),
@@ -372,7 +416,7 @@ export function PatientDocumentsTab({
   );
   const documentPagination = useDataTablePagination(
     documentTree.roots,
-    `${patientId ?? ""}:${documentStatusFilter}:${documentCategoryFilter}:${validityFilter}`,
+    `${patientId ?? ""}:${documentStatusFilter}:${documentCategoryFilter}:${validityFilter}:${notSentOnly}`,
   );
   const pagedDocumentRows = useMemo(
     () => withTranslationChildren(documentPagination.pagedRows, documentTree.childrenByParent),
@@ -420,7 +464,9 @@ export function PatientDocumentsTab({
   }
 
   async function openPatientDocumentPreview(doc: DocumentItem) {
-    if (canManageDocuments && doc.translation_source_document_id) {
+    // An earlier version opens read-only: no signature, release or renewal.
+    setPreviewIsPreviousVersion(isPreviousVersionRow(doc));
+    if (canManageDocuments && doc.translation_source_document_id && !isPreviousVersionRow(doc)) {
       await openTranslationEditor(doc);
       return;
     }
@@ -502,7 +548,8 @@ export function PatientDocumentsTab({
         onPreview: (doc) => void openPatientDocumentPreview(doc),
         onSigned: onDocumentGenerated,
         // An archived version (also one whose file was deleted) is not signed.
-        canSign: (doc) => doc.status !== "archived",
+        canSign: (doc) => doc.status !== "archived" && !isPreviousVersionRow(doc),
+        canTranslate: (doc) => !isPreviousVersionRow(doc),
         translateLabel: documentTranslationActionLabel(lang),
         onTranslate: canManageDocuments
           ? (doc) => {
@@ -519,7 +566,14 @@ export function PatientDocumentsTab({
         sortable: true,
         required: true,
         minWidth: 280,
-        render: (doc) => (
+        render: (doc) => isPreviousVersionRow(doc) ? (
+          <span className="flex min-w-0 items-center gap-2" title={doc.filename ?? undefined}>
+            <PreviousVersionLabel document={doc} />
+            <span className="truncate text-[13px] text-muted-foreground">
+              {documentDisplayName(doc, l)}
+            </span>
+          </span>
+        ) : (
           <span
             className="flex min-w-0 items-center gap-2"
             style={{ paddingLeft: translationIndent(documentTree.depthById.get(doc.id)) }}
@@ -531,6 +585,12 @@ export function PatientDocumentsTab({
             <span className="truncate text-[13px] text-foreground">
               {documentDisplayName(doc, l)}
             </span>
+            <DocumentVersionToggle
+              document={doc}
+              expanded={expandedVersions.has(doc.id)}
+              onToggle={toggleVersions}
+              lang={lang}
+            />
             {doc.translation_source_document_id ? (
               <Badge
                 variant="outline"
@@ -622,7 +682,11 @@ export function PatientDocumentsTab({
         sortable: true,
         // Status and the DEMO signature side by side, never clipped.
         width: 240,
-        render: (doc) => (
+        render: (doc) => isPreviousVersionRow(doc) ? (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <DocumentStateChip chip={previousVersionChip(doc, lang)} documentId={doc.id} />
+          </span>
+        ) : (
           <span className="flex min-w-0 items-center gap-1.5">
             <DocumentStatusBadges
               documentId={doc.id}
@@ -636,6 +700,8 @@ export function PatientDocumentsTab({
             {isOutdatedCurrentVersion(doc) ? (
               <OutdatedDocumentChip className="shrink-0 whitespace-nowrap" />
             ) : null}
+            {/* Not sent / sent / signed (fix-98); only documents made to be signed. */}
+            <DocumentStateChip chip={signatureStateChip(doc, lang)} documentId={doc.id} />
             {/* Optional validity date (owner 2026-11-15); nothing without one. */}
             <DocumentValidityChip document={doc} compact className="shrink-0 whitespace-nowrap" />
           </span>
@@ -671,9 +737,11 @@ export function PatientDocumentsTab({
       documentPartyRows,
       documentStatusOptions,
       documentsFilenameLabel,
+      expandedVersions,
       formatDate,
       l,
       lang,
+      toggleVersions,
       openPatientDocumentPreview,
       onDocumentGenerated,
       patientsAssignedByLabel,
@@ -727,13 +795,6 @@ export function PatientDocumentsTab({
               ))}
             </div>
           ) : null}
-          {documentAlerts.out_of_sync ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              {l(
-                "patients_the_stored_compliance_flag_for_document_pack_complete_is",
-              )}
-            </p>
-          ) : null}
         </div>
       ) : null}
 
@@ -744,11 +805,36 @@ export function PatientDocumentsTab({
           toolbarClassName="sm:flex-wrap sm:overflow-x-visible"
           rows={pagedDocumentRows}
           columns={documentColumns}
-          rowId={(doc) => doc.id}
+          rowId={(doc) => (isPreviousVersionRow(doc) ? `${doc.previous_version_of}:${doc.id}` : doc.id)}
           defaultDensity="compact"
+          expandRow={(doc) =>
+            isPreviousVersionRow(doc) ? null : previousVersionRows(doc, expandedVersions)
+          }
+          rowBackground={(doc) => (isPreviousVersionRow(doc) ? "bg-muted/30" : null)}
           onRowClick={(doc) => void openPatientDocumentPreview(doc)}
-          rowActions={(doc) => (
+          rowActions={(doc) => isPreviousVersionRow(doc) ? (
+            // An earlier version is read-only: preview (row click) and download.
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              title={t.documents_download}
+              aria-label={t.documents_download}
+              onClick={(event) => {
+                event.stopPropagation();
+                void downloadDocumentFile(doc.id, doc.filename || "document");
+              }}
+            >
+              <Download className="size-3.5" />
+            </Button>
+          ) : (
             <>
+              {canChangeConsents && patientId && isPatientConsentFormRow(doc, patientId) ? (
+                <PatientConsentChangeRowButton
+                  title={documentDisplayName(doc, l)}
+                  onOpen={() => setConsentChangePatientId(patientId)}
+                />
+              ) : null}
               {canRenewOutdated && isOutdatedCurrentVersion(doc) ? (
                 <RenewOutdatedDocumentButton
                   documentId={doc.id}
@@ -824,7 +910,11 @@ export function PatientDocumentsTab({
             </>
           )}
           rowActionsAlwaysVisible
-          rowActionsWidth={canManageDocuments ? (canRenewOutdated && outdatedIds.length > 0 ? 150 : 118) : 46}
+          rowActionsWidth={
+            canManageDocuments
+              ? (canRenewOutdated && outdatedIds.length > 0 ? 150 : 118) + (canChangeConsents ? 32 : 0)
+              : 46
+          }
           emptyState={
             <EmptyCell>
               {documents.length === 0
@@ -920,7 +1010,24 @@ export function PatientDocumentsTab({
                   ))}
                 </NativeComboboxSelect>
               ) : null}
-              {hasDocumentFilters || validityFilter ? (
+              {notSentCount > 0 || notSentOnly ? (
+                // «Ждут отправки на подпись: N» — a click shows only those.
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  aria-pressed={notSentOnly}
+                  data-testid="patient-documents-not-sent-filter"
+                  className={cn(
+                    "h-8 shrink-0 rounded-lg border-amber-300 text-amber-900 dark:text-amber-200",
+                    notSentOnly ? "bg-amber-100 dark:bg-amber-950/50" : "bg-amber-50 dark:bg-amber-950/30",
+                  )}
+                  onClick={() => setNotSentOnly((value) => !value)}
+                >
+                  {notSentCountLabel(notSentCount, lang)}
+                </Button>
+              ) : null}
+              {hasDocumentFilters || validityFilter || notSentOnly ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -928,6 +1035,7 @@ export function PatientDocumentsTab({
                   className="shrink-0"
                   onClick={() => {
                     setValidityFilter("");
+                    setNotSentOnly(false);
                     onResetDocumentFilters();
                   }}
                 >
@@ -994,8 +1102,10 @@ export function PatientDocumentsTab({
                     }}
                   />
                 ) : null}
-                <DocumentSignatureAction documentId={documentPreview.id} title={documentPreview.title} onDone={onDocumentGenerated} />
-                {canRenewOutdated && !outdatedIds.includes(documentPreview.id) ? (
+                {previewIsPreviousVersion ? null : (
+                  <DocumentSignatureAction documentId={documentPreview.id} title={documentPreview.title} onDone={onDocumentGenerated} />
+                )}
+                {canRenewOutdated && !previewIsPreviousVersion && !outdatedIds.includes(documentPreview.id) ? (
                   <DocumentPortalReleaseAction key={documentPreview.id} documentId={documentPreview.id} onReleased={onDocumentGenerated} />
                 ) : null}
                 <Button
@@ -1099,6 +1209,13 @@ export function PatientDocumentsTab({
         </>
       ) : null}
       {canRenewOutdated ? renewal.dialog : null}
+      {canChangeConsents ? (
+        <PatientConsentChangeHost
+          patientId={consentChangePatientId}
+          onClose={() => setConsentChangePatientId(null)}
+          onChanged={onDocumentGenerated}
+        />
+      ) : null}
       </OutdatedSignatureDocuments.Provider>
     </TabsContent>
   );

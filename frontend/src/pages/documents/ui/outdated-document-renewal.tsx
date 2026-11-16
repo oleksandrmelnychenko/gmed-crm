@@ -170,7 +170,7 @@ export function useOutdatedDocumentRenewal({
   /** Opens the same next steps for a document made elsewhere, e.g. from a template in the patient card. */
   const offer = useCallback((created: RenewedDocument) => setRenewed(created), []);
 
-  return { renew, extend, offer, busyId, dialog };
+  return { renew, extend, offer, busyId, dialog, dialogOpen: renewed !== null };
 }
 
 /** The button beside the «Устарел» status. */

@@ -7465,7 +7465,9 @@ async fn load_legal_status_evidence(
            WHERE d.patient_id = $1
              AND d.compliance_kind = ANY($2)
              AND d.signed_at IS NOT NULL
-             AND d.status = 'active'
+             -- The signed version stays in force while its new version waits
+             -- for the signature (fix-98).
+             AND (d.status = 'active' OR document_signed_predecessor_in_force(d.id))
              AND d.file_deleted_at IS NULL
            ORDER BY d.signed_at DESC, d.created_at DESC
            LIMIT 200"#,
@@ -8487,15 +8489,20 @@ async fn list_patient_documents(
                   ) AS bundles_consent_document,
                   -- A translation of a consent document, in any depth, is one too
                   -- (owner decision 2026-10-11; migration 20261012150000).
-                  document_translates_consent(d.id) AS translates_consent_document
+                  document_translates_consent(d.id) AS translates_consent_document,
+                  NOT EXISTS (
+                    SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
+                  ) AS is_latest_version,
+                  d.signed_at,
+                  document_signature_state(d.id) AS signature_state,
+                  document_signature_sent_at(d.id) AS signature_sent_at
            FROM documents d
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1
              AND ($2::boolean = false OR COALESCE(d.is_medical, false) = false)
-             AND NOT EXISTS (
-               SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
-             )
-           ORDER BY d.created_at DESC"#,
+           -- Every version: the current one is the row, the earlier ones
+           -- travel with it as `previous_versions` (fix-98).
+           ORDER BY d.created_at DESC, d.version_number DESC"#,
     )
     .bind(patient_uuid)
     .bind(hide_medical_documents)
@@ -8571,10 +8578,58 @@ async fn list_patient_documents(
                 "validity_days_left": validity_days_left,
                 "uploaded_by_name": row.try_get::<Option<String>, _>("uploaded_by_name").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "is_latest_version": row.try_get::<bool, _>("is_latest_version").unwrap_or(true),
+                "signed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                "signature_state": row.try_get::<Option<String>, _>("signature_state").unwrap_or_default(),
+                "signature_sent_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signature_sent_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             }));
     }
 
-    Ok(Json(items))
+    Ok(Json(nest_previous_document_versions(items)))
+}
+
+/// The document lists show one row per document (version chain): the
+/// current version, with the earlier versions the caller may open as
+/// `previous_versions`, newest first (fix-98, owner 2026-11-16). An earlier
+/// version whose current version the caller cannot see is not listed.
+pub(crate) fn nest_previous_document_versions(items: Vec<Value>) -> Vec<Value> {
+    let chain_of = |item: &Value| {
+        item.get("version_root_document_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .filter(|root| root != &Uuid::nil().to_string())
+            .or_else(|| item.get("id").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_default()
+    };
+    let is_latest = |item: &Value| {
+        item.get("is_latest_version")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    };
+    let mut previous: HashMap<String, Vec<Value>> = HashMap::new();
+    let mut heads = Vec::new();
+    for item in items {
+        if is_latest(&item) {
+            heads.push(item);
+        } else {
+            previous.entry(chain_of(&item)).or_default().push(item);
+        }
+    }
+    for head in &mut heads {
+        let mut versions = previous.remove(&chain_of(head)).unwrap_or_default();
+        versions.sort_by_key(|version| {
+            std::cmp::Reverse(
+                version
+                    .get("version_number")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(1),
+            )
+        });
+        if let Some(object) = head.as_object_mut() {
+            object.insert("previous_versions".to_string(), Value::Array(versions));
+        }
+    }
+    heads
 }
 
 #[allow(clippy::result_large_err)]
@@ -8764,7 +8819,10 @@ async fn evaluate_patient_document_alerts(
     // Only the current version of an active document counts: a draft (a
     // generated form before it is signed, a scan before its review) is not a
     // document of the pack yet (QA 2026-10-11 B-06); a signed version
-    // replaces the draft it was made of.
+    // replaces the draft it was made of. While a new version of a consent
+    // document waits for its signature, the previous signed version of the
+    // chain stays in force and counts (fix-98, owner 2026-11-16); `chain_head_id`
+    // is the current version, which decides what a caller may see.
     let mut document_rows = sqlx::query(
         r#"SELECT d.id,
                   COALESCE(NULLIF(btrim(d.auto_name), ''), d.original_filename, 'Document') AS filename,
@@ -8774,15 +8832,23 @@ async fn evaluate_patient_document_alerts(
                   d.compliance_kind,
                   d.signed_at,
                   d.signed_at IS NOT NULL AS signed,
-                  d.status
+                  d.status,
+                  COALESCE((
+                      SELECT head.id FROM documents head
+                      WHERE head.version_root_document_id = d.version_root_document_id
+                        AND NOT EXISTS (
+                            SELECT 1 FROM documents newer WHERE newer.replaces_document_id = head.id)
+                      ORDER BY head.version_number DESC LIMIT 1
+                  ), d.id) AS chain_head_id
            FROM documents d
            WHERE d.patient_id = $1
-             AND d.status = 'active'
              -- A deleted upload proves nothing (QA 2026-10-31: it stood as «Скан паспорта»).
              AND d.file_deleted_at IS NULL
-             AND NOT EXISTS (
-                 SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
-             )
+             AND ((d.status = 'active'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
+                   ))
+                  OR document_signed_predecessor_in_force(d.id))
            ORDER BY d.created_at DESC"#,
     )
     .bind(patient_uuid)
@@ -8796,9 +8862,13 @@ async fn evaluate_patient_document_alerts(
         )
     })?;
     if let Some(visible_document_ids) = visible_document_ids {
+        // A signed earlier version counts for a caller who sees its current version.
         document_rows.retain(|row| {
             row.try_get::<Uuid, _>("id")
                 .is_ok_and(|document_id| visible_document_ids.contains(&document_id))
+                || row
+                    .try_get::<Uuid, _>("chain_head_id")
+                    .is_ok_and(|head_id| visible_document_ids.contains(&head_id))
         });
     }
 
@@ -8849,6 +8919,9 @@ async fn evaluate_patient_document_alerts(
                     "art": row.try_get::<String, _>("art").unwrap_or_default(),
                     "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    // The current version of its chain: a signed earlier
+                    // version is shown to whoever sees the current one.
+                    "current_version_id": row.try_get::<Uuid, _>("chain_head_id").ok(),
                 }));
             }
         }
@@ -8952,11 +9025,13 @@ pub(crate) fn retain_visible_document_alert_matches(
             continue;
         };
         matching_documents.retain(|document| {
-            document
-                .get("id")
-                .and_then(Value::as_str)
-                .and_then(|value| Uuid::parse_str(value).ok())
-                .is_some_and(|document_id| visible_document_ids.contains(&document_id))
+            ["id", "current_version_id"].iter().any(|key| {
+                document
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                    .is_some_and(|document_id| visible_document_ids.contains(&document_id))
+            })
         });
     }
 }

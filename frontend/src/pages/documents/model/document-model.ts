@@ -292,6 +292,7 @@ export function buildDocumentsPath(filters: FiltersState) {
   if (filters.accessCategory) params.set("access_category", filters.accessCategory);
   if (filters.financialStatus) params.set("financial_status", filters.financialStatus);
   if (filters.validity) params.set("validity", filters.validity);
+  if (filters.signatureState) params.set("signature_state", filters.signatureState);
   return params.size ? `/documents?${params.toString()}` : "/documents";
 }
 

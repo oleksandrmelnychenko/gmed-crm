@@ -350,7 +350,7 @@ export function PatientConsentChoicesView({
  * After a staff change the consent form gets its new version at once and the signature dialog
  * offers «Отправить на подпись» and «Передать клиенту» (fix-65 flow).
  */
-export function usePatientConsentChoices(patientId: string | null) {
+export function usePatientConsentChoices(patientId: string | null, onChanged?: () => void) {
   const { lang } = useLang();
   const [state, setState] = useState<PatientConsentState | null>(null);
   const [failed, setFailed] = useState(false);
@@ -364,7 +364,8 @@ export function usePatientConsentChoices(patientId: string | null) {
     return () => { active = false; };
   }, [patientId, lang, reload]);
   const refresh = useCallback(() => setReload((value) => value + 1), []);
-  const renewal = useOutdatedDocumentRenewal({ onRenewed: refresh });
+  const onRenewed = useCallback(() => { refresh(); onChanged?.(); }, [refresh, onChanged]);
+  const renewal = useOutdatedDocumentRenewal({ onRenewed });
   const { renew } = renewal;
   const onSaved = useCallback((saved: PatientConsentState) => {
     setState(saved);
@@ -373,8 +374,71 @@ export function usePatientConsentChoices(patientId: string | null) {
     // Staff: the consent form that prints the choice gets its new version at once.
     const [first] = patientId ? documentsToRenew(saved) : [];
     if (first) void renew(first, "consent_changed");
-  }, [lang, patientId, renew]);
+    else onChanged?.();
+  }, [lang, patientId, renew, onChanged]);
   return { state, failed, editing, setEditing, onSaved, renewal, refresh };
+}
+
+/** Roles offered «Изменить согласия»; the server still checks the Patient Manager's assignment. */
+export function canChangePatientConsents(role: string | null | undefined): boolean {
+  return role === "ceo" || role === "patient_manager";
+}
+
+/**
+ * «Изменить согласия» on an Einverständniserklärung row of the document tables (owner
+ * 2026-11-16, fix-98). The button only asks the table to open the dialog: the dialog lives
+ * outside the row (`PatientConsentChangeHost`), because the row is replaced by the new version.
+ */
+export function PatientConsentChangeRowButton({ title, onOpen }: { title: string; onOpen: () => void }) {
+  const { lang } = useLang();
+  const label = consentText(lang).change;
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      title={label}
+      aria-label={`${label}: ${title}`}
+      data-testid="document-row-change-consents"
+      onClick={(event) => { event.stopPropagation(); onOpen(); }}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <ShieldCheck className="size-3.5" />
+    </Button>
+  );
+}
+
+/**
+ * The patient card's «Изменить согласия» flow for a table: save, the form's new version, the
+ * signature dialog, and the table reloads (`onChanged`). Loads the consent state once opened;
+ * the server decides who may change it (CEO, the patient's Patient Manager).
+ */
+export function PatientConsentChangeHost({ patientId, onClose, onChanged }: { patientId: string | null; onClose: () => void; onChanged?: () => void }) {
+  return patientId ? <PatientConsentChangeRowDialog key={patientId} patientId={patientId} onClose={onClose} onChanged={onChanged} /> : null;
+}
+
+function PatientConsentChangeRowDialog({ patientId, onClose, onChanged }: { patientId: string; onClose: () => void; onChanged?: () => void }) {
+  const { lang } = useLang();
+  const { state, failed, onSaved, renewal } = usePatientConsentChoices(patientId, onChanged);
+  const [editing, setEditing] = useState(true);
+  useEffect(() => {
+    if (failed || (state && !state.can_edit)) {
+      toast.error(consentText(lang).failed);
+      onClose();
+    }
+  }, [failed, state, lang, onClose]);
+  // The renewal dialog (signature, «Передать клиенту») outlives the consent dialog.
+  useEffect(() => {
+    if (!editing && !renewal.busyId && !renewal.dialogOpen) onClose();
+  }, [editing, renewal.busyId, renewal.dialogOpen, onClose]);
+  return (
+    <>
+      {state?.can_edit ? (
+        <PatientConsentChoicesDialog state={state} patientId={patientId} open={editing} onOpenChange={setEditing} onSaved={onSaved} />
+      ) : null}
+      {renewal.dialog}
+    </>
+  );
 }
 
 /** Roles that read the consent choices of a patient (CEO Assistant only reads). */

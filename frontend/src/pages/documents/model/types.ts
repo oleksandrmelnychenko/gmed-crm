@@ -99,6 +99,11 @@ export type DocumentItem = {
   notes: string | null;
   signed_at?: string | null;
   signed_by?: string | null;
+  /** `not_sent` / `sent` / `signed` of a document made to be signed (fix-98); null otherwise. */
+  signature_state?: "not_sent" | "sent" | "signed" | null;
+  signature_sent_at?: string | null;
+  /** The earlier versions the caller may open, newest first (fix-98). */
+  previous_versions?: DocumentItem[];
   compliance_kind?: string | null;
   uploaded_by_name: string | null;
   version_root_document_id: string;
@@ -315,6 +320,8 @@ export type FiltersState = {
   financialStatus: string;
   /** `attention` | `expired` | `expiring` | "" (`GET /documents?validity=`). */
   validity: string;
+  /** `not_sent` / `sent` / `signed` (fix-98); empty = every document. */
+  signatureState?: string;
 };
 
 export type UploadFormState = {

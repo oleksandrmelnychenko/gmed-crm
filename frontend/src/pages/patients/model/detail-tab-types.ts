@@ -128,7 +128,16 @@ export type DocumentItem = {
   payment_date?: string | null;
   payment_method?: string | null;
   created_at: string;
+  is_latest_version?: boolean;
+  signed_at?: string | null;
+  /** `not_sent` / `sent` / `signed` of a document made to be signed (fix-98); null otherwise. */
+  signature_state?: DocumentSignatureState | null;
+  signature_sent_at?: string | null;
+  /** The earlier versions the caller may open, newest first (fix-98). */
+  previous_versions?: DocumentItem[];
 };
+
+export type DocumentSignatureState = "not_sent" | "sent" | "signed";
 
 export type DocumentStatus = "draft" | "active" | "archived";
 

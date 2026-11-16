@@ -12,7 +12,7 @@ pub(crate) use gwg_legal_entity::{
 };
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::{Path as FsPath, PathBuf},
     sync::OnceLock,
 };
@@ -2964,6 +2964,8 @@ struct DocumentListQuery {
     /// `expired`, `expiring` or `attention` (both): documents by their
     /// optional validity date (owner 2026-11-15).
     validity: Option<String>,
+    /// `not_sent`, `sent` or `signed`: `document_signature_state` (fix-98).
+    signature_state: Option<String>,
     include_archived_versions: Option<bool>,
     /// `true`: answer `{ items, offset, has_more }` and page past the newest
     /// [`DOCUMENT_LIST_BATCH`] documents with `offset` / `limit` counted in
@@ -14445,6 +14447,10 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "validity_days_left": validity_days_left,
         "signed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "signed_by": row.try_get::<Option<Uuid>, _>("signed_by").unwrap_or_default(),
+        // `not_sent` / `sent` / `signed` or null (fix-98); read only where the
+        // query selects it.
+        "signature_state": row.try_get::<Option<String>, _>("signature_state").unwrap_or_default(),
+        "signature_sent_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signature_sent_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "compliance_kind": row.try_get::<Option<String>, _>("compliance_kind").unwrap_or_default(),
         "generated_template_id": generated_template_id,
         "generated_bindings": row.try_get::<Option<Value>, _>("generated_bindings").unwrap_or_default(),
@@ -33176,131 +33182,9 @@ fn merge_payer(manual: DocPartyBlock, invoice: Option<DocPartyBlock>) -> DocPart
     }
 }
 
-async fn list_documents(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Query(query): Query<DocumentListQuery>,
-) -> axum::response::Response {
-    if let Err(resp) = auth.require_capability(Capability::DocumentsView) {
-        return resp;
-    }
-
-    let assignment_set = match load_assignment_set(&state, &auth).await {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-    let view_acl = match load_document_acl_candidates(&state, &auth, AccessCapability::View).await {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-    let search = query
-        .search
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let patient_id =
-        match parse_required_uuid_query_filter(query.patient_id.as_deref(), "patient_id") {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        };
-    let lead_id = match parse_required_uuid_query_filter(query.lead_id.as_deref(), "lead_id") {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-    let (order_id, order_lookup) = parse_uuid_or_text_query_filter(query.order_id.as_deref());
-    let (appointment_id, appointment_lookup) =
-        parse_uuid_or_text_query_filter(query.appointment_id.as_deref());
-    let date_from = match query
-        .date_from
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-            Ok(value) => Some(value),
-            Err(_) => return err(StatusCode::BAD_REQUEST, "Invalid date_from filter"),
-        },
-        None => None,
-    };
-    let date_to = match query
-        .date_to
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-            Ok(value) => Some(value),
-            Err(_) => return err(StatusCode::BAD_REQUEST, "Invalid date_to filter"),
-        },
-        None => None,
-    };
-    let klinik = query
-        .klinik
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let ursprung = query
-        .ursprung
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let document_direction = match normalize_document_direction(query.document_direction.as_deref())
-    {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-    let document_variant = match normalize_document_variant(query.document_variant.as_deref()) {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-    let access_category = match normalize_document_access_category(query.access_category.as_deref())
-    {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-    let financial_status =
-        match normalize_document_financial_status(query.financial_status.as_deref()) {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        };
-    let Ok(validity_filter) =
-        crate::services::document_validity::parse_filter(query.validity.as_deref())
-    else {
-        return err(StatusCode::BAD_REQUEST, "Invalid validity filter");
-    };
-    let validity_today = crate::app_time::today();
-
-    let paged = query.paged.unwrap_or(false);
-    // A huge offset made the paged list read the whole table in batches
-    // (security review 2026-11-13, final-D S3-3): refused past the cap.
-    let requested_offset = query.offset.unwrap_or(0).max(0);
-    if paged && requested_offset > DOCUMENT_LIST_MAX_OFFSET {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({
-                "error": "document_list_offset_too_large",
-                "message": "offset is larger than the document list allows",
-                "max_offset": DOCUMENT_LIST_MAX_OFFSET,
-            })),
-        )
-            .into_response();
-    }
-    let page_offset = if paged { requested_offset as usize } else { 0 };
-    let page_limit = if paged {
-        query
-            .limit
-            .unwrap_or(DOCUMENT_LIST_BATCH)
-            .clamp(1, DOCUMENT_LIST_MAX_PAGE) as usize
-    } else {
-        DOCUMENT_LIST_BATCH as usize
-    };
-    // One document past the page tells whether there are more.
-    let wanted = page_offset + page_limit + 1;
-    let mut visible: Vec<serde_json::Value> = Vec::new();
-    let mut batch_offset: i64 = 0;
-    loop {
-        let rows = match sqlx::query(
-        r#"SELECT d.id, d.document_number, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
+/// The document list query (`list_documents`): $26 lists the earlier versions
+/// of the given chains, $27 filters by `document_signature_state`.
+const DOCUMENT_LIST_SQL: &str = r#"SELECT d.id, d.document_number, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
@@ -33319,6 +33203,8 @@ async fn list_documents(
                   d.payment_method, d.valid_until, d.generated_template_id, d.generated_bindings,
                   d.generated_manual_text,
                   d.signed_at, d.signed_by, d.compliance_kind,
+                  document_signature_state(d.id) AS signature_state,
+                  document_signature_sent_at(d.id) AS signature_sent_at,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -33472,6 +33358,11 @@ async fn list_documents(
              AND ($21::boolean OR NOT EXISTS(
                    SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
                  ))
+             -- The earlier versions of the listed chains (fix-98).
+             AND ($26::uuid[] IS NULL
+                  OR (d.version_root_document_id = ANY($26)
+                      AND EXISTS(SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id)))
+             AND ($27::text IS NULL OR document_signature_state(d.id) = $27)
              -- Validity filter (services::document_validity, 30 days =
              -- EXPIRING_DAYS); $25 is the Berlin day.
              AND ($24::text IS NULL
@@ -33482,42 +33373,299 @@ async fn list_documents(
            -- The id breaks ties, so batches read with OFFSET never skip or
            -- repeat a document.
            ORDER BY d.created_at DESC, d.id DESC
-           LIMIT $22 OFFSET $23"#,
-    )
-    .bind(search)
-    .bind(patient_id)
-    .bind(order_id)
-    .bind(appointment_id)
-    .bind(query.status.as_deref())
-    .bind(query.visibility.as_deref())
-    .bind(query.art.as_deref())
-    .bind(query.category.as_deref())
-    .bind(date_from)
-    .bind(date_to)
-    .bind(klinik)
-    .bind(ursprung)
-    .bind(auth.user_id)
-    .bind(order_lookup.as_deref())
-    .bind(appointment_lookup.as_deref())
-    .bind(document_direction.as_deref())
-    .bind(document_variant.as_deref())
-    .bind(access_category.as_deref())
-    .bind(financial_status.as_deref())
-    .bind(lead_id)
-    .bind(query.include_archived_versions.unwrap_or(false))
-    .bind(DOCUMENT_LIST_BATCH)
-    .bind(batch_offset)
-    .bind(validity_filter)
-    .bind(validity_today)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!(error = %e, "list documents");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load documents");
-        }
+           LIMIT $22 OFFSET $23"#;
+
+/// The earlier versions of the listed documents (fix-98, owner 2026-11-16):
+/// one query for every chain of the page, each version admitted by the same
+/// per-document access rule as the list, nested newest first under its
+/// current version as `previous_versions`. The page and its counts stay one
+/// row per document.
+async fn attach_previous_versions(
+    state: &AppState,
+    auth: &AuthUser,
+    assignment_set: &HashSet<Uuid>,
+    view_acl: &DocumentAclCandidates,
+    items: &mut [serde_json::Value],
+) -> Result<(), axum::response::Response> {
+    let chain_of = |item: &serde_json::Value| {
+        item.get("version_root_document_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
     };
+    let roots: Vec<Uuid> = items
+        .iter()
+        .filter(|item| {
+            item.get("is_latest_version")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true)
+                && item
+                    .get("version_count")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(1)
+                    > 1
+        })
+        .filter_map(chain_of)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let mut previous: HashMap<Uuid, Vec<serde_json::Value>> = HashMap::new();
+    if !roots.is_empty() {
+        let rows = sqlx::query(DOCUMENT_LIST_SQL)
+            .bind(None::<String>)
+            .bind(None::<Uuid>)
+            .bind(None::<Uuid>)
+            .bind(None::<Uuid>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<NaiveDate>)
+            .bind(None::<NaiveDate>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(auth.user_id)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<String>)
+            .bind(None::<Uuid>)
+            .bind(true)
+            .bind(DOCUMENT_LIST_MAX_PAGE * 5)
+            .bind(0_i64)
+            .bind(None::<String>)
+            .bind(crate::app_time::today())
+            .bind(Some(roots))
+            .bind(None::<String>)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "list earlier document versions");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load documents",
+                )
+            })?;
+        for row in rows.iter().filter(|row| {
+            let document_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+            let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+            document_access_allowed(
+                auth,
+                row,
+                can_view_document_row(auth, row, assignment_set),
+                view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical),
+            )
+        }) {
+            let version = document_json(row);
+            if let Some(root) = chain_of(&version) {
+                previous.entry(root).or_default().push(version);
+            }
+        }
+    }
+    for item in items.iter_mut() {
+        let mut versions = if item
+            .get("is_latest_version")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true)
+        {
+            chain_of(item)
+                .and_then(|root| previous.remove(&root))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        versions.sort_by_key(|version| {
+            std::cmp::Reverse(
+                version
+                    .get("version_number")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(1),
+            )
+        });
+        if let Some(object) = item.as_object_mut() {
+            object.insert(
+                "previous_versions".to_string(),
+                serde_json::Value::Array(versions),
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn list_documents(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<DocumentListQuery>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_capability(Capability::DocumentsView) {
+        return resp;
+    }
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let view_acl = match load_document_acl_candidates(&state, &auth, AccessCapability::View).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let patient_id =
+        match parse_required_uuid_query_filter(query.patient_id.as_deref(), "patient_id") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let lead_id = match parse_required_uuid_query_filter(query.lead_id.as_deref(), "lead_id") {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let (order_id, order_lookup) = parse_uuid_or_text_query_filter(query.order_id.as_deref());
+    let (appointment_id, appointment_lookup) =
+        parse_uuid_or_text_query_filter(query.appointment_id.as_deref());
+    let date_from = match query
+        .date_from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+            Ok(value) => Some(value),
+            Err(_) => return err(StatusCode::BAD_REQUEST, "Invalid date_from filter"),
+        },
+        None => None,
+    };
+    let date_to = match query
+        .date_to
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+            Ok(value) => Some(value),
+            Err(_) => return err(StatusCode::BAD_REQUEST, "Invalid date_to filter"),
+        },
+        None => None,
+    };
+    let klinik = query
+        .klinik
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let ursprung = query
+        .ursprung
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let document_direction = match normalize_document_direction(query.document_direction.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let document_variant = match normalize_document_variant(query.document_variant.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let access_category = match normalize_document_access_category(query.access_category.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let financial_status =
+        match normalize_document_financial_status(query.financial_status.as_deref()) {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let Ok(validity_filter) =
+        crate::services::document_validity::parse_filter(query.validity.as_deref())
+    else {
+        return err(StatusCode::BAD_REQUEST, "Invalid validity filter");
+    };
+    let validity_today = crate::app_time::today();
+    let signature_state_filter = match query
+        .signature_state
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None => None,
+        Some(value @ ("not_sent" | "sent" | "signed")) => Some(value.to_string()),
+        Some(_) => return err(StatusCode::BAD_REQUEST, "Invalid signature_state filter"),
+    };
+
+    let paged = query.paged.unwrap_or(false);
+    // A huge offset made the paged list read the whole table in batches
+    // (security review 2026-11-13, final-D S3-3): refused past the cap.
+    let requested_offset = query.offset.unwrap_or(0).max(0);
+    if paged && requested_offset > DOCUMENT_LIST_MAX_OFFSET {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "document_list_offset_too_large",
+                "message": "offset is larger than the document list allows",
+                "max_offset": DOCUMENT_LIST_MAX_OFFSET,
+            })),
+        )
+            .into_response();
+    }
+    let page_offset = if paged { requested_offset as usize } else { 0 };
+    let page_limit = if paged {
+        query
+            .limit
+            .unwrap_or(DOCUMENT_LIST_BATCH)
+            .clamp(1, DOCUMENT_LIST_MAX_PAGE) as usize
+    } else {
+        DOCUMENT_LIST_BATCH as usize
+    };
+    // One document past the page tells whether there are more.
+    let wanted = page_offset + page_limit + 1;
+    let mut visible: Vec<serde_json::Value> = Vec::new();
+    let mut batch_offset: i64 = 0;
+    loop {
+        let rows = match sqlx::query(DOCUMENT_LIST_SQL)
+            .bind(search)
+            .bind(patient_id)
+            .bind(order_id)
+            .bind(appointment_id)
+            .bind(query.status.as_deref())
+            .bind(query.visibility.as_deref())
+            .bind(query.art.as_deref())
+            .bind(query.category.as_deref())
+            .bind(date_from)
+            .bind(date_to)
+            .bind(klinik)
+            .bind(ursprung)
+            .bind(auth.user_id)
+            .bind(order_lookup.as_deref())
+            .bind(appointment_lookup.as_deref())
+            .bind(document_direction.as_deref())
+            .bind(document_variant.as_deref())
+            .bind(access_category.as_deref())
+            .bind(financial_status.as_deref())
+            .bind(lead_id)
+            .bind(query.include_archived_versions.unwrap_or(false))
+            .bind(DOCUMENT_LIST_BATCH)
+            .bind(batch_offset)
+            .bind(validity_filter)
+            .bind(validity_today)
+            .bind(None::<Vec<Uuid>>)
+            .bind(signature_state_filter.as_deref())
+            .fetch_all(&state.db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!(error = %e, "list documents");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load documents",
+                );
+            }
+        };
         let fetched = rows.len() as i64;
 
         visible.extend(
@@ -33548,17 +33696,31 @@ async fn list_documents(
         batch_offset += DOCUMENT_LIST_BATCH;
     }
 
+    let with_previous_versions = !query.include_archived_versions.unwrap_or(false);
     if !paged {
+        if with_previous_versions
+            && let Err(resp) =
+                attach_previous_versions(&state, &auth, &assignment_set, &view_acl, &mut visible)
+                    .await
+        {
+            return resp;
+        }
         return Json(visible).into_response();
     }
     // «Load more» stops where the next page would pass the offset cap.
     let has_more = visible.len() > page_offset + page_limit
         && page_offset + page_limit <= DOCUMENT_LIST_MAX_OFFSET as usize;
-    let items: Vec<_> = visible
+    let mut items: Vec<_> = visible
         .into_iter()
         .skip(page_offset)
         .take(page_limit)
         .collect();
+    if with_previous_versions
+        && let Err(resp) =
+            attach_previous_versions(&state, &auth, &assignment_set, &view_acl, &mut items).await
+    {
+        return resp;
+    }
     Json(json!({
         "items": items,
         "offset": page_offset,

@@ -948,3 +948,228 @@ async fn a_portal_change_renews_the_consent_form_and_the_exports_carry_the_histo
     assert!(history[0].get("recorded_note").is_some());
     assert_eq!(history[1]["source_label"]["de"], "Portal");
 }
+
+/// fix-98 (owner 2026-11-16): a new version of the signed consent form waits
+/// for its signature — the signed version stays in force (required documents,
+/// legal status), and the document lists show one row per document with the
+/// earlier versions and the signature state of the current one.
+#[tokio::test]
+async fn signed_consent_stays_in_force_while_its_new_version_waits() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = ctx.pool.clone();
+    let app = ctx.app.clone();
+    let tag = Uuid::new_v4().simple().to_string();
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let fixture = seed_converted_patient(&pool, ctx.admin_id, &tag).await;
+    let patient_id = fixture.patient_id;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    assign(&pool, patient_id, pm_id, ctx.admin_id).await;
+    let pm = bearer(pm_id, "patient_manager");
+
+    let draft = generate_consent(&app, &ceo, patient_id, None).await;
+    let (status, signed) = support::paper_signature(&app, &ceo, &draft).await;
+    assert!(status.is_success(), "{status} {signed}");
+    let signed_id: String =
+        sqlx::query_scalar("SELECT id::text FROM documents WHERE replaces_document_id = $1::uuid")
+            .bind(&draft)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let consent_missing = |alerts: &Value| {
+        alerts["missing_documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| rule["key"] == "consent_form")
+    };
+    let alerts_path = format!("/api/v1/patients/{patient_id}/document-alerts");
+    let (status, before) = json_request(&app, "GET", &alerts_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    assert!(!consent_missing(&before), "{before}");
+
+    // The consent change makes a new, unsigned version.
+    let current = generate_consent(&app, &pm, patient_id, Some(&signed_id)).await;
+    let (status, alerts) = json_request(&app, "GET", &alerts_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{alerts}");
+    assert!(!consent_missing(&alerts), "{alerts}");
+    assert_eq!(alerts["out_of_sync"], before["out_of_sync"], "{alerts}");
+    let consent_rule = alerts["required_documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["key"] == "consent_form")
+        .cloned()
+        .unwrap();
+    assert!(
+        consent_rule["matching_documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|document| document["id"] == json!(signed_id)),
+        "{consent_rule}"
+    );
+
+    // The legal status keeps the signed version as its evidence.
+    let (status, card) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{card}");
+    let evidence = &card["legal_status_evidence"]["dsgvo"];
+    assert_eq!(
+        evidence["signed_document"]["id"],
+        json!(signed_id),
+        "{evidence}"
+    );
+    assert_eq!(
+        evidence["pending_document"]["id"],
+        json!(current),
+        "{evidence}"
+    );
+
+    // The patient card list: one row, the earlier versions nested.
+    let chain = [current.clone(), signed_id.clone(), draft.clone()];
+    let list_path = format!("/api/v1/patients/{patient_id}/documents");
+    let (status, documents) = json_request(&app, "GET", &list_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{documents}");
+    let chain_rows: Vec<&Value> = documents
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| chain.iter().any(|id| row["id"] == json!(id)))
+        .collect();
+    assert_eq!(chain_rows.len(), 1, "{documents}");
+    let row = chain_rows[0];
+    assert_eq!(row["id"], json!(current));
+    assert_eq!(row["signature_state"], "not_sent", "{row}");
+    let previous = row["previous_versions"].as_array().unwrap();
+    assert_eq!(previous.len(), 2, "{row}");
+    assert_eq!(previous[0]["id"], json!(signed_id));
+    assert!(previous[0]["signed_at"].is_string(), "{row}");
+    assert_eq!(previous[0]["status"], "archived");
+    assert_eq!(previous[0]["signature_state"], "signed");
+    assert_eq!(previous[1]["id"], json!(draft));
+    assert!(previous[1]["signed_at"].is_null(), "{row}");
+    assert!(previous[1]["signature_state"].is_null(), "{row}");
+
+    // The document list: the same, counted per document; the filter finds
+    // the version still to be sent.
+    let (status, page) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}&paged=true&limit=50"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let items = page["items"].as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .all(|item| item["id"] != json!(signed_id) && item["id"] != json!(draft))
+    );
+    let item = items
+        .iter()
+        .find(|item| item["id"] == json!(current))
+        .unwrap();
+    assert_eq!(item["signature_state"], "not_sent");
+    let previous_ids: Vec<Value> = item["previous_versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|version| version["id"].clone())
+        .collect();
+    assert_eq!(previous_ids, [json!(signed_id), json!(draft)]);
+    let (status, waiting) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}&signature_state=not_sent"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{waiting}");
+    let waiting_ids: Vec<Value> = waiting
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].clone())
+        .collect();
+    assert_eq!(waiting_ids, [json!(current)]);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}&signature_state=maybe"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // A running signature request: «sent».
+    sqlx::query(
+        r#"INSERT INTO document_signature_requests (
+               id, source_document_id, requested_by, source_sha256, source_context, signers,
+               provider_account, test_mode, status)
+           VALUES ($1, $2::uuid, $3, repeat('a', 64), '{}', '[]', 'test', true, 'pending')"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(&current)
+    .bind(ctx.admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, documents) = json_request(&app, "GET", &list_path, &pm, None).await;
+    let row = documents
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!(current))
+        .unwrap();
+    assert_eq!(row["signature_state"], "sent", "{row}");
+    assert!(row["signature_sent_at"].is_string(), "{row}");
+
+    // Access: a Patient Manager without the patient gets nothing of it.
+    let other_pm = bearer(
+        seed_user(&pool, &format!("{tag}-other"), "patient_manager").await,
+        "patient_manager",
+    );
+    let (status, _) = json_request(&app, "GET", &list_path, &other_pm, None).await;
+    assert!(status.is_client_error(), "{status}");
+    let (status, other_list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &other_pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_list}");
+    assert!(!other_list.to_string().contains(&signed_id), "{other_list}");
+    // An interpreter of the patient never sees an earlier version of a chain
+    // whose current version is closed to him.
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    assign(&pool, patient_id, interpreter_id, ctx.admin_id).await;
+    let (status, interpreter_list) = json_request(
+        &app,
+        "GET",
+        &list_path,
+        &bearer(interpreter_id, "interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{interpreter_list}");
+    if !interpreter_list.to_string().contains(&current) {
+        assert!(
+            !interpreter_list.to_string().contains(&signed_id),
+            "{interpreter_list}"
+        );
+    }
+}
