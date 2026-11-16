@@ -48,6 +48,12 @@ export type DocumentUploadFormState = {
   notes: string;
   orderId: string;
   appointmentId: string;
+  /** «Действует до», YYYY-MM-DD or "" (not tracked). */
+  validUntil: string;
+  /** «Загрузить новый»: the upload is the next version of this document. */
+  replacesDocumentId: string;
+  /** Its name, shown in the dialog. */
+  replacesDocumentName: string;
 };
 
 export type PatientEditFormState = {
@@ -228,6 +234,8 @@ export function buildPatientDocumentUploadFormData(
   formData.append("visibility", form.visibility);
   formData.append("is_medical", form.isMedical ? "true" : "false");
   if (form.notes.trim()) formData.append("notes", form.notes.trim());
+  if (form.validUntil) formData.append("valid_until", form.validUntil);
+  if (form.replacesDocumentId) formData.append("replaces_document_id", form.replacesDocumentId);
   return formData;
 }
 
@@ -243,6 +251,33 @@ export function blankDocumentUploadForm(): DocumentUploadFormState {
     notes: "",
     orderId: "",
     appointmentId: "",
+    validUntil: "",
+    replacesDocumentId: "",
+    replacesDocumentName: "",
+  };
+}
+
+/** The upload dialog prefilled for «Загрузить новый» of `document` (its next version). */
+export function documentUploadFormReplacing(document: {
+  id: string;
+  art?: string | null;
+  category?: string | null;
+  is_medical?: boolean | null;
+  visibility?: string | null;
+  order_id?: string | null;
+  appointment_id?: string | null;
+  name: string;
+}): DocumentUploadFormState {
+  return {
+    ...blankDocumentUploadForm(),
+    art: document.art ?? "",
+    category: document.category ?? "",
+    isMedical: Boolean(document.is_medical),
+    visibility: (document.visibility as DocumentVisibility | null | undefined) ?? "internal",
+    orderId: document.order_id ?? "",
+    appointmentId: document.appointment_id ?? "",
+    replacesDocumentId: document.id,
+    replacesDocumentName: document.name,
   };
 }
 

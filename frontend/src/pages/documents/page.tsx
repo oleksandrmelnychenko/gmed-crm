@@ -279,7 +279,7 @@ import {
   useCanRenewOutdatedDocuments,
   useOutdatedDocumentRenewal,
 } from "./ui/outdated-document-renewal";
-import { parseValidityFilter } from "./model/document-validity";
+import { parseValidityFilter, validityRenewalKind } from "./model/document-validity";
 import {
   DocumentValidityAction,
   DocumentValidityChip,
@@ -1687,6 +1687,7 @@ function StaffDocumentsPage({
     [detail, documents],
   );
   const detailOutdated = Boolean(detail && isOutdatedCurrentVersion(detail));
+  const detailValidityRenewal = detail ? validityRenewalKind(detail) : null;
   const outdatedRenewal = useOutdatedDocumentRenewal({
     onRenewed: (created) => {
       refresh();
@@ -2529,6 +2530,8 @@ function StaffDocumentsPage({
         formData.append("notes", uploadForm.notes.trim());
       if (uploadForm.validUntil)
         formData.append("valid_until", uploadForm.validUntil);
+      if (uploadForm.replacesDocumentId)
+        formData.append("replaces_document_id", uploadForm.replacesDocumentId);
       const response = await uploadDocument(formData);
       setNotice(
         constrainedUpload
@@ -3615,6 +3618,7 @@ function StaffDocumentsPage({
                     setIntakeUploadOpen(true);
                     return;
                   }
+                  setUploadForm((current) => ({ ...current, replacesDocumentId: "", replacesDocumentName: "" }));
                   setUploadOpen(true);
                 }}
               >
@@ -5093,8 +5097,8 @@ function StaffDocumentsPage({
           <form onSubmit={handleUpload} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
               icon={FileUp}
-              title={t.documents_upload}
-              description={text.uploadDescription}
+              title={uploadForm.replacesDocumentId ? text.newVersion : t.documents_upload}
+              description={uploadForm.replacesDocumentId ? uploadForm.replacesDocumentName : text.uploadDescription}
               footer={(
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
@@ -5145,6 +5149,7 @@ function StaffDocumentsPage({
                           }))
                         }
                         className={selectClassName}
+                        disabled={Boolean(uploadForm.replacesDocumentId)}
                       >
                         <option value="">{t.documents_select_patient}</option>
                         {patients.map((patient) => (
@@ -6779,8 +6784,9 @@ function StaffDocumentsPage({
                         <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} onDone={() => refresh()} />
                       ) : null}
                       {/* The order changed after this PDF was made: one click makes
-                          the new version from the current data (owner 2026-11-15). */}
-                      {detailOutdated ? <OutdatedDocumentChip className="shrink-0" /> : null}
+                          the new version from the current data (owner 2026-11-15).
+                          The signature button already says «Устарел» (QA S3-3). */}
+                      {detailOutdated && !selectedDocumentReleasable ? <OutdatedDocumentChip className="shrink-0" /> : null}
                       {canRenewOutdated && detailOutdated ? (
                         <RenewOutdatedDocumentButton
                           documentId={detail.id}
@@ -6788,34 +6794,42 @@ function StaffDocumentsPage({
                           onRenew={(id) => void outdatedRenewal.renew(id)}
                         />
                       ) : null}
-                      {/* Optional «Gültig bis» (owner 2026-11-15): status, and for an
-                          expiring or expired scan «Загрузить новый»; a template
-                          document gets «Новая версия» beside it. */}
+                      {/* Optional «Gültig bis» (owner 2026-11-15): status and the
+                          same action as in the patient card and the order:
+                          «Продлить срок до …» for an estimate, «Создать новую
+                          версию» for another template document, «Загрузить
+                          новый» for a scan (the next version of it). */}
                       <DocumentValidityChip document={detail} className="shrink-0" />
-                      {canUpload && !detail.generated_template_id ? (
+                      {!detailOutdated && detailValidityRenewal ? (
                         <DocumentValidityAction
                           document={detail}
-                          busyId={null}
-                          onUploadNew={() => {
-                            setUploadForm((current) => ({
-                              ...current,
-                              file: null,
-                              patientId: detail.patient_id ?? "",
+                          busyId={outdatedRenewal.busyId}
+                          onRenew={canRenewOutdated && detail.patient_id ? (id) => void outdatedRenewal.renew(id, "expired") : undefined}
+                          onExtend={canRenewOutdated && detail.patient_id ? (id, date) => outdatedRenewal.extend(id, date) : undefined}
+                          onUploadNew={canUpload && canManage ? () => {
+                            setUploadForm({
+                              ...emptyUploadForm(detail.patient_id ?? ""),
                               orderId: detail.order_id ?? "",
                               appointmentId: detail.appointment_id ?? "",
                               art: detail.art,
                               category: detail.category ?? "",
-                              validUntil: "",
-                            }));
+                              isMedical: Boolean(detail.is_medical),
+                              visibility: (detail.visibility as UploadFormState["visibility"]) ?? "internal",
+                              replacesDocumentId: detail.id,
+                              replacesDocumentName: detail.original_filename || detail.auto_name,
+                            });
                             setUploadOpen(true);
-                          }}
+                          } : undefined}
                         />
                       ) : null}
-                      {/* The server only replaces the newest, non-archived version. */}
+                      {/* The server only replaces the newest, non-archived version;
+                          beside a one-click new version it would be a second
+                          button for the same thing (QA S3-3). */}
                       {canManage &&
                       currentDetailTemplate &&
                       detail.is_latest_version &&
-                      detail.status !== "archived" ? (
+                      detail.status !== "archived" &&
+                      !(canRenewOutdated && (detailOutdated || detailValidityRenewal === "new_version")) ? (
                         <Button
                           type="button"
                           variant="outline"

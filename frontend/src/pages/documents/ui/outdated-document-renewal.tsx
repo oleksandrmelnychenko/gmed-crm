@@ -8,7 +8,12 @@ import { ApiRequestError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { refreshSignatureSummaries } from "../data/use-signature-summary";
-import { RegenerateDocumentError, regenerateOutdatedDocument } from "../data/regenerate-document-version";
+import {
+  RegenerateDocumentError,
+  extendEstimateValidity,
+  regenerateOutdatedDocument,
+  type RegeneratedDocument,
+} from "../data/regenerate-document-version";
 import { DocumentSignatureAction, SIGNING_ROLES } from "./document-signature-action";
 import { DocumentPortalReleaseAction } from "./document-portal-release-action";
 
@@ -37,6 +42,18 @@ export function renewalErrorText(error: unknown, tx: Tx): string {
   const code = error instanceof ApiRequestError
     ? ((error.body as { error?: string; code?: string } | null | undefined)?.error ?? error.code ?? (error.body as { code?: string } | null | undefined)?.code)
     : undefined;
+  if (code === "no_changes") {
+    return tx("Нет изменений для новой версии", "Keine Änderungen für eine neue Version");
+  }
+  if (code === "quote_valid_until_past") {
+    return tx("Срок действия сметы не может быть в прошлом.", "Das Gültigkeitsdatum des Kostenvoranschlags darf nicht in der Vergangenheit liegen.");
+  }
+  if (code === "quote_superseded" || code === "quote_rejected" || code === "estimate_without_quote") {
+    return tx("Смета этого документа закрыта: создайте новую смету заказа.", "Der Kostenvoranschlag dieses Dokuments ist geschlossen: Erstellen Sie einen neuen Kostenvoranschlag zum Auftrag.");
+  }
+  if (code === "document_not_current") {
+    return tx("У документа уже есть более новая версия. Обновите список.", "Das Dokument hat bereits eine neuere Version. Laden Sie die Liste neu.");
+  }
   if (code === "signature_pending") {
     return tx("Документ ещё на подписи. Сначала отзовите запрос подписи.", "Das Dokument ist noch zur Unterschrift unterwegs. Ziehen Sie zuerst die Signaturanfrage zurück.");
   }
@@ -86,28 +103,43 @@ export function useOutdatedDocumentRenewal({
   const [renewed, setRenewed] = useState<RenewedDocument | null>(null);
   const running = useRef(false);
 
-  const renew = useCallback(async (documentId: string, reason: "outdated" | "expired" = "outdated") => {
+  const run = useCallback(async (documentId: string, make: () => Promise<RegeneratedDocument>): Promise<boolean> => {
     // One new version at a time: a second click must not race the first.
-    if (running.current) return;
+    if (running.current) return false;
     running.current = true;
     setBusyId(documentId);
     try {
-      const result = await regenerateOutdatedDocument(documentId, reason);
+      const result = await make();
       if (result.kind === "needs_form") {
         onNeedsForm?.(result.previousId);
-        return;
+        return true;
       }
       refreshSignatureSummaries();
       toast.success(tx("Новая версия создана. Проверьте получателей и отправьте её на подпись.", "Neue Version erstellt. Prüfen Sie die Empfänger und senden Sie sie zur Unterschrift."));
       setRenewed(result);
       onRenewed?.(result);
+      return true;
     } catch (error) {
       toast.error(renewalErrorText(error, tx));
+      return false;
     } finally {
       running.current = false;
       setBusyId(null);
     }
   }, [onNeedsForm, onRenewed, tx]);
+
+  const renew = useCallback(
+    (documentId: string, reason: "outdated" | "expired" = "outdated") =>
+      run(documentId, () => regenerateOutdatedDocument(documentId, reason)),
+    [run],
+  );
+
+  /** «Продлить срок до …» of a Kostenvoranschlag: the quote's date, then the new version. */
+  const extend = useCallback(
+    (documentId: string, validUntil: string) =>
+      run(documentId, () => extendEstimateValidity(documentId, validUntil)),
+    [run],
+  );
 
   const dialog: ReactNode = renewed ? (
     <DocumentSignatureAction
@@ -135,7 +167,7 @@ export function useOutdatedDocumentRenewal({
   /** Opens the same next steps for a document made elsewhere, e.g. from a template in the patient card. */
   const offer = useCallback((created: RenewedDocument) => setRenewed(created), []);
 
-  return { renew, offer, busyId, dialog };
+  return { renew, extend, offer, busyId, dialog };
 }
 
 /** The button beside the «Устарел» status. */

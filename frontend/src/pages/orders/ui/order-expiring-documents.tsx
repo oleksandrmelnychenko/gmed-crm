@@ -64,6 +64,7 @@ export function OrderExpiringDocuments({
                       document={document}
                       busyId={renewal.busyId}
                       onRenew={(id) => void renewal.renew(id, "expired")}
+                      onExtend={(id, date) => renewal.extend(id, date)}
                       title={displayName(document)}
                     />
                   ) : null

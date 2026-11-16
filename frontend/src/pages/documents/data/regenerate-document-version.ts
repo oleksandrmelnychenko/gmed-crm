@@ -48,7 +48,12 @@ export async function regenerateOutdatedDocument(
   }
   if (!regeneratesInOneClick(template.id)) return { kind: "needs_form", previousId: document.id };
   const form = oneClickReplacementForm(document, template);
-  const created = await generateDocument(buildGenerateDocumentPayload({ template, form }));
+  // The standard name ends with the patient, as the first version's did
+  // (QA 2026-11-16 S3-1: new versions lost the name).
+  const patients = document.patient_name
+    ? [{ id: document.patient_id, patient_id: "", first_name: document.patient_name }]
+    : [];
+  const created = await generateDocument(buildGenerateDocumentPayload({ template, form, patients }));
   clearApiCache("/documents");
   clearApiCache("/patients");
   return {
@@ -57,4 +62,20 @@ export async function regenerateOutdatedDocument(
     title: created.original_filename || created.auto_name || template.label,
     previousId: document.id,
   };
+}
+
+/**
+ * «Продлить срок до …» of a Kostenvoranschlag (QA 2026-11-16 S2-1): the quote
+ * it prints gets the new validity (audited like every quote change), then the
+ * estimate's new version takes that date. The same date again is a no-op on
+ * the server, so a failed second step can simply be retried.
+ */
+export async function extendEstimateValidity(documentId: string, validUntil: string): Promise<RegeneratedDocument> {
+  await apiFetch<unknown>(`/documents/${documentId}/extend-quote-validity`, {
+    method: "POST",
+    body: JSON.stringify({ valid_until: validUntil }),
+  });
+  clearApiCache("/quotes");
+  clearApiCache("/orders");
+  return regenerateOutdatedDocument(documentId, "expired");
 }

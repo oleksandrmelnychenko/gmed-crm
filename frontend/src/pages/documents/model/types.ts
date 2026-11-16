@@ -344,6 +344,13 @@ export type UploadFormState = {
   notes: string;
   /** «Действует до», YYYY-MM-DD or "" (none). */
   validUntil: string;
+  /**
+   * «Загрузить новый» (QA 2026-11-16 S2-2): the upload is the next version of
+   * this document (same chain, type and patient; the old one is archived).
+   */
+  replacesDocumentId?: string;
+  /** Its name, shown in the upload sheet. */
+  replacesDocumentName?: string;
 };
 
 export type EditFormState = {

@@ -15089,6 +15089,206 @@ async fn load_replacement_document_version(
     })
 }
 
+/// The uploaded document a new upload replaces («Загрузить новый», QA
+/// 2026-11-16 S2-2): its person, type, category and order, and the version
+/// the upload continues.
+struct UploadReplacement {
+    version: ReplacementDocumentVersion,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+    appointment_id: Option<Uuid>,
+    art: String,
+    category: Option<String>,
+    valid_until: Option<NaiveDate>,
+}
+
+/// Checks a new upload may replace `document_id` the way a new generated
+/// version does: staff may upload to it, it is an uploaded document (a
+/// template document gets its new version from the template), the newest
+/// version, not archived and not out for signature.
+async fn load_upload_replacement(
+    state: &AppState,
+    auth: &AuthUser,
+    document_id: Uuid,
+) -> Result<UploadReplacement, axum::response::Response> {
+    require_existing_document_upload_access(state, auth, document_id).await?;
+    ensure_no_active_signature_request(state, document_id).await?;
+    let row = sqlx::query(
+        r#"SELECT d.patient_id, d.lead_id, d.order_id, d.appointment_id, d.art, d.category,
+                  d.status, d.generated_template_id, d.version_root_document_id,
+                  d.version_number, d.valid_until,
+                  EXISTS (SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id)
+                      AS already_replaced
+           FROM documents d
+           WHERE d.id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %document_id, "load the document a new upload replaces");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load replacement document",
+        )
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Replacement document not found"))?;
+    if row_generated_template_id(&row).is_some() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A document made from a template gets its new version from the template",
+        ));
+    }
+    if row.try_get::<bool, _>("already_replaced").unwrap_or(false) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Replacement document already has a newer version",
+        ));
+    }
+    if row.try_get::<String, _>("status").unwrap_or_default() == "archived" {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Archived documents cannot be replaced again",
+        ));
+    }
+    let patient_id = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let lead_id = row
+        .try_get::<Option<Uuid>, _>("lead_id")
+        .unwrap_or_default();
+    if patient_id.is_none() && lead_id.is_none() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only a patient's or lead's document gets a new version by upload",
+        ));
+    }
+    Ok(UploadReplacement {
+        version: ReplacementDocumentVersion {
+            document_id,
+            version_root_document_id: row
+                .try_get::<Option<Uuid>, _>("version_root_document_id")
+                .unwrap_or_default()
+                .unwrap_or(document_id),
+            version_number: row.try_get::<i32, _>("version_number").unwrap_or(1),
+        },
+        patient_id,
+        lead_id,
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        appointment_id: row
+            .try_get::<Option<Uuid>, _>("appointment_id")
+            .unwrap_or_default(),
+        art: row.try_get::<String, _>("art").unwrap_or_default(),
+        category: row
+            .try_get::<Option<String>, _>("category")
+            .unwrap_or_default(),
+        valid_until: row
+            .try_get::<Option<NaiveDate>, _>("valid_until")
+            .unwrap_or_default(),
+    })
+}
+
+/// The version a new one replaced is history: archived, and its portal
+/// release (taken over by the new version, if any) closed — as for a new
+/// generated version.
+async fn supersede_replaced_document(
+    state: &AppState,
+    replaced: Uuid,
+) -> Result<(), axum::response::Response> {
+    let result = sqlx::query(
+        r#"WITH archived AS (
+               UPDATE documents SET status = 'archived' WHERE id = $1
+           )
+           UPDATE document_shares
+           SET revoked_at = now()
+           WHERE document_id = $1
+             AND channel = 'patient_portal'
+             AND revoked_at IS NULL"#,
+    )
+    .bind(replaced)
+    .execute(&state.db)
+    .await;
+    result.map(|_| ()).map_err(|error| {
+        tracing::error!(%error, replaced_document_id = %replaced, "archive the replaced document");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to archive replaced document",
+        )
+    })
+}
+
+/// Whether a new version of the patient's order document `replaced`, asked
+/// for with `body`, would print what the current version prints: its terms
+/// are current, nobody changed the patient, the order or the estimate's quote
+/// since, the request brings no other input, and the validity stays the same
+/// (a Kostenvoranschlag takes the date of the quote it prints, every other
+/// template none). Only the templates whose terms the server tracks
+/// (Einzelauftrag, Kostenvoranschlag, Rahmenvertrag) of a patient are
+/// checked; any doubt counts as a change.
+async fn replacement_changes_nothing(
+    state: &AppState,
+    replaced: Uuid,
+    body: &GenerateDocumentRequest,
+    language: &str,
+) -> Result<bool, sqlx::Error> {
+    if !ONE_PER_ORDER_TEMPLATES.contains(&body.template_id.as_str()) {
+        return Ok(false);
+    }
+    let has_text = |value: &Option<String>| value.as_deref().is_some_and(|v| !v.trim().is_empty());
+    if has_text(&body.title_override)
+        || has_text(&body.introduction)
+        || has_text(&body.closing_note)
+        || body
+            .text_block_keys
+            .as_ref()
+            .is_some_and(|keys| !keys.is_empty())
+    {
+        return Ok(false);
+    }
+    let manual_text = body
+        .manual_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    let requested_bindings = body.bindings.as_ref().and_then(generated_binding_snapshot);
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT d.patient_id IS NOT NULL
+              AND d.lead_id IS NULL
+              AND document_terms_current(d.id) IS TRUE
+              AND COALESCE(d.document_language, '') = $2
+              AND COALESCE(btrim(d.generated_manual_text), '') = COALESCE($3, '')
+              AND COALESCE(d.generated_bindings, '{}'::jsonb) @> COALESCE($4, '{}'::jsonb)
+              AND NOT EXISTS (SELECT 1 FROM patients p
+                              WHERE p.id = d.patient_id AND p.updated_at > d.created_at)
+              AND NOT EXISTS (SELECT 1 FROM orders o
+                              WHERE o.id = d.order_id AND o.updated_at > d.created_at)
+              AND CASE
+                  WHEN d.generated_template_id = 'order_cost_estimate' THEN COALESCE(
+                      (SELECT q.quote_number = d.generated_bindings->>'_quote_number'
+                              AND q.updated_at <= d.created_at
+                              AND q.valid_until IS NOT DISTINCT FROM d.valid_until
+                       FROM quotes q
+                       WHERE q.order_id = d.order_id AND q.status <> 'superseded'
+                       ORDER BY q.created_at DESC, q.id DESC
+                       LIMIT 1),
+                      FALSE)
+                  ELSE d.valid_until IS NULL
+              END
+           FROM documents d
+           WHERE d.id = $1"#,
+    )
+    .bind(replaced)
+    .bind(language)
+    .bind(manual_text)
+    .bind(requested_bindings)
+    .fetch_optional(&state.db)
+    .await
+    .map(|value| value.unwrap_or(false))
+}
+
 pub(crate) async fn load_assignment_set(
     state: &AppState,
     auth: &AuthUser,
@@ -18606,6 +18806,28 @@ async fn generate_document(
     } else {
         None
     };
+    // A new version that would print exactly what the current one prints
+    // (same terms, data and validity) only piles up identical versions
+    // (QA 2026-11-16 S2-1): refused before anything is numbered.
+    if let Some(replaced) = replacement.as_ref() {
+        match replacement_changes_nothing(&state, replaced.document_id, &body, language).await {
+            Ok(false) => {}
+            Ok(true) => {
+                return super::contracts::coded_err(
+                    StatusCode::CONFLICT,
+                    "no_changes",
+                    "Nothing changed since the current version",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, document_id = %replaced.document_id, "compare the replaced version");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check existing document version",
+                );
+            }
+        }
+    }
 
     let requested_block_keys = body.text_block_keys.clone().unwrap_or_default();
     let mut text_blocks = Vec::new();
@@ -37236,6 +37458,9 @@ async fn upload_document_with_mode(
     // Optional «Gültig bis» (owner 2026-11-15); without it the known date of
     // an identity document is prefilled (trigger documents_prefill_valid_until).
     let mut valid_until: Option<NaiveDate> = None;
+    // «Загрузить новый» for an expiring or expired scan (QA 2026-11-16 S2-2):
+    // the upload is the next version of that document.
+    let mut replaces_document_id: Option<Uuid> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or_default().to_string();
@@ -37266,6 +37491,12 @@ async fn upload_document_with_mode(
             }
             "lead_id" => {
                 lead_id = match parse_uuid_field(field).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "replaces_document_id" => {
+                replaces_document_id = match parse_uuid_field(field).await {
                     Ok(value) => value,
                     Err(resp) => return resp,
                 }
@@ -37411,6 +37642,48 @@ async fn upload_document_with_mode(
         Some(data) if !data.is_empty() => data,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
+    // The chain (person, type, order) is the old document's, not the form's.
+    let replacement = match replaces_document_id {
+        Some(_) if invoice_import || !matches!(auth.role, Role::Ceo | Role::PatientManager) => {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Only CEO and patient managers upload a new version of a document",
+            );
+        }
+        Some(previous_id) => match load_upload_replacement(&state, &auth, previous_id).await {
+            Ok(value) => Some(value),
+            Err(resp) => return resp,
+        },
+        None => None,
+    };
+    if let Some(previous) = replacement.as_ref() {
+        if patient_id.is_some_and(|value| Some(value) != previous.patient_id)
+            || lead_id.is_some_and(|value| Some(value) != previous.lead_id)
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Replacement document must belong to the same patient",
+            );
+        }
+        if !art.trim().is_empty() && art.trim() != previous.art {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Replacement document must keep the document type",
+            );
+        }
+        patient_id = previous.patient_id;
+        lead_id = previous.lead_id;
+        order_id = order_id.or(previous.order_id);
+        appointment_id = appointment_id.or(previous.appointment_id);
+        art = previous.art.clone();
+        if category
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            category = previous.category.clone();
+        }
+        manual_intake = false;
+    }
     let invoice_xml = invoice_import
         && matches!(
             mime_type.split(';').next().unwrap_or_default().trim(),
@@ -37783,9 +38056,14 @@ async fn upload_document_with_mode(
         generated_template_id: None,
         generated_bindings: None,
         generated_manual_text: None,
-        version_root_document_id: None,
-        replaces_document_id: None,
-        version_number: 1,
+        version_root_document_id: replacement
+            .as_ref()
+            .map(|value| value.version.version_root_document_id),
+        replaces_document_id: replacement.as_ref().map(|value| value.version.document_id),
+        version_number: replacement
+            .as_ref()
+            .map(|value| value.version.version_number + 1)
+            .unwrap_or(1),
         uploaded_by: auth.user_id,
     };
     let (document_id, file_size, original_filename, storage_key) =
@@ -37793,6 +38071,27 @@ async fn upload_document_with_mode(
             Ok(value) => value,
             Err(resp) => return resp,
         };
+    if let Some(previous) = replacement.as_ref() {
+        if let Err(response) =
+            supersede_replaced_document(&state, previous.version.document_id).await
+        {
+            return response;
+        }
+        // Without a date of its own the new version must not take over the
+        // old one's (the prefill reads the same, possibly stale, record).
+        if valid_until.is_none()
+            && let Some(previous_day) = previous.valid_until
+            && let Err(error) = sqlx::query(
+                "UPDATE documents SET valid_until = NULL WHERE id = $1 AND valid_until = $2",
+            )
+            .bind(document_id)
+            .bind(previous_day)
+            .execute(&state.db)
+            .await
+        {
+            tracing::warn!(%error, %document_id, "clear the inherited validity of a new version");
+        }
+    }
     if let Some(day) = valid_until
         && let Err(error) = sqlx::query("UPDATE documents SET valid_until = $2 WHERE id = $1")
             .bind(document_id)
@@ -37874,6 +38173,8 @@ async fn upload_document_with_mode(
             "ursprung": ursprung.as_deref(),
             "classification_suggestion": classification_suggestion.clone(),
             "valid_until": valid_until.map(|day| day.to_string()),
+            "replaces_document_id": replacement.as_ref().map(|value| value.version.document_id),
+            "version_number": persist_input.version_number,
         }),
     ));
 

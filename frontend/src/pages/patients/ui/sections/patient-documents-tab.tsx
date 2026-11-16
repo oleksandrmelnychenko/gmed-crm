@@ -84,6 +84,7 @@ import {
 } from "@/pages/documents/model/document-validity";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { DocumentPortalReleaseAction } from "@/pages/documents/ui/document-portal-release-action";
+import { documentUploadFormReplacing, type DocumentUploadFormState } from "../../model/sheet-forms";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -130,7 +131,7 @@ type PatientDocumentsTabProps = {
   onDocumentGenerated: () => void;
   onResetDocumentFilters: () => void;
   canManageDocuments: boolean;
-  onOpenUpload: () => void;
+  onOpenUpload: (initialForm?: DocumentUploadFormState) => void;
   /** Absent for roles the server does not admit to the clinical import. */
   onRecognizeDocument?: (documentId: string) => Promise<void>;
   statusColors: Record<string, string>;
@@ -347,6 +348,16 @@ export function PatientDocumentsTab({
   const previewDocument = documentPreview
     ? documents.find((doc) => doc.id === documentPreview.id) ?? null
     : null;
+  // «Загрузить новый»: the upload is the next version of the expired scan
+  // (same type and chain; the category stays the old one's on the server).
+  const uploadFormReplacing = (doc: DocumentItem): DocumentUploadFormState =>
+    documentUploadFormReplacing({
+      id: doc.id,
+      art: doc.art,
+      is_medical: doc.is_medical,
+      order_id: doc.order_id,
+      name: documentDisplayName(doc, l),
+    });
   const anyValidityTracked = useMemo(
     () => documents.some((doc) => Boolean(doc.valid_until)),
     [documents],
@@ -753,7 +764,8 @@ export function PatientDocumentsTab({
                   document={doc}
                   busyId={renewal.busyId}
                   onRenew={canRenewOutdated ? (id) => void renewal.renew(id, "expired") : undefined}
-                  onUploadNew={onOpenUpload}
+                  onExtend={canRenewOutdated ? (id, date) => renewal.extend(id, date) : undefined}
+                  onUploadNew={() => onOpenUpload(canRenewOutdated ? uploadFormReplacing(doc) : undefined)}
                   title={documentDisplayName(doc, l)}
                   iconOnly
                 />
@@ -853,7 +865,7 @@ export function PatientDocumentsTab({
                     type="button"
                     size="sm"
                     className="h-8 shrink-0 rounded-lg gap-1.5"
-                    onClick={onOpenUpload}
+                    onClick={() => onOpenUpload()}
                   >
                     {l("patients_upload_document")}
                   </Button>
@@ -975,9 +987,10 @@ export function PatientDocumentsTab({
                     document={previewDocument}
                     busyId={renewal.busyId}
                     onRenew={canRenewOutdated ? (id) => void renewal.renew(id, "expired") : undefined}
+                    onExtend={canRenewOutdated ? (id, date) => renewal.extend(id, date) : undefined}
                     onUploadNew={() => {
                       closeDocumentPreview();
-                      onOpenUpload();
+                      onOpenUpload(canRenewOutdated ? uploadFormReplacing(previewDocument) : undefined);
                     }}
                   />
                 ) : null}

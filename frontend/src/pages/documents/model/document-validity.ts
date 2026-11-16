@@ -52,6 +52,29 @@ export function needsValidityAttention(document: DocumentValidity): boolean {
     && document.status !== "archived";
 }
 
+/**
+ * What renews an expiring or expired document (QA 2026-11-16 S2-1):
+ * - `extend_quote`: a Kostenvoranschlag takes its date from its quote, so a new
+ *   version alone would carry the same date; «Продлить срок до …» extends the
+ *   quote and makes the new version;
+ * - `new_version`: another document made from a template;
+ * - `upload_new`: an uploaded scan gets its next version by upload;
+ * - null: nothing to renew.
+ */
+export type ValidityRenewalKind = "extend_quote" | "new_version" | "upload_new";
+
+export function validityRenewalKind(
+  document: DocumentValidity & { generated_template_id?: string | null; order_id?: string | null },
+): ValidityRenewalKind | null {
+  if (!needsValidityAttention(document)) return null;
+  if (document.generated_template_id === "order_cost_estimate" && document.order_id) return "extend_quote";
+  if (document.generated_template_id) return "new_version";
+  return "upload_new";
+}
+
+/** The date «Продлить срок до …» suggests: today + the usual offer validity (30 days). */
+export const DEFAULT_QUOTE_VALIDITY_DAYS = 30;
+
 export function countValidityAttention(documents: ReadonlyArray<DocumentValidity>): number {
   return documents.filter(needsValidityAttention).length;
 }

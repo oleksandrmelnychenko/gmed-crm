@@ -59,6 +59,8 @@ type PatientDocumentUploadDialogProps = {
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   onError: (message: string) => void;
+  /** «Загрузить новый»: the form starts with the old document's type and chain. */
+  initialForm?: DocumentUploadFormState | null;
 };
 
 type Localize = (key: string) => string;
@@ -118,17 +120,21 @@ function PatientDocumentUploadDialog({
   onOpenChange,
   onSaved,
   onError,
+  initialForm,
 }: PatientDocumentUploadDialogProps) {
-  const [form, setForm] = useState<DocumentUploadFormState>(blankDocumentUploadForm);
+  const [form, setForm] = useState<DocumentUploadFormState>(() => initialForm ?? blankDocumentUploadForm());
   const [busy, setBusy] = useState(false);
   const recognitionCopy = documentRecognitionCopy(lang);
+  const replacing = Boolean(form.replacesDocumentId);
 
   useEffect(() => {
     if (!open) {
       setForm(blankDocumentUploadForm());
       setBusy(false);
+    } else if (initialForm) {
+      setForm(initialForm);
     }
-  }, [open]);
+  }, [open, initialForm]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setForm((current) => ({
@@ -180,8 +186,8 @@ function PatientDocumentUploadDialog({
       onOpenChange={onOpenChange}
       width="form-heavy"
       onSubmit={handleSubmit}
-      title={recognitionCopy.title}
-      description={recognitionCopy.description}
+      title={replacing ? (lang === "de" ? "Neue Version" : lang === "uk" ? "Нова версія" : "Новая версия") : recognitionCopy.title}
+      description={replacing ? form.replacesDocumentName : recognitionCopy.description}
       bodyClassName="space-y-4 px-5 py-4"
       footer={
         <DocumentUploadFooter
@@ -202,6 +208,7 @@ function PatientDocumentUploadDialog({
       <DocumentDetailsSection
         form={form}
         l={l}
+        lang={lang}
         setForm={setForm}
         statusLabel={statusLabel}
       />
@@ -302,6 +309,7 @@ function DocumentFileSection({
 type DocumentDetailsSectionProps = {
   form: DocumentUploadFormState;
   l: Localize;
+  lang: string;
   setForm: DocumentUploadFormSetter;
   statusLabel: (status: string) => string;
 };
@@ -325,6 +333,7 @@ function documentVisibilityLabel(
 function DocumentDetailsSection({
   form,
   l,
+  lang,
   setForm,
   statusLabel,
 }: DocumentDetailsSectionProps) {
@@ -335,11 +344,25 @@ function DocumentDetailsSection({
           <Input
             id="document-art"
             value={form.art}
+            // A new version keeps the type of the document it replaces.
+            readOnly={Boolean(form.replacesDocumentId)}
             onChange={(event) =>
               setForm((current) => ({ ...current, art: event.target.value }))
             }
             className={inputClass}
             placeholder={l("patients_document_art_placeholder")}
+          />
+        </FormField>
+        <FormField label={lang === "de" ? "Gültig bis" : lang === "uk" ? "Діє до" : "Действует до"} htmlFor="document-valid-until">
+          <Input
+            id="document-valid-until"
+            type="date"
+            value={form.validUntil}
+            data-testid="patient-document-upload-valid-until"
+            onChange={(event) =>
+              setForm((current) => ({ ...current, validUntil: event.target.value }))
+            }
+            className={inputClass}
           />
         </FormField>
         <FormField label={l("patients_category")} htmlFor="document-category">

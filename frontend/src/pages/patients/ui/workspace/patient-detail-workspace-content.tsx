@@ -61,6 +61,7 @@ import {
 import { PatientOverviewCard } from "../sections/patient-overview-card";
 import { CustomFieldsSection } from "@/components/custom-fields/custom-fields-section";
 import { PatientClinicalDocumentActions } from "../sections/patient-clinical-document-actions";
+import type { DocumentUploadFormState } from "../../model/sheet-forms";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -346,7 +347,7 @@ type PatientDetailWorkspaceContentProps = {
   onNewRequestForPerson?: (relation: RelationItem) => void;
   onOpenPatient: (patientId: string) => void;
   onOpenProfileEditor: () => void;
-  onOpenUpload: () => void;
+  onOpenUpload: (initialForm?: DocumentUploadFormState) => void;
   onPrintPatientLabel: (format: PatientLabelFormatId) => void;
   onResetDocumentFilters: () => void;
   onResetTimelineFilters: () => void;

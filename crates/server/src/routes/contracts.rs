@@ -79,6 +79,10 @@ pub fn router() -> Router<AppState> {
             "/quotes/{quote_id}/internal-note",
             post(update_quote_internal_note),
         )
+        .route(
+            "/documents/{id}/extend-quote-validity",
+            post(extend_estimate_quote_validity),
+        )
 }
 
 #[derive(Deserialize)]
@@ -5763,6 +5767,274 @@ async fn update_quote_internal_note(
     if let Err(error) = tx.commit().await {
         tracing::error!(%error, %quote_id, "commit quote internal note");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+    }
+
+    match load_quote_detail(&state, quote_id, &auth).await {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(resp) => resp,
+    }
+}
+
+#[derive(Deserialize)]
+struct ExtendEstimateQuoteValidityRequest {
+    valid_until: Option<String>,
+}
+
+/// «Продлить срок до …» of a Kostenvoranschlag whose validity is its quote's
+/// (QA 2026-11-16 S2-1): the quote the estimate prints (order + printed
+/// number, the rule of the validity prefill) gets the new `valid_until` with
+/// a version snapshot and an audit row in one transaction, like every other
+/// quote change; an expired quote is open again with the status it had.
+/// Staff then make the estimate's new version, which takes the new date.
+/// The same date again changes nothing and answers 200, so a failed second
+/// step can be retried.
+async fn extend_estimate_quote_validity(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(document_id): Path<Uuid>,
+    Json(body): Json<ExtendEstimateQuoteValidityRequest>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let valid_until = match parse_optional_date(body.valid_until.as_deref()) {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "valid_until is required"),
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if quote_validity_passed(Some(valid_until), crate::app_time::today()) {
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "quote_valid_until_past",
+            "The quote validity date cannot be in the past",
+        );
+    }
+    let document = match sqlx::query_as::<
+        _,
+        (Option<Uuid>, Option<String>, Option<String>, String, bool),
+    >(sqlx::AssertSqlSafe(format!(
+        r#"SELECT d.order_id, d.generated_template_id, {ESTIMATE_QUOTE_NUMBER}, d.status,
+                      EXISTS (SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id)
+               FROM documents d
+               WHERE d.id = $1"#
+    )))
+    .bind(document_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(error) => {
+            tracing::error!(%error, %document_id, "load estimate for quote validity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+    let (order_id, template_id, quote_number, document_status, replaced) = document;
+    let (Some(order_id), Some("order_cost_estimate"), Some(quote_number)) =
+        (order_id, template_id.as_deref(), quote_number)
+    else {
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "estimate_without_quote",
+            "Only a cost estimate made for a quote takes its validity from the quote",
+        );
+    };
+    if replaced || document_status == "archived" {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "document_not_current",
+            "The document is no longer the current version",
+        );
+    }
+    let order_ctx = match load_order_access_context(&state, order_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(resp) => return resp,
+    };
+    let subject = match order_ctx.subject() {
+        Ok(subject) => subject,
+        Err(error) => {
+            tracing::error!(?error, %order_id, "invalid quote order subject");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Order has invalid subject",
+            );
+        }
+    };
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %document_id, "begin quote validity update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+    let quote = match sqlx::query(
+        r#"SELECT q.id, q.status, q.valid_until
+           FROM quotes q
+           WHERE q.order_id = $1 AND q.quote_number = $2
+           FOR UPDATE"#,
+    )
+    .bind(order_id)
+    .bind(&quote_number)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "lock quote for validity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+    let quote_id = quote.try_get::<Uuid, _>("id").unwrap_or_default();
+    let previous_status = quote.try_get::<String, _>("status").unwrap_or_default();
+    let previous_valid_until = quote
+        .try_get::<Option<NaiveDate>, _>("valid_until")
+        .unwrap_or_default();
+    match previous_status.as_str() {
+        "superseded" => {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "quote_superseded",
+                "A superseded quote is closed; use the quote that replaced it",
+            );
+        }
+        "rejected" => {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "quote_rejected",
+                "A rejected quote is closed; create a new quote",
+            );
+        }
+        _ => {}
+    }
+    if previous_valid_until == Some(valid_until) && previous_status != "expired" {
+        drop(tx);
+        return match load_quote_detail(&state, quote_id, &auth).await {
+            Ok(Some(value)) => Json(value).into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
+            Err(resp) => resp,
+        };
+    }
+    // An expired offer is open again with the status it had before.
+    let status = if previous_status == "expired" {
+        match sqlx::query_scalar::<_, String>(
+            r#"SELECT status FROM quote_versions
+               WHERE quote_id = $1 AND status IN ('draft', 'sent')
+               ORDER BY version_number DESC
+               LIMIT 1"#,
+        )
+        .bind(quote_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(value) => value.unwrap_or_else(|| "sent".to_string()),
+            Err(error) => {
+                tracing::error!(%error, %quote_id, "load status before expiry");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+            }
+        }
+    } else {
+        previous_status.clone()
+    };
+    let row = match sqlx::query(
+        r#"UPDATE quotes SET valid_until = $2, status = $3
+           WHERE id = $1
+           RETURNING order_id, quote_number, total_net, total_vat, total_gross,
+                     quote_recorded_cash_paid(id) AS paid_amount,
+                     quote_recorded_cash_received_at(id) AS paid_at,
+                     line_items, notes"#,
+    )
+    .bind(quote_id)
+    .bind(valid_until)
+    .bind(&status)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "update quote validity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+    let snapshot = QuoteVersionSnapshotInput {
+        quote_id,
+        order_id,
+        quote_number: quote_number.clone(),
+        status: status.clone(),
+        total_net: row.try_get::<Decimal, _>("total_net").unwrap_or_default(),
+        total_vat: row.try_get::<Decimal, _>("total_vat").unwrap_or_default(),
+        total_gross: row.try_get::<Decimal, _>("total_gross").unwrap_or_default(),
+        valid_until: Some(valid_until),
+        paid_amount: row
+            .try_get::<Option<Decimal>, _>("paid_amount")
+            .unwrap_or_default()
+            .unwrap_or(Decimal::ZERO),
+        paid_at: row
+            .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+            .unwrap_or_default(),
+        line_items: row.try_get::<Value, _>("line_items").unwrap_or_default(),
+        notes: row
+            .try_get::<Option<String>, _>("notes")
+            .unwrap_or_default(),
+        change_reason: Some("valid_until_extended".to_string()),
+        created_by: Some(auth.user_id),
+    };
+    if let Err(error) = insert_quote_version_snapshot(&mut tx, &snapshot).await {
+        tracing::error!(%error, %quote_id, "snapshot quote validity");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to persist quote version",
+        );
+    }
+    let event = audit::AuditEvent {
+        user_id: Some(auth.user_id),
+        action: "update_quote_valid_until".to_string(),
+        entity_type: "quote".to_string(),
+        entity_id: Some(quote_id),
+        context: json!({
+            "quote_number": quote_number,
+            "order_id": order_id,
+            "order_number": order_ctx.order_number,
+            "document_id": document_id,
+        }),
+        old_value: Some(json!({
+            "valid_until": previous_valid_until.map(|date| date.to_string()),
+            "status": previous_status,
+        })),
+        new_value: Some(json!({
+            "valid_until": valid_until.to_string(),
+            "status": status,
+        })),
+        ip_hash: None,
+    };
+    if let Err(error) = audit::write_in_transaction(&mut tx, &event).await {
+        tracing::error!(%error, %quote_id, "audit quote validity");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %quote_id, "commit quote validity");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+    }
+    if status != previous_status {
+        crate::realtime::publish_quote_event(
+            &state,
+            Some(auth.user_id),
+            "quote.status_changed",
+            quote_id,
+            json!({
+                "status": status,
+                "previous_status": previous_status,
+                "order_id": order_id,
+                "reason": "valid_until_extended",
+            }),
+        )
+        .await;
     }
 
     match load_quote_detail(&state, quote_id, &auth).await {

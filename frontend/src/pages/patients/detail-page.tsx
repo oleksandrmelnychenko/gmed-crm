@@ -7,9 +7,11 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type FormEvent,
   type SetStateAction,
 } from "react";
+import type { DocumentUploadFormState } from "./model/sheet-forms";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -1120,6 +1122,8 @@ function usePatientDetailPageContent() {
     setPageField("relationEditorOpen", value);
   const setEditingRelation = (value: SetStateAction<RelationItem | null>) =>
     setPageField("editingRelation", value);
+  // «Загрузить новый»: the upload dialog starts as the next version of a document.
+  const [documentUploadInitialForm, setDocumentUploadInitialForm] = useState<DocumentUploadFormState | null>(null);
   const setDocumentUploadOpen = (value: SetStateAction<boolean>) =>
     setPageField("documentUploadOpen", value);
   const setContractCreateOpen = (value: SetStateAction<boolean>) =>
@@ -1854,8 +1858,9 @@ function usePatientDetailPageContent() {
     setDunningNote("");
   }
 
-  function openDocumentUpload() {
+  function openDocumentUpload(initialForm?: DocumentUploadFormState) {
     preloadPatientDetailOverlayLayers();
+    setDocumentUploadInitialForm(initialForm ?? null);
     setDocumentUploadOpen(true);
   }
 
@@ -2285,6 +2290,7 @@ function usePatientDetailPageContent() {
             detail={detail}
             dictionary={tr}
             documentUploadOpen={documentUploadOpen}
+            documentUploadInitialForm={documentUploadInitialForm}
             dunningBusy={dunningBusy}
             dunningEvents={dunningEvents}
             dunningNote={dunningNote}

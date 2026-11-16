@@ -3,6 +3,7 @@ import { lazy, Suspense, type FormEvent } from "react";
 import type { AppointmentItem, OrderItem, RelationItem } from "../../model/detail-tab-types";
 import type { PatientsDictionary, PatientDetail } from "../../model/list-model";
 import type { DunningEvent } from "../../model/detail-tab-types";
+import type { DocumentUploadFormState } from "../../model/sheet-forms";
 
 const loadPatientProfileEditorSheet = () => import("../sheets/patient-profile-editor-sheet");
 const loadPatientRelationEditorSheet = () => import("../sheets/patient-relation-editor-sheet");
@@ -60,6 +61,8 @@ type PatientDetailOverlayLayersProps = {
   detail: PatientDetail;
   dictionary: PatientsDictionary;
   documentUploadOpen: boolean;
+  /** «Загрузить новый»: the upload dialog starts as the next version of a document. */
+  documentUploadInitialForm?: DocumentUploadFormState | null;
   dunningBusy: boolean;
   dunningEvents: DunningEvent[];
   dunningNote: string;
@@ -120,6 +123,7 @@ export function PatientDetailOverlayLayers({
   detail,
   dictionary,
   documentUploadOpen,
+  documentUploadInitialForm,
   dunningBusy,
   dunningEvents,
   dunningNote,
@@ -208,6 +212,7 @@ export function PatientDetailOverlayLayers({
         <Suspense fallback={null}>
           <LazyPatientDocumentUploadDialog
             open={documentUploadOpen}
+            initialForm={documentUploadInitialForm}
             patientId={patientId}
             orders={orders}
             appointments={appointments}

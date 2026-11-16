@@ -6,8 +6,25 @@ import {
   needsValidityAttention,
   parseValidityFilter,
   validUntilText,
+  validityRenewalKind,
   validityStatusText,
 } from "./document-validity";
+
+describe("validityRenewalKind", () => {
+  const expiring = { valid_until: "2026-12-01", validity_status: "expiring" as const, validity_days_left: 10 };
+  it("extends a Kostenvoranschlag through its quote", () => {
+    expect(validityRenewalKind({ ...expiring, generated_template_id: "order_cost_estimate", order_id: "o" })).toBe("extend_quote");
+  });
+  it("makes a new version of another template document and a new upload of a scan", () => {
+    expect(validityRenewalKind({ ...expiring, generated_template_id: "single_order", order_id: "o" })).toBe("new_version");
+    expect(validityRenewalKind({ ...expiring, generated_template_id: null })).toBe("upload_new");
+  });
+  it("offers nothing for a valid, older or archived document", () => {
+    expect(validityRenewalKind({ ...expiring, validity_status: "valid" })).toBeNull();
+    expect(validityRenewalKind({ ...expiring, is_latest_version: false })).toBeNull();
+    expect(validityRenewalKind({ ...expiring, status: "archived" })).toBeNull();
+  });
+});
 
 const ru = (ruText: string) => ruText;
 const de = (_ru: string, deText: string) => deText;
