@@ -1699,23 +1699,17 @@ async fn invoice_cash_lines(
     } else {
         CreditedAdvanceSplit::default()
     };
-    // An advance with a payment split set by hand books what each VAT
-    // category received (owner 2026-11-15); otherwise pro rata as before.
-    let manual_splits =
-        advance_rows::manual_payment_splits(transaction, context.invoice_id).await?;
-    let targets = if manual_splits.is_empty() {
-        invoice_cash_targets(
+    // An advance books what each VAT category received by the splits frozen
+    // on its payments (owner 2026-11-15, QA 2026-11-16 S1-1); otherwise pro
+    // rata as before.
+    let targets = match advance_rows::advance_booking_rows(transaction, context.invoice_id).await? {
+        Some(paid) => advance_rows::advance_cash_targets(&paid, retained_gross),
+        None => invoice_cash_targets(
             context,
             &credit_notes::load_active_credits(transaction, context.invoice_id).await?,
             credited,
             retained_gross,
-        )
-    } else {
-        advance_rows::advance_cash_targets(
-            &advance_rows::advance_rows(transaction, context.invoice_id).await?,
-            &manual_splits,
-            retained_gross,
-        )
+        ),
     };
     Ok(targets
         .into_iter()
@@ -1760,6 +1754,10 @@ async fn insert_invoice_cash_accounting_entries(
     } else {
         "invoice_payment"
     };
+    if !is_refund && !is_reversal {
+        advance_rows::freeze_advance_payment(transaction, context.invoice_id, transaction_id)
+            .await?;
+    }
     let lines = invoice_cash_lines(
         transaction,
         context,
@@ -10214,6 +10212,28 @@ fn invoice_payment_row_payload(row: &sqlx::postgres::PgRow, staff_view: bool) ->
                     .unwrap_or_default()
             ),
         );
+        // The VAT split staff set by hand on a payment of an advance (QA
+        // 2026-11-16 S3-3); a pro rata split is not shown.
+        map.insert(
+            "category_split".to_string(),
+            row.try_get::<Option<Value>, _>("category_split")
+                .unwrap_or_default()
+                .and_then(|value| advance_rows::rows_from_json(&value))
+                .map(|rows| {
+                    Value::Array(
+                        rows.iter()
+                            .map(|row| {
+                                json!({
+                                    "kind": advance_rows::kind_key(row.kind),
+                                    "vat_rate": decimal_to_string(row.rate),
+                                    "amount_gross": decimal_to_string(row.gross),
+                                })
+                            })
+                            .collect(),
+                    )
+                })
+                .unwrap_or(Value::Null),
+        );
     }
     payload
 }
@@ -10233,9 +10253,12 @@ async fn load_invoice_payment_history(
                   payment.corrects_transaction_id,
                   correction.id AS corrected_by_transaction_id,
                   reversal.id AS reversed_by_transaction_id,
-                  (reversal.id IS NOT NULL) AS is_reversed
+                  (reversal.id IS NOT NULL) AS is_reversed,
+                  split.rows AS category_split
            FROM invoice_payment_transactions payment
            JOIN users creator ON creator.id = payment.created_by
+           LEFT JOIN invoice_payment_category_splits split
+             ON split.payment_transaction_id = payment.id AND split.manual
            LEFT JOIN invoice_payment_transactions correction
              ON correction.corrects_transaction_id = payment.id
            LEFT JOIN invoice_payment_transactions reversal
@@ -11900,7 +11923,7 @@ async fn correct_invoice_payment(
         None => {
             let frozen = sqlx::query_scalar::<_, bool>(
                 r#"SELECT EXISTS (SELECT 1 FROM invoice_payment_category_splits
-                                  WHERE payment_transaction_id = $1)
+                                  WHERE payment_transaction_id = $1 AND manual)
                       AND EXISTS (SELECT 1 FROM invoice_prepayment_allocations
                                   WHERE advance_invoice_id = $2)"#,
             )
@@ -15885,6 +15908,25 @@ async fn update_invoice_status(
             "Failed to release invoice prepayment",
         );
     }
+    // The cancellation document states the advances the final deducted (the
+    // Storno releases them), read before they are released (QA 2026-11-16
+    // S2-3).
+    let storno_deducted_advances = if cancelling_released
+        && locked_prepayment_amount > Decimal::ZERO
+    {
+        match document::load_deducted_advances(&mut transaction, invoice_id).await {
+            Ok(advances) => advances,
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load advances deducted on the cancelled invoice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to release invoice prepayment",
+                );
+            }
+        }
+    } else {
+        Vec::new()
+    };
     if requested_status == "cancelled"
         && let Err(e) =
             sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE target_invoice_id = $1")
@@ -16291,6 +16333,7 @@ async fn update_invoice_status(
                         &mut transaction,
                         invoice_id,
                         reason,
+                        &storno_deducted_advances,
                         auth.user_id,
                     )
                     .await

@@ -3,7 +3,11 @@
 //! An advance invoice splits its amount over VAT categories (own services at
 //! a rate, 0 % own services, pass-through costs). Its cash is split the same
 //! way: pro rata over the categories (owner 2026-11-15), unless staff set the
-//! split of a payment by hand (`invoice_payment_category_splits`). What an
+//! split of a payment by hand. Each payment's split is frozen when it is
+//! recorded (`invoice_payment_category_splits`, QA 2026-11-16 S1-1): a pro
+//! rata payment stores the split computed then, a later payment never
+//! re-spreads earlier cash. Payments recorded before keep the former reading
+//! until the next payment on the advance freezes them with it. What an
 //! advance deducts on a settlement invoice is planned per category: never
 //! more than the advance holds in a category and never more than the
 //! settlement invoice bills in it, so the final invoice cannot show negative
@@ -346,14 +350,7 @@ pub(super) fn validate_payment_split(
         if gross.is_zero() {
             continue;
         }
-        let vat = vat_share(*gross, row.gross, row.vat);
-        rows.push(VatBreakdownRow {
-            kind: key.0,
-            rate: key.1,
-            net: *gross - vat,
-            vat,
-            gross: *gross,
-        });
+        rows.push(part_row(row, paid_before, *gross));
     }
     if rows.iter().map(|row| row.gross).sum::<Decimal>() != amount.round_cents() {
         return Err("The split must add up to the payment amount");
@@ -361,18 +358,16 @@ pub(super) fn validate_payment_split(
     Ok(rows)
 }
 
-/// The cash booking targets of an advance whose payments carry a split set
-/// by hand: what [`advance_paid_rows`] says each category received, the rest
-/// patient credit. Same shape as `invoice_cash_targets`.
+/// The cash booking targets of an advance booked by its payment rows: what
+/// each category received (`paid`, see [`paid_rows`]), the rest patient
+/// credit. Same shape as `invoice_cash_targets`.
 pub(super) fn advance_cash_targets(
-    advance_rows: &[VatBreakdownRow],
-    manual_splits: &[Vec<VatBreakdownRow>],
+    paid: &[VatBreakdownRow],
     retained_gross: Decimal,
 ) -> [(&'static str, Decimal, Decimal); 3] {
-    let paid = advance_paid_rows(advance_rows, manual_splits, retained_gross);
     let (mut service_gross, mut service_vat) = (Decimal::ZERO, Decimal::ZERO);
     let (mut passthrough_gross, mut passthrough_vat) = (Decimal::ZERO, Decimal::ZERO);
-    for row in &paid {
+    for row in paid {
         if row.kind == VatGroupKind::Passthrough {
             passthrough_gross += row.gross;
             passthrough_vat += row.vat;
@@ -394,6 +389,174 @@ pub(super) fn advance_cash_targets(
             Decimal::ZERO,
         ),
     ]
+}
+
+/// The row a payment adds to a category of the advance: `gross`, with the VAT
+/// that brings the category's paid VAT to its share of what is paid then (a
+/// fully paid category carries exactly its invoiced VAT).
+fn part_row(
+    row: &VatBreakdownRow,
+    paid_before: &[VatBreakdownRow],
+    gross: Decimal,
+) -> VatBreakdownRow {
+    let key = category_of(row);
+    let (before_gross, before_vat) = paid_before
+        .iter()
+        .filter(|item| category_of(item) == key)
+        .fold((Decimal::ZERO, Decimal::ZERO), |(gross, vat), item| {
+            (gross + item.gross, vat + item.vat)
+        });
+    let vat = (vat_share(before_gross + gross, row.gross, row.vat) - before_vat)
+        .max(Decimal::ZERO)
+        .min(gross.max(Decimal::ZERO));
+    VatBreakdownRow {
+        kind: key.0,
+        rate: key.1,
+        net: gross - vat,
+        vat,
+        gross,
+    }
+}
+
+/// The split a payment without a split set by hand freezes when it is
+/// recorded: pro rata over what each category still has open (what the
+/// payment form prefills), at most what is open in total.
+pub(super) fn pro_rata_payment_rows(
+    advance_rows: &[VatBreakdownRow],
+    paid_before: &[VatBreakdownRow],
+    amount: Decimal,
+) -> Vec<VatBreakdownRow> {
+    let caps = advance_rows
+        .iter()
+        .map(|row| {
+            let key = category_of(row);
+            let paid: Decimal = paid_before
+                .iter()
+                .filter(|item| category_of(item) == key)
+                .map(|item| item.gross)
+                .sum();
+            (row.kind, (row.gross - paid).max(Decimal::ZERO))
+        })
+        .collect::<Vec<_>>();
+    let open: Decimal = caps.iter().map(|(_, cap)| *cap).sum();
+    let parts = split_within(amount.round_cents().max(Decimal::ZERO).min(open), &caps);
+    advance_rows
+        .iter()
+        .zip(parts)
+        .filter(|(_, gross)| *gross > Decimal::ZERO)
+        .map(|(row, gross)| part_row(row, paid_before, gross))
+        .collect()
+}
+
+/// A payment on an advance (not reversed) with the split stored for it;
+/// `rows` is `None` for a payment recorded before splits were frozen.
+#[derive(Clone, Debug)]
+pub(super) struct AdvancePayment {
+    pub id: Uuid,
+    pub amount: Decimal,
+    pub created_by: Uuid,
+    pub rows: Option<Vec<VatBreakdownRow>>,
+}
+
+/// What an advance's retained cash paid per category. Every payment frozen:
+/// the sum of the stored splits (refunded cash takes the same share of each
+/// category). Otherwise the former reading ([`advance_paid_rows`]: stored
+/// splits as set, the rest pro rata over what is open).
+pub(super) fn paid_rows(
+    advance_rows: &[VatBreakdownRow],
+    payments: &[AdvancePayment],
+    cash: Decimal,
+) -> Vec<VatBreakdownRow> {
+    let stored = payments
+        .iter()
+        .filter_map(|payment| payment.rows.clone())
+        .collect::<Vec<_>>();
+    if stored.len() < payments.len() {
+        return advance_paid_rows(advance_rows, &stored, cash);
+    }
+    let mut sum = Vec::new();
+    for rows in &stored {
+        add_rows(&mut sum, rows);
+    }
+    let paid = advance_rows
+        .iter()
+        .map(|row| {
+            let key = category_of(row);
+            let (gross, vat) = sum
+                .iter()
+                .filter(|item| category_of(item) == key)
+                .fold((Decimal::ZERO, Decimal::ZERO), |(gross, vat), item| {
+                    (gross + item.gross, vat + item.vat)
+                });
+            let gross = gross.min(row.gross).max(Decimal::ZERO);
+            let vat = vat.min(row.vat).max(Decimal::ZERO).min(gross);
+            VatBreakdownRow {
+                kind: key.0,
+                rate: key.1,
+                net: gross - vat,
+                vat,
+                gross,
+            }
+        })
+        .collect::<Vec<_>>();
+    let total: Decimal = paid.iter().map(|row| row.gross).sum();
+    let cash = cash.round_cents().max(Decimal::ZERO);
+    if cash >= total {
+        return paid
+            .into_iter()
+            .filter(|row| row.gross > Decimal::ZERO)
+            .collect();
+    }
+    let caps = paid
+        .iter()
+        .map(|row| (row.kind, row.gross))
+        .collect::<Vec<_>>();
+    paid.iter()
+        .zip(split_within(cash, &caps))
+        .filter(|(_, gross)| *gross > Decimal::ZERO)
+        .map(|(row, gross)| {
+            let vat = vat_share(gross, row.gross, row.vat);
+            VatBreakdownRow {
+                kind: row.kind,
+                rate: row.rate,
+                net: gross - vat,
+                vat,
+                gross,
+            }
+        })
+        .collect()
+}
+
+/// The splits to freeze for payments recorded before splits were frozen
+/// (`rows` = `None`): together exactly what the former reading gives them
+/// today, so nothing booked or deducted moves; attributed to those payments
+/// in the order they were recorded.
+pub(super) fn legacy_payment_rows(
+    advance_rows: &[VatBreakdownRow],
+    payments: &[AdvancePayment],
+    cash: Decimal,
+) -> Vec<(Uuid, Vec<VatBreakdownRow>)> {
+    let stored = payments
+        .iter()
+        .filter_map(|payment| payment.rows.clone())
+        .collect::<Vec<_>>();
+    let mut fixed = Vec::new();
+    for rows in &stored {
+        add_rows(&mut fixed, rows);
+    }
+    let reading = advance_paid_rows(advance_rows, &stored, cash);
+    let mut rest = subtract_rows(&reading, &fixed);
+    rest.retain(|row| row.gross > Decimal::ZERO);
+    payments
+        .iter()
+        .filter(|payment| payment.rows.is_none())
+        .map(|payment| {
+            let part = deducted_advance_rows(&rest, payment.amount);
+            rest = subtract_rows(&rest, &part);
+            rest.retain(|row| row.gross > Decimal::ZERO);
+            (payment.id, part)
+        })
+        .collect()
 }
 
 /// The VAT rows an advance charges after its active credit notes; an early
@@ -504,26 +667,73 @@ pub(super) async fn allocation_rows(
     Ok(result)
 }
 
-/// The splits set by hand on the advance's payments that are not reversed.
-pub(super) async fn manual_payment_splits(
+/// The advance's payments that are not reversed, oldest first, with their
+/// stored splits.
+pub(super) async fn advance_payments(
     conn: &mut PgConnection,
     advance_id: Uuid,
-) -> Result<Vec<Vec<VatBreakdownRow>>, sqlx::Error> {
-    let values = sqlx::query_scalar::<_, Value>(
-        r#"SELECT split.rows
-           FROM invoice_payment_category_splits split
-           WHERE split.invoice_id = $1
+) -> Result<Vec<AdvancePayment>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT payment.id, payment.amount_gross, payment.created_by, split.rows
+           FROM invoice_payment_transactions payment
+           LEFT JOIN invoice_payment_category_splits split
+             ON split.payment_transaction_id = payment.id
+           WHERE payment.invoice_id = $1
+             AND payment.transaction_type = 'payment'
              AND NOT EXISTS (
                  SELECT 1 FROM invoice_payment_transactions reversal
-                 WHERE reversal.reverses_transaction_id = split.payment_transaction_id
+                 WHERE reversal.reverses_transaction_id = payment.id
                    AND reversal.transaction_type = 'reversal'
              )
-           ORDER BY split.created_at, split.payment_transaction_id"#,
+           ORDER BY payment.created_at, payment.id"#,
     )
     .bind(advance_id)
     .fetch_all(&mut *conn)
     .await?;
-    Ok(values.iter().filter_map(rows_from_json).collect())
+    rows.into_iter()
+        .map(|row| {
+            Ok(AdvancePayment {
+                id: row.try_get("id")?,
+                amount: row.try_get("amount_gross")?,
+                created_by: row.try_get("created_by")?,
+                rows: row
+                    .try_get::<Option<Value>, _>("rows")?
+                    .and_then(|value| rows_from_json(&value)),
+            })
+        })
+        .collect()
+}
+
+/// The advance's retained cash (payments less refunds) from the journal, not
+/// `paid_amount` (inside a payment transaction the column is refreshed only
+/// at its end), and what the advance still charges after credit notes.
+async fn advance_cash(
+    conn: &mut PgConnection,
+    advance_id: Uuid,
+) -> Result<(Decimal, Decimal), sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT COALESCE((SELECT SUM(CASE WHEN payment.transaction_type = 'payment'
+                                            THEN payment.amount_gross ELSE -payment.amount_gross END)
+                            FROM invoice_payment_transactions payment
+                            WHERE payment.invoice_id = invoice.id), 0)
+                  - COALESCE((SELECT SUM(CASE WHEN refund.transaction_type = 'refund'
+                                              THEN refund.amount_gross ELSE -refund.amount_gross END)
+                              FROM invoice_refund_transactions refund
+                              WHERE refund.invoice_id = invoice.id), 0) AS cash,
+                  invoice.total_gross - invoice.credited_amount AS capacity
+           FROM invoices invoice WHERE invoice.id = $1"#,
+    )
+    .bind(advance_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match row {
+        Some(row) => (row.try_get("cash")?, row.try_get("capacity")?),
+        None => (Decimal::ZERO, Decimal::ZERO),
+    })
+}
+
+fn capped_cash(cash: Decimal, capacity: Decimal) -> Decimal {
+    cash.min(capacity).max(Decimal::ZERO)
 }
 
 /// What the advance's retained cash paid per category.
@@ -532,28 +742,106 @@ pub(super) async fn advance_paid(
     advance_id: Uuid,
 ) -> Result<(Vec<VatBreakdownRow>, Vec<VatBreakdownRow>), sqlx::Error> {
     let rows = advance_rows(conn, advance_id).await?;
-    // From the journal, not `paid_amount`: inside a payment transaction the
-    // column is refreshed only at its end.
-    let cash = sqlx::query_scalar::<_, Decimal>(
-        r#"SELECT GREATEST(LEAST(
-                      COALESCE((SELECT SUM(CASE WHEN payment.transaction_type = 'payment'
-                                                THEN payment.amount_gross ELSE -payment.amount_gross END)
-                                FROM invoice_payment_transactions payment
-                                WHERE payment.invoice_id = invoice.id), 0)
-                      - COALESCE((SELECT SUM(CASE WHEN refund.transaction_type = 'refund'
-                                                  THEN refund.amount_gross ELSE -refund.amount_gross END)
-                                  FROM invoice_refund_transactions refund
-                                  WHERE refund.invoice_id = invoice.id), 0),
-                      invoice.total_gross - invoice.credited_amount), 0)
-           FROM invoices invoice WHERE invoice.id = $1"#,
+    let (cash, capacity) = advance_cash(conn, advance_id).await?;
+    let payments = advance_payments(conn, advance_id).await?;
+    let paid = paid_rows(&rows, &payments, capped_cash(cash, capacity));
+    Ok((rows, paid))
+}
+
+/// Whether the invoice is an advance whose lines carry their amounts (its
+/// cash is split per VAT category).
+async fn is_categorised_advance(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let is_advance = sqlx::query_scalar::<_, bool>(
+        "SELECT invoice_type = 'advance' FROM invoices WHERE id = $1",
     )
-    .bind(advance_id)
+    .bind(invoice_id)
     .fetch_optional(&mut *conn)
     .await?
-    .unwrap_or(Decimal::ZERO);
-    let splits = manual_payment_splits(conn, advance_id).await?;
-    let paid = advance_paid_rows(&rows, &splits, cash);
-    Ok((rows, paid))
+    .unwrap_or(false);
+    Ok(is_advance && settlement_rows(conn, invoice_id).await?.is_some())
+}
+
+/// Freezes the split of a payment just recorded on an advance (inside its
+/// transaction, before its booking): payments recorded before splits were
+/// frozen first get the split the former reading gives them, then the new
+/// payment, unless staff set its split by hand, gets the pro rata split of
+/// what is open (QA 2026-11-16 S1-1).
+pub(super) async fn freeze_advance_payment(
+    conn: &mut PgConnection,
+    advance_id: Uuid,
+    payment_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    if !is_categorised_advance(conn, advance_id).await? {
+        return Ok(());
+    }
+    let rows = advance_rows(conn, advance_id).await?;
+    let (cash, capacity) = advance_cash(conn, advance_id).await?;
+    let mut payments = advance_payments(conn, advance_id).await?;
+    let Some(index) = payments.iter().position(|payment| payment.id == payment_id) else {
+        return Ok(());
+    };
+    let payment = payments.remove(index);
+    let cash_before = capped_cash(cash - payment.amount, capacity);
+    for (id, split) in legacy_payment_rows(&rows, &payments, cash_before) {
+        let Some(earlier) = payments.iter_mut().find(|item| item.id == id) else {
+            continue;
+        };
+        insert_frozen_split(conn, advance_id, id, &split, earlier.created_by).await?;
+        earlier.rows = Some(split);
+    }
+    if payment.rows.is_none() {
+        let paid_before = paid_rows(&rows, &payments, cash_before);
+        let split = pro_rata_payment_rows(&rows, &paid_before, payment.amount);
+        insert_frozen_split(conn, advance_id, payment.id, &split, payment.created_by).await?;
+    }
+    Ok(())
+}
+
+async fn insert_frozen_split(
+    conn: &mut PgConnection,
+    advance_id: Uuid,
+    payment_id: Uuid,
+    rows: &[VatBreakdownRow],
+    created_by: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO invoice_payment_category_splits (
+                payment_transaction_id, invoice_id, rows, created_by, manual
+           ) VALUES ($1, $2, $3, $4, FALSE)"#,
+    )
+    .bind(payment_id)
+    .bind(advance_id)
+    .bind(rows_to_json(rows))
+    .bind(created_by)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// What a categorised advance's cash paid per category, for its cash
+/// booking; `None` books as any invoice (not a categorised advance, or no
+/// payment of it has a stored split).
+pub(super) async fn advance_booking_rows(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Option<Vec<VatBreakdownRow>>, sqlx::Error> {
+    if !is_categorised_advance(conn, invoice_id).await? {
+        return Ok(None);
+    }
+    let payments = advance_payments(conn, invoice_id).await?;
+    if payments.iter().all(|payment| payment.rows.is_none()) {
+        return Ok(None);
+    }
+    let rows = advance_rows(conn, invoice_id).await?;
+    let (cash, capacity) = advance_cash(conn, invoice_id).await?;
+    Ok(Some(paid_rows(
+        &rows,
+        &payments,
+        capped_cash(cash, capacity),
+    )))
 }
 
 /// What an advance still holds per category: its paid cash less what its
@@ -778,6 +1066,132 @@ mod tests {
         // A later payment of 300 without split fills the open pass-through.
         let paid = advance_paid_rows(&advance, &[split], dec("969"));
         assert_eq!(paid, advance.to_vec());
+    }
+
+    fn payment(amount: &str, rows: Option<Vec<VatBreakdownRow>>) -> AdvancePayment {
+        AdvancePayment {
+            id: Uuid::new_v4(),
+            amount: dec(amount),
+            created_by: Uuid::nil(),
+            rows,
+        }
+    }
+
+    /// The A1 advance of QA 2026-11-16: 800 = 0 % 326,58 · 19 % 473,42
+    /// (VAT 75,59).
+    fn a1_advance() -> Vec<VatBreakdownRow> {
+        vec![
+            row(VatGroupKind::Taxed, "19", "75.59", "473.42"),
+            row(VatGroupKind::ZeroRated, "0", "0", "326.58"),
+        ]
+    }
+
+    /// S1-1: 300 pro rata, then 200 split by hand 50 @19 % / 150 @0 %. Each
+    /// payment keeps its own split; the manual one is not re-spread.
+    #[test]
+    fn a_manual_split_after_a_pro_rata_payment_is_kept_as_entered() {
+        let advance = a1_advance();
+        let first = pro_rata_payment_rows(&advance, &[], dec("300"));
+        assert_eq!(first[0].gross, dec("177.53"));
+        assert_eq!(first[0].vat, dec("28.35"));
+        assert_eq!(first[1].gross, dec("122.47"));
+        let manual = validate_payment_split(
+            &advance,
+            &first,
+            dec("200"),
+            &[
+                (category_for(false, dec("19")), dec("50")),
+                (category_for(false, Decimal::ZERO), dec("150")),
+            ],
+        )
+        .unwrap();
+        assert_eq!(manual[0].gross, dec("50"));
+        assert_eq!(manual[0].vat, dec("7.98"));
+        let payments = [payment("300", Some(first)), payment("200", Some(manual))];
+        let paid = paid_rows(&advance, &payments, dec("500"));
+        assert_eq!(paid[0].gross, dec("227.53"));
+        assert_eq!(paid[0].vat, dec("36.33"));
+        assert_eq!(paid[1].gross, dec("272.47"));
+        // Paid in full: the categories carry exactly the invoiced VAT.
+        let rest = pro_rata_payment_rows(&advance, &paid, dec("300"));
+        let payments = [
+            payments[0].clone(),
+            payments[1].clone(),
+            payment("300", Some(rest)),
+        ];
+        assert_eq!(paid_rows(&advance, &payments, dec("800")), advance);
+    }
+
+    /// A5: a manual split first, then a pro rata payment spreads over what is
+    /// still open; the manual part stays as entered.
+    #[test]
+    fn a_pro_rata_payment_after_a_manual_split_takes_what_is_open() {
+        let advance = vec![
+            row(VatGroupKind::Taxed, "19", "94.49", "591.78"),
+            row(VatGroupKind::ZeroRated, "0", "0", "408.22"),
+        ];
+        let manual = vec![row(VatGroupKind::ZeroRated, "0", "0", "300")];
+        let next = pro_rata_payment_rows(&advance, &manual, dec("200"));
+        assert_eq!(
+            next.iter().map(|row| row.gross).sum::<Decimal>(),
+            dec("200")
+        );
+        let payments = [
+            payment("300", Some(manual)),
+            payment("200", Some(next.clone())),
+        ];
+        let paid = paid_rows(&advance, &payments, dec("500"));
+        let zero = paid
+            .iter()
+            .find(|row| row.kind == VatGroupKind::ZeroRated)
+            .unwrap();
+        let next_zero = next
+            .iter()
+            .find(|row| row.kind == VatGroupKind::ZeroRated)
+            .unwrap();
+        assert_eq!(zero.gross, dec("300") + next_zero.gross);
+    }
+
+    /// Payments recorded before splits were frozen get, together, exactly
+    /// what the former reading gives today.
+    #[test]
+    fn legacy_payments_freeze_to_the_former_reading() {
+        let advance = a1_advance();
+        let manual = vec![
+            row(VatGroupKind::Taxed, "19", "7.98", "50"),
+            row(VatGroupKind::ZeroRated, "0", "0", "150"),
+        ];
+        let payments = [payment("300", None), payment("200", Some(manual.clone()))];
+        let former = advance_paid_rows(&advance, std::slice::from_ref(&manual), dec("500"));
+        let frozen = legacy_payment_rows(&advance, &payments, dec("500"));
+        assert_eq!(frozen.len(), 1);
+        let payments = [
+            payment("300", Some(frozen[0].1.clone())),
+            payment("200", Some(manual)),
+        ];
+        assert_eq!(paid_rows(&advance, &payments, dec("500")), former);
+        // Pure pro rata history: the former pro rata reading.
+        let payments = [payment("300", None), payment("100", None)];
+        let frozen = legacy_payment_rows(&advance, &payments, dec("400"));
+        let payments = frozen
+            .into_iter()
+            .map(|(_, rows)| payment("0", Some(rows)))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paid_rows(&advance, &payments, dec("400")),
+            deducted_advance_rows(&advance, dec("400"))
+        );
+    }
+
+    #[test]
+    fn refunded_cash_shrinks_every_category_alike() {
+        let advance = a1_advance();
+        let first = pro_rata_payment_rows(&advance, &[], dec("400"));
+        let paid = paid_rows(&advance, &[payment("400", Some(first))], dec("200"));
+        assert_eq!(
+            paid.iter().map(|row| row.gross).sum::<Decimal>(),
+            dec("200")
+        );
     }
 
     #[test]

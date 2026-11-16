@@ -95,6 +95,9 @@ pub(crate) struct CreditNotePdfContext {
     /// The corrected invoice's addressee (payer or patient). A correction is
     /// sent to the same party as the invoice and names it like the invoice.
     pub(super) recipient: Option<super::document::InvoiceRecipient>,
+    /// Cancellation document of a final invoice: the advances the final
+    /// deducted (released by the Storno), printed below the totals.
+    pub(super) deducted_advances: Vec<super::document::DeductedAdvance>,
 }
 
 fn setting(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
@@ -177,6 +180,7 @@ pub(crate) async fn load_credit_note_pdf_context(
     .await?;
     Ok(Some(CreditNotePdfContext {
         recipient,
+        deducted_advances: Vec::new(),
         credit_note_id,
         invoice_id,
         patient_id: row.try_get("patient_id")?,
@@ -271,7 +275,7 @@ pub(crate) async fn load_storno_pdf_context(
         r#"SELECT storno.id, storno.document_number, storno.reason, storno.issued_on,
                   storno.currency, storno.amount_net, storno.amount_vat, storno.amount_gross,
                   storno.line_items, storno.original_invoice_number,
-                  storno.original_invoice_date,
+                  storno.original_invoice_date, storno.deducted_advances,
                   invoice.patient_id, invoice.status,
                   invoice.portal_visible, invoice.hide_amounts_from_patient,
                   invoice.pdf_visible_to_patient,
@@ -318,6 +322,10 @@ pub(crate) async fn load_storno_pdf_context(
     let lines = lines_for_recipient(conn, lines, recipient.as_ref()).await?;
     Ok(Some(CreditNotePdfContext {
         recipient,
+        deducted_advances: super::storno::deducted_advances_from_json(
+            row.try_get::<Option<Value>, _>("deducted_advances")?
+                .as_ref(),
+        ),
         credit_note_id: row.try_get("id")?,
         invoice_id,
         patient_id: row.try_get("patient_id")?,
@@ -382,6 +390,18 @@ fn label(language: &str, key: &'static str) -> &'static str {
         ("ru", "storno_total") => "Сумма сторно",
         ("en", "storno_total") => "Cancellation total",
         (_, "storno_total") => "Stornobetrag",
+        ("uk", "storno_advances_heading") => "Плюс зараховані передоплати",
+        ("ru", "storno_advances_heading") => "Плюс зачтённые предоплаты",
+        ("en", "storno_advances_heading") => "Plus advance payments deducted",
+        (_, "storno_advances_heading") => "Zuzüglich verrechneter Anzahlungen",
+        ("uk", "storno_advances_statement") => "Передоплати, зараховані в рахунку, знову доступні.",
+        ("ru", "storno_advances_statement") => "Предоплаты, зачтённые в счёте, снова доступны.",
+        ("en", "storno_advances_statement") => {
+            "The advance payments deducted on the invoice are available again."
+        }
+        (_, "storno_advances_statement") => {
+            "Die mit der Rechnung verrechneten Anzahlungen stehen wieder zur Verfügung."
+        }
         ("uk", "refers_to") => "до рахунку",
         ("ru", "refers_to") => "к счёту",
         ("en", "refers_to") => "for invoice",
@@ -868,6 +888,80 @@ fn printed_lines(context: &CreditNotePdfContext) -> Vec<CreditNoteLine> {
     }
 }
 
+/// Cancellation document of a final invoice that deducted advances: the
+/// advances as the final listed them, re-added (the Storno releases them),
+/// and what remains, the negative of the final's «Verbleibender Betrag»
+/// (QA 2026-11-16 S2-3).
+fn render_released_advances(layout: &mut Layout, context: &CreditNotePdfContext, sign: Decimal) {
+    let language = context.language.as_str();
+    let currency = context.currency.as_str();
+    let amount_row = |layout: &mut Layout,
+                      text: &str,
+                      (net, vat, gross): (Decimal, Decimal, Decimal),
+                      bold: bool| {
+        let (net, vat, gross) = (
+            format_money(net, currency),
+            format_money(vat, currency),
+            format_money(gross, currency),
+        );
+        layout.row(
+            &[
+                (text, 76.0, Align::Left),
+                (net.as_str(), 32.0, Align::Right),
+                (vat.as_str(), 32.0, Align::Right),
+                (gross.as_str(), 32.0, Align::Right),
+            ],
+            false,
+            bold,
+        );
+    };
+    layout.space(3.0);
+    layout.row(
+        &[
+            (
+                label(language, "storno_advances_heading"),
+                76.0,
+                Align::Left,
+            ),
+            (label(language, "net"), 32.0, Align::Right),
+            (label(language, "vat_amount"), 32.0, Align::Right),
+            (label(language, "gross"), 32.0, Align::Right),
+        ],
+        true,
+        false,
+    );
+    let mut released = (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+    for advance in &context.deducted_advances {
+        let reference = super::invoice_pdf_advance_reference(language, advance);
+        layout.row(&[(reference.as_str(), 172.0, Align::Left)], false, false);
+        for row in &advance.rows {
+            let text = super::invoice_pdf_vat_group_label(language, row);
+            amount_row(layout, text.as_str(), (row.net, row.vat, row.gross), false);
+            released.0 += row.net;
+            released.1 += row.vat;
+            released.2 += row.gross;
+        }
+    }
+    if context.deducted_advances.len() > 1 {
+        amount_row(
+            layout,
+            super::invoice_pdf_label(language, "advances_total"),
+            released,
+            true,
+        );
+    }
+    amount_row(
+        layout,
+        super::invoice_pdf_label(language, "remaining_amount"),
+        (
+            sign * context.amount_net + released.0,
+            sign * context.amount_vat + released.1,
+            sign * context.amount_gross + released.2,
+        ),
+        true,
+    );
+}
+
 pub(crate) fn build_credit_note_pdf(
     context: &CreditNotePdfContext,
 ) -> Result<Vec<u8>, &'static str> {
@@ -1127,6 +1221,9 @@ pub(crate) fn build_credit_note_pdf(
             emphasized,
         );
     }
+    if is_storno && !context.deducted_advances.is_empty() {
+        render_released_advances(&mut layout, context, sign);
+    }
     layout.space(6.0);
     layout.paragraph(
         label(
@@ -1143,6 +1240,14 @@ pub(crate) fn build_credit_note_pdf(
         false,
         Tone::Muted,
     );
+    if is_storno && !context.deducted_advances.is_empty() {
+        layout.paragraph(
+            label(language, "storno_advances_statement"),
+            9.5,
+            false,
+            Tone::Muted,
+        );
+    }
 
     let mut warnings: Vec<PdfWarnMsg> = Vec::new();
     Ok(document
@@ -1641,6 +1746,7 @@ mod tests {
                 is_payer: true,
                 ..Default::default()
             }),
+            deducted_advances: Vec::new(),
         }
     }
 
@@ -1710,6 +1816,62 @@ mod tests {
             storno_pdf_filename("STORNO-20260928-0001"),
             "STORNORECHNUNG-STORNO-20260928-0001.pdf"
         );
+    }
+
+    /// QA 2026-11-16 S2-3 (INV-20261116-0062): the final asked 1.647,30 /
+    /// 33,80 VAT after 1.700,00 / 93,50 VAT of advances; its Storno states
+    /// the released advances and the negative of that remaining amount.
+    #[test]
+    fn storno_of_a_final_mirrors_its_deducted_advances() {
+        use super::super::document::{DeductedAdvance, VatBreakdownRow, VatGroupKind};
+        let row = |kind, rate: &str, vat: &str, gross: &str| VatBreakdownRow {
+            kind,
+            rate: dec(rate),
+            net: dec(gross) - dec(vat),
+            vat: dec(vat),
+            gross: dec(gross),
+        };
+        let mut storno = context(None, STORNO_DOCUMENT);
+        storno.document_number = "STORNO-20261116-0010".to_string();
+        storno.amount_net = dec("3220.00");
+        storno.amount_vat = dec("127.30");
+        storno.amount_gross = dec("3347.30");
+        storno.deducted_advances = vec![
+            DeductedAdvance {
+                invoice_number: "INV-20261116-0058".to_string(),
+                issue_date: NaiveDate::from_ymd_opt(2026, 11, 16).unwrap(),
+                rows: vec![
+                    row(VatGroupKind::Taxed, "19", "41.79", "261.71"),
+                    row(VatGroupKind::ZeroRated, "0", "0", "238.29"),
+                ],
+            },
+            DeductedAdvance {
+                invoice_number: "INV-20261116-0061".to_string(),
+                issue_date: NaiveDate::from_ymd_opt(2026, 11, 16).unwrap(),
+                rows: vec![
+                    row(VatGroupKind::Taxed, "19", "51.71", "323.88"),
+                    row(VatGroupKind::ZeroRated, "0", "0", "223.42"),
+                    row(VatGroupKind::Passthrough, "0", "0", "652.70"),
+                ],
+            },
+        ];
+        let bytes = build_credit_note_pdf(&storno).unwrap();
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(
+            text.to_lowercase()
+                .contains("zuzüglich verrechneter anzahlungen"),
+            "{text}"
+        );
+        assert!(text.contains("INV-20261116-0058"), "{text}");
+        assert!(text.contains("Summe Anzahlungen"), "{text}");
+        assert!(text.contains("1.700,00"), "{text}");
+        assert!(text.contains("93,50"), "{text}");
+        assert!(text.contains("Verbleibender Betrag"), "{text}");
+        assert!(text.contains("-1.647,30"), "{text}");
+        assert!(text.contains("-1.613,50"), "{text}");
+        assert!(text.contains("-33,80"), "{text}");
+        assert!(text.contains("-3.347,30"), "{text}");
+        assert!(text.contains("wieder zur Verfügung"), "{text}");
     }
 
     #[test]

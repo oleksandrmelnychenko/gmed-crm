@@ -2451,3 +2451,361 @@ async fn a_part_payment_on_an_advance_can_be_split_by_hand() {
         .unwrap();
     assert_eq!(taxed["open_gross"], "0");
 }
+
+/// QA 2026-11-16 (verify-A A1): an advance of 800 (19 % 473,42 incl. 75,59
+/// VAT, 0 % 326,58) paid 300 without a split, then 200 split by hand 50 @19 %
+/// / 150 @0 %. Each payment keeps its split (S1-1): the manual payment books
+/// 7,98 VAT, the final deducts 227,53 / 36,33 VAT + 272,47. The order panel
+/// asks the advance's own open rest (S2-1). The Storno of the final states
+/// the released advances and the negative of what the final asked (S2-3).
+#[tokio::test]
+async fn a_manual_split_after_a_pro_rata_payment_is_booked_and_deducted_as_entered() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("frozen-split");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    for user_id in [billing_id, manager_id] {
+        seed_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let advance: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by,
+                issued_at
+           ) VALUES ($1, $2, $3, 'advance', 'sent', CURRENT_DATE + 14, 724.41, 75.59, 800, 0,
+                     $4, $5, now() - interval '1 day')
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-adv"))
+    .bind(json!([
+        {"description": "Anzahlung – Anteil 19 % USt.", "quantity": "1", "unit_price": "397.83",
+         "vat_rate": "19", "is_cost_passthrough": false, "line_net": "397.83", "line_vat": "75.59",
+         "line_gross": "473.42", "source": "advance_prepayment"},
+        {"description": "Anzahlung – Anteil 0 % USt.", "quantity": "1", "unit_price": "326.58",
+         "vat_rate": "0", "is_cost_passthrough": false, "line_net": "326.58", "line_vat": "0",
+         "line_gross": "326.58", "source": "advance_prepayment"}
+    ]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let manager = auth_header_for(manager_id, "patient_manager");
+    let open_on_order = || {
+        let app = app.clone();
+        let manager = manager.clone();
+        async move {
+            let (status, economics) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/orders/{order_id}/economics"),
+                &manager,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{economics:?}");
+            money(&economics["actual"]["patient_open_gross"])
+        }
+    };
+    let pay = |amount: &str, split: Option<Value>| {
+        let app = app.clone();
+        let billing = billing.clone();
+        let mut body = json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": amount,
+            "payment_method": "bank_transfer",
+            "received_on": gmed_server::app_time::today().to_string(),
+        });
+        if let Some(split) = split {
+            body["category_split"] = split;
+        }
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/invoices/{advance}/payments"),
+                &billing,
+                Some(body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{body:?}");
+            Uuid::parse_str(body["payment_transaction_id"].as_str().unwrap()).unwrap()
+        }
+    };
+    let payment_vat = |payment: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Decimal>(
+                "SELECT COALESCE(SUM(amount_vat), 0) FROM accounting_entries
+                 WHERE source_invoice_payment_transaction_id = $1",
+            )
+            .bind(payment)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let dec = |value: &str| value.parse::<Decimal>().unwrap();
+
+    assert_eq!(open_on_order().await, dec("800"));
+    let first = pay("300", None).await;
+    // S2-1: 800 billed, 300 received: 500 still to receive (not 200).
+    assert_eq!(open_on_order().await, dec("500"));
+    let frozen = sqlx::query(
+        "SELECT manual, rows FROM invoice_payment_category_splits WHERE payment_transaction_id = $1",
+    )
+    .bind(first)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!frozen.get::<bool, _>("manual"));
+    let rows = frozen.get::<Value, _>("rows");
+    let taxed = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "taxed")
+        .unwrap()
+        .clone();
+    assert_eq!(money(&taxed["gross"]), dec("177.53"));
+    assert_eq!(money(&taxed["vat"]), dec("28.35"));
+    assert_eq!(payment_vat(first).await, dec("28.35"));
+
+    let second = pay(
+        "200",
+        Some(json!([
+            {"kind": "taxed", "vat_rate": "19", "amount_gross": "50"},
+            {"kind": "zero_rated", "amount_gross": "150"}
+        ])),
+    )
+    .await;
+    assert_eq!(payment_vat(second).await, dec("7.98"));
+    assert_eq!(open_on_order().await, dec("300"));
+    let detail = invoice_detail(&app, &billing, advance).await;
+    let categories = detail["advance_categories"]["categories"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let paid = |kind: &str| {
+        money(
+            &categories
+                .iter()
+                .find(|category| category["kind"] == kind)
+                .unwrap()["paid_gross"],
+        )
+    };
+    assert_eq!(paid("taxed"), dec("227.53"));
+    assert_eq!(paid("zero_rated"), dec("272.47"));
+    let (status, payments) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{advance}/payments"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{payments:?}");
+    let listed = payments["items"].as_array().unwrap().clone();
+    let split_of = |id: Uuid| {
+        listed
+            .iter()
+            .find(|item| item["id"] == id.to_string())
+            .unwrap()["category_split"]
+            .clone()
+    };
+    assert!(split_of(first).is_null(), "a pro rata split is not shown");
+    assert_eq!(split_of(second).as_array().unwrap().len(), 2);
+
+    // The final bills 19 % 1.000 (VAT 159,66) and 0 % 1.000.
+    let final_invoice: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, 'final', 'draft', CURRENT_DATE + 14, 1840.34, 159.66, 2000, 0, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(json!([
+        {"description": "Dolmetscher", "quantity": "1", "unit_price": "840.34",
+         "vat_rate": "19", "is_cost_passthrough": false, "line_net": "840.34",
+         "line_vat": "159.66", "line_gross": "1000"},
+        {"description": "Organisation", "quantity": "1", "unit_price": "1000",
+         "vat_rate": "0", "is_cost_passthrough": false, "line_net": "1000",
+         "line_vat": "0", "line_gross": "1000"}
+    ]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_invoice}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released:?}");
+    assert_eq!(money(&released["prepayment_applied_amount"]), dec("500"));
+    let vat_rows: Value = sqlx::query_scalar(
+        "SELECT vat_rows FROM invoice_prepayment_allocations WHERE target_invoice_id = $1",
+    )
+    .bind(final_invoice)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let deducted = |kind: &str, field: &str| {
+        money(
+            &vat_rows
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["kind"] == kind)
+                .unwrap()[field],
+        )
+    };
+    assert_eq!(deducted("taxed", "gross"), dec("227.53"));
+    assert_eq!(deducted("taxed", "vat"), dec("36.33"));
+    assert_eq!(deducted("zero_rated", "gross"), dec("272.47"));
+
+    // S2-3: the Storno of the final releases the deductions and states them.
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_invoice}/status"),
+        &billing,
+        Some(json!({ "status": "cancelled", "reason": "Falsche Positionen" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    let released_allocations: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_prepayment_allocations WHERE advance_invoice_id = $1",
+    )
+    .bind(advance)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(released_allocations, 0);
+    let storno = sqlx::query(
+        "SELECT amount_gross, deducted_advances FROM invoice_storno_documents
+         WHERE invoice_id = $1",
+    )
+    .bind(final_invoice)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(storno.get::<Decimal, _>("amount_gross"), dec("-2000"));
+    let advances = storno.get::<Value, _>("deducted_advances");
+    assert_eq!(advances[0]["invoice_number"], format!("INV-{tag}-adv"));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/invoices/{final_invoice}/storno/pdf"))
+                .header("Authorization", &billing)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap();
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(text.contains(&format!("INV-{tag}-adv")), "{text}");
+    assert!(text.contains("227,53"), "{text}");
+    // What the final asked: 2.000,00 − 500,00 = 1.500,00, VAT 159,66 − 36,33.
+    assert!(text.contains("-1.500,00"), "{text}");
+    assert!(text.contains("-123,33"), "{text}");
+}
+
+/// A payment recorded before splits were frozen keeps the former pro rata
+/// reading: the next payment freezes it with exactly that split (QA
+/// 2026-11-16 S1-1, historic results stay stable).
+#[tokio::test]
+async fn an_earlier_unsplit_payment_is_frozen_with_its_former_reading() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("legacy-split");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let advance: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, $3, 'advance', 'sent', CURRENT_DATE + 14, 724.41, 75.59, 800, 0,
+                     $4, $5)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-adv"))
+    .bind(json!([
+        {"description": "Anzahlung – Anteil 19 % USt.", "quantity": "1", "unit_price": "397.83",
+         "vat_rate": "19", "is_cost_passthrough": false, "line_net": "397.83", "line_vat": "75.59",
+         "line_gross": "473.42", "source": "advance_prepayment"},
+        {"description": "Anzahlung – Anteil 0 % USt.", "quantity": "1", "unit_price": "326.58",
+         "vat_rate": "0", "is_cost_passthrough": false, "line_net": "326.58", "line_vat": "0",
+         "line_gross": "326.58", "source": "advance_prepayment"}
+    ]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // As recorded before this change: a journal row without a split.
+    let earlier: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, request_id, amount_gross, payment_method,
+                received_on, created_by
+           ) VALUES ($1, 'payment', $2, 300, 'bank_transfer', CURRENT_DATE, $3)
+           RETURNING id"#,
+    )
+    .bind(advance)
+    .bind(Uuid::new_v4())
+    .bind(billing_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    record_payment(&app, &billing, advance, Uuid::new_v4(), 100, "NEXT").await;
+    let rows: Value = sqlx::query_scalar(
+        "SELECT rows FROM invoice_payment_category_splits
+         WHERE payment_transaction_id = $1 AND NOT manual",
+    )
+    .bind(earlier)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let taxed = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "taxed")
+        .unwrap()
+        .clone();
+    // Pro rata of 300 over 800: 177,53 incl. 28,35 VAT.
+    assert_eq!(money(&taxed["gross"]), "177.53".parse::<Decimal>().unwrap());
+    assert_eq!(money(&taxed["vat"]), "28.35".parse::<Decimal>().unwrap());
+    let detail = invoice_detail(&app, &billing, advance).await;
+    let paid_taxed = detail["advance_categories"]["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|category| category["kind"] == "taxed")
+        .unwrap()["paid_gross"]
+        .clone();
+    // 400 of 800 paid pro rata: 236,71 of 473,42.
+    assert_eq!(money(&paid_taxed), "236.71".parse::<Decimal>().unwrap());
+}

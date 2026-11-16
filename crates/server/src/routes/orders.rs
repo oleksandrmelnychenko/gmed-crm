@@ -4934,6 +4934,21 @@ fn economics_money(value: rust_decimal::Decimal) -> String {
     money::money_string(value)
 }
 
+/// What the patient still has to pay on an order («Осталось получить»):
+/// paid advance cash not applied yet settles the order's open settlement
+/// invoices, never the advances' own open rest (QA 2026-11-16 S2-1: an
+/// advance of 1.000 paid 400 still asks 600); overpaid cash is netted last.
+fn order_patient_open_gross(
+    invoice_outstanding: rust_decimal::Decimal,
+    advance_outstanding: rust_decimal::Decimal,
+    advance_available: rust_decimal::Decimal,
+    patient_credit: rust_decimal::Decimal,
+) -> rust_decimal::Decimal {
+    let zero = rust_decimal::Decimal::ZERO;
+    let settlement_open = (invoice_outstanding - advance_available.max(zero)).max(zero);
+    (settlement_open + advance_outstanding.max(zero) - patient_credit.max(zero)).max(zero)
+}
+
 /// Net revenue and partner cost of an order's pass-through services.
 #[derive(Debug, Default, Clone, Copy)]
 struct PassthroughAmounts {
@@ -5224,15 +5239,16 @@ async fn get_order_economics(
         .unwrap_or(rust_decimal::Decimal::ZERO);
     // Unpaid advances are open too, as the portal shows them (QA 2026-11-01,
     // T3-9: an order with only an issued advance read 0,00).
-    let patient_open_gross = (invoice
-        .try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross")
-        .unwrap_or(rust_decimal::Decimal::ZERO)
-        + advances
+    let patient_open_gross = order_patient_open_gross(
+        invoice
+            .try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross")
+            .unwrap_or(rust_decimal::Decimal::ZERO),
+        advances
             .try_get::<rust_decimal::Decimal, _>("advance_outstanding_gross")
-            .unwrap_or(rust_decimal::Decimal::ZERO)
-        - advance_available_gross
-        - patient_credit_gross)
-        .max(rust_decimal::Decimal::ZERO);
+            .unwrap_or(rust_decimal::Decimal::ZERO),
+        advance_available_gross,
+        patient_credit_gross,
+    );
 
     let external = match sqlx::query(
         r#"SELECT
@@ -15077,6 +15093,30 @@ async fn ensure_order_service_patient_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paid_advance_cash_never_nets_the_advance_itself() {
+        let dec = |value: &str| value.parse::<rust_decimal::Decimal>().unwrap();
+        // A4: advance 1.000 paid 400, no settlement invoice yet.
+        assert_eq!(
+            order_patient_open_gross(dec("0"), dec("600"), dec("400"), dec("0")),
+            dec("600")
+        );
+        // A1: 800 billed, 500 received.
+        assert_eq!(
+            order_patient_open_gross(dec("0"), dec("300"), dec("500"), dec("0")),
+            dec("300")
+        );
+        // An open final of 1.000 is settled by the 400 held on the advance.
+        assert_eq!(
+            order_patient_open_gross(dec("1000"), dec("600"), dec("400"), dec("0")),
+            dec("1200")
+        );
+        assert_eq!(
+            order_patient_open_gross(dec("100"), dec("0"), dec("0"), dec("150")),
+            dec("0")
+        );
+    }
 
     #[test]
     fn order_numbers_carry_the_german_date() {

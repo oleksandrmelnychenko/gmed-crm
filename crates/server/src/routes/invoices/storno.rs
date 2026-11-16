@@ -6,7 +6,9 @@
 //! invoice line with negative amounts, summed per VAT rate. Its PDF is stored
 //! in the same transaction; the invoice and its cancellation document net to
 //! zero in the patient's account. A draft cancelled before release was never
-//! issued and gets no document.
+//! issued and gets no document. A final invoice that deducted advances
+//! states them on its cancellation document too (they are released by the
+//! Storno), so the document mirrors what the final asked (QA 2026-11-16).
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
@@ -15,7 +17,8 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use super::credit_notes::{self, CreditNoteLine};
-use super::release;
+use super::document::DeductedAdvance;
+use super::{advance_rows, release};
 use crate::money::{self, CommercialRounding};
 
 /// Lines and totals of a cancellation document, with positive amounts (the
@@ -117,6 +120,7 @@ pub(crate) async fn issue_storno_tx(
     conn: &mut PgConnection,
     invoice_id: Uuid,
     reason: &str,
+    deducted_advances: &[DeductedAdvance],
     actor: Uuid,
 ) -> Result<IssuedStorno, sqlx::Error> {
     let invoice = sqlx::query(
@@ -152,8 +156,9 @@ pub(crate) async fn issue_storno_tx(
         r#"INSERT INTO invoice_storno_documents (
                 invoice_id, document_number, issued_on, reason,
                 original_invoice_number, original_invoice_date, currency,
-                amount_net, amount_vat, amount_gross, line_items, vat_breakdown, created_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                amount_net, amount_vat, amount_gross, line_items, vat_breakdown, created_by,
+                deducted_advances
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -169,6 +174,7 @@ pub(crate) async fn issue_storno_tx(
     .bind(line_items)
     .bind(vat_breakdown)
     .bind(actor)
+    .bind((!deducted_advances.is_empty()).then(|| deducted_advances_to_json(deducted_advances)))
     .fetch_one(&mut *conn)
     .await?;
     Ok(IssuedStorno {
@@ -177,6 +183,38 @@ pub(crate) async fn issue_storno_tx(
         issued_on,
         amount_gross: -plan.gross,
     })
+}
+
+/// The advances a cancelled final deducted, as stored on its cancellation
+/// document: number, date and the rows per VAT category it deducted.
+pub(crate) fn deducted_advances_to_json(advances: &[DeductedAdvance]) -> Value {
+    Value::Array(
+        advances
+            .iter()
+            .map(|advance| {
+                json!({
+                    "invoice_number": advance.invoice_number,
+                    "issue_date": advance.issue_date.to_string(),
+                    "rows": advance_rows::rows_to_json(&advance.rows),
+                })
+            })
+            .collect(),
+    )
+}
+
+pub(super) fn deducted_advances_from_json(value: Option<&Value>) -> Vec<DeductedAdvance> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            Some(DeductedAdvance {
+                invoice_number: item.get("invoice_number")?.as_str()?.to_string(),
+                issue_date: item.get("issue_date")?.as_str()?.parse().ok()?,
+                rows: advance_rows::rows_from_json(item.get("rows")?)?,
+            })
+        })
+        .collect()
 }
 
 /// The cancellation document of an invoice for the invoice detail, with its
