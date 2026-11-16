@@ -40,6 +40,8 @@ import { ownServicesGrossOfSelection } from "@/components/order-budget/order-bud
 import { partlyCreditedHint } from "../model/billing-release";
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
+import { finalInvoiceTotals } from "../model/final-invoice";
+import { FinalInvoiceLines, FinalInvoiceSettlement } from "./final-invoice-lines";
 import type { CreateForm, InvoiceType, PrepaymentAdvancePreview, QuoteOption } from "../model/types";
 import { appDateKey } from "@/lib/app-time-zone";
 import { INVOICE_PAYMENT_METHODS } from "../model/payment-correction";
@@ -137,7 +139,12 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
       }
     : null;
   const previewError = prepaymentMode ? currentPreview?.error ?? null : null;
-  const selectionTotals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
+  const final = form.invoiceType === "final";
+  // Delivered services of the order outside the quote: a final invoice proposes them (owner 2026-11-17).
+  const extras = selectedQuote?.delivered_services_outside_quote ?? [];
+  const selectionTotals = final
+    ? finalInvoiceTotals(lines, form, extras)
+    : calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
   const packageOverage = prepaymentMode
     ? { net: 0, vat: 0, gross: 0 }
     : invoiceSelectionPackageOverage(selectedQuote, lines, form);
@@ -155,7 +162,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const overOpenAdvance = interimLimit != null && selectionTotals.gross > interimLimit.maxGross;
   const selectionValid = prepaymentMode
     ? quoteAvailable && Boolean(prepaymentSplit && prepaymentSplit.gross > 0)
-    : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form)) && totals.gross > 0 && !overOpenAdvance;
+    : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form, extras)) && (totals.gross > 0 || final) && !overOpenAdvance;
   // Money received before the invoice (Billing/CEO) and the service period
   // (owner 2026-11-17); the release records the payment with its day.
   const canRecordPayment = hasCapability(user, "invoices.finance");
@@ -179,8 +186,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
       : (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.")
     : null);
   const footerError = Boolean(error || optionsError || previewError);
-  const final = form.invoiceType === "final";
-  const servicesOutsideQuote = selectedQuote?.services_outside_quote ?? [];
   // Transit lines billed while receipts of the order are already re-billed:
   // the same cost may be billed twice (owner 2026-11-12, C-2). Warning only.
   const selectedTransitLines = prepaymentMode
@@ -204,7 +209,9 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const descriptionLabel = de ? "Leistungsbeschreibung" : "Описание услуги";
   const commentLabel = de ? "Anmerkung auf der Rechnung" : "Примечание в счёте";
   const commentPlaceholder = de ? "z. B. 2. und 3. Quartal 2026" : "например: за 2 и 3 квартал 2026";
-  const availableCount = lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
+  const availableCount = final
+    ? lines.length + extras.length
+    : lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
   // Quotes this type hides, with why: staff looked for them under the default
   // type without a word (QA 2026-11-01, X3 NEW-3).
@@ -237,7 +244,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       const quote = selectableQuotes.find((item) => item.id === event.target.value);
                       onFormChange((current) => ({
                         ...current, quoteId: quote?.id ?? "",
-                        ...createInvoiceLineSelection(quote?.line_items ?? [], current.invoiceType),
+                        ...createInvoiceLineSelection(quote?.line_items ?? [], current.invoiceType, quote?.delivered_services_outside_quote),
                         // Remarks belong to the positions of the previous quote.
                         lineComments: {},
                       }));
@@ -275,7 +282,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       value={form.invoiceType}
                       onChange={(event) => {
                         const invoiceType = event.target.value as InvoiceType;
-                        onFormChange((current) => ({ ...current, invoiceType, ...createInvoiceLineSelection(lines, invoiceType) }));
+                        onFormChange((current) => ({ ...current, invoiceType, ...createInvoiceLineSelection(lines, invoiceType, extras) }));
                       }}
                       className={selectClass}
                     >
@@ -288,13 +295,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       onChange={(value) => onFormChange((current) => ({ ...current, dueDate: value }))} />
                   </FormField>
                 </div>
-                {final && servicesOutsideQuote.length ? (
-                  <p role="status" data-testid="invoice-services-outside-quote" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
-                    {de
-                      ? `Nicht in dieser Rechnung: ${servicesOutsideQuote.join(", ")}. Diese Leistungen sind erbracht, stehen aber nicht im Angebot. Der Auftrag lässt sich erst abschließen, wenn sie abgerechnet sind: Erstellen Sie ein neues Angebot.`
-                      : `Не войдёт в этот счёт: ${servicesOutsideQuote.join(", ")}. Эти услуги оказаны, но их нет в предложении. Заказ нельзя будет завершить, пока они не выставлены: создайте новое предложение.`}
-                  </p>
-                ) : null}
                 {transitRebilledWarning ? (
                   <p role="status" data-testid="invoice-transit-rebilled-warning" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
                     {transitRebilledWarning}
@@ -415,7 +415,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 <section aria-label={de ? "Rechnungspositionen" : "Позиции счёта"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
                     <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={ListOrdered}>{de ? "Rechnungspositionen" : "Позиции счёта"}</SectionHeading>
-                      {selectedQuote ? <CountBadge>{form.selectedLineIndexes.length} / {availableCount}</CountBadge> : null}
+                      {selectedQuote && !final ? <CountBadge>{form.selectedLineIndexes.length} / {availableCount}</CountBadge> : null}
                     </h3>
                     {selectedQuote && !final && availableCount > 0 ? (
                       <Button type="button" variant="ghost" size="sm" disabled={busy}
@@ -436,6 +436,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       <FileText className="size-6" />
                       <p className="text-sm">{t.invoices_workspace_choose_quote}</p>
                     </div>
+                  ) : final ? (
+                    <FinalInvoiceLines lines={lines} extras={extras} form={form} busy={busy} money={money} onFormChange={onFormChange} />
                   ) : (
                     <div className="divide-y divide-border">
                       {lines.map((line, index) => {
@@ -542,7 +544,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
                   {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross)} testId="invoice-create-budget" /> : null}
-                  {selectedQuote && !prepaymentMode && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
+                  {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} /> : null}
+                  {selectedQuote && !prepaymentMode && !final && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>
             </div>

@@ -127,6 +127,7 @@ import {
 import { CREDIT_TRANSFER_METHOD, creditablePrepayments, overpaymentConfirmed, paymentOverpayment } from "./model/overpayment";
 import { CreditBalancePanel } from "./ui/credit-balance-panel";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
+import { finalOrderServicesPayload } from "./model/final-invoice";
 import { InvoiceLineComment } from "./ui/invoice-line-comment";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
@@ -1234,8 +1235,9 @@ function useStaffInvoicesPageContent() {
 
   useEffect(() => {
     if (!createOpen || !selectedCreateQuote?.line_items.length) return;
-    if (createForm.invoiceType !== "final" && Object.keys(createForm.lineQuantities).length > 0) return;
-    const selection = createInvoiceLineSelection(selectedCreateQuote.line_items, createForm.invoiceType);
+    // The quantities staff typed stay; a final invoice line is editable too (owner 2026-11-17).
+    if (Object.keys(createForm.lineQuantities).length > 0) return;
+    const selection = createInvoiceLineSelection(selectedCreateQuote.line_items, createForm.invoiceType, selectedCreateQuote.delivered_services_outside_quote);
     if (!hasFormChanges({ selectedLineIndexes: createForm.selectedLineIndexes, lineQuantities: createForm.lineQuantities }, selection)) return;
     setCreateForm((current) => ({
       ...current,
@@ -2072,7 +2074,8 @@ function useStaffInvoicesPageContent() {
     const prepaymentAdvance =
       effectiveAdvanceBasis(createForm, selectedCreateQuote) === "prepayment";
     const overageOnly = isOverageOnlyInvoice(selectedCreateQuote, createForm);
-    if (!prepaymentAdvance && !overageOnly && !isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm)) {
+    const deliveredServices = selectedCreateQuote.delivered_services_outside_quote ?? [];
+    if (!prepaymentAdvance && !overageOnly && !isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm, deliveredServices)) {
       setCreateError(lang === "de" ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.");
       return;
     }
@@ -2098,6 +2101,9 @@ function useStaffInvoicesPageContent() {
             internal_note: createForm.internalNote.trim() || null,
             ...(overageOnly ? {} : { line_items: selectedLines }),
             ...documentTerms,
+            ...(createForm.invoiceType === "final"
+              ? { order_services: finalOrderServicesPayload(createForm, deliveredServices) }
+              : {}),
           });
       clearApiCache();
       setCreateOpen(false);
@@ -3133,7 +3139,11 @@ function useStaffInvoicesPageContent() {
           ...blankCreateForm(filters.quoteId),
           invoiceType: createForm.invoiceType,
           dueDate: createDefaultDueDate,
-          ...createInvoiceLineSelection(quotes.find((quote) => quote.id === filters.quoteId)?.line_items ?? [], createForm.invoiceType),
+          ...createInvoiceLineSelection(
+            quotes.find((quote) => quote.id === filters.quoteId)?.line_items ?? [],
+            createForm.invoiceType,
+            quotes.find((quote) => quote.id === filters.quoteId)?.delivered_services_outside_quote,
+          ),
         })}
         optionsBusy={optionsBusy}
         error={createError}

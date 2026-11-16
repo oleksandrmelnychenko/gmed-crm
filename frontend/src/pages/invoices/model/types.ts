@@ -79,6 +79,26 @@ export type InvoiceLineItem = {
   invoiced_gross?: string;
   remaining_quantity?: string;
   fully_invoiced?: boolean;
+  /** Unit of the quote line, e.g. "hour". */
+  unit?: string | null;
+  /** Quote API: the order records the delivery of the line, or not («по смете»). */
+  delivery_basis?: "actual" | "estimate";
+  /** Quote API: what a final invoice proposes for the line itself. */
+  final_quantity?: string;
+};
+
+/** A delivered, unbilled order service no quote line links (final invoice). */
+export type DeliveredOrderService = {
+  order_leistung_id: string;
+  description: string;
+  name: string;
+  unit?: string | null;
+  quantity: string;
+  unit_price: string;
+  vat_rate: string;
+  is_cost_passthrough: boolean;
+  /** The quote line of the same catalogue service, if any. */
+  quote_line_index: number | null;
 };
 
 export type InvoicePrepaymentOption = {
@@ -609,6 +629,8 @@ export type QuoteOption = {
   final_invoice_credited?: boolean;
   /** Delivered services of the order no line of this quote bills. */
   services_outside_quote?: string[];
+  /** The same, unbilled, with their terms: a final invoice proposes them. */
+  delivered_services_outside_quote?: DeliveredOrderService[];
   /** Approved package overage a settlement invoice adds to the quote lines. */
   open_package_overage_net?: string;
   open_package_overage_gross?: string;
@@ -659,6 +681,8 @@ export type CreateForm = {
   receivedPayment: ReceivedPaymentForm;
   /** The service period typed by staff; null = the order's planned one. */
   servicePeriod: ServicePeriodForm | null;
+  /** Final invoice: quantities of delivered services outside the quote, by order service id. */
+  orderServiceQuantities?: Record<string, string>;
 };
 
 export type StatusForm = {

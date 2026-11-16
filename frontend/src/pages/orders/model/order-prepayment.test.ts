@@ -15,6 +15,8 @@ describe("orderNotYetBilledGross", () => {
     expect(orderNotYetBilledGross(714, "827.05")).toBe(0);
     expect(orderNotYetBilledGross("550", "550.00")).toBe(0);
     expect(orderNotYetBilledGross(undefined, undefined)).toBe(0);
+    // An issued final invoice settles the order with what was delivered.
+    expect(orderNotYetBilledGross("788", "550", true)).toBe(0);
   });
 });
 

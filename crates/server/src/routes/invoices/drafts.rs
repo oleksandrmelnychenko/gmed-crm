@@ -379,6 +379,7 @@ fn lines_mode(draft: &DraftRow) -> LinesMode {
     }
     let from_quote = lines.iter().all(|line| {
         line_source(line) == Some("service_package_overage")
+            || (draft.invoice_type == "final" && super::final_delivery::is_order_service_line(line))
             || (line.get("quote_line_index").is_some_and(Value::is_u64)
                 && line_source(line).is_none_or(|source| {
                     !matches!(source, "advance_prepayment" | "external_invoice")
@@ -451,6 +452,7 @@ pub(super) async fn get_invoice_draft_editor(
     }
     let mut mode = lines_mode(&draft);
     let mut quote_lines = Vec::new();
+    let mut order_service_lines = Vec::<Value>::new();
     let mut advance = Value::Null;
     if let (LinesMode::QuotePositions | LinesMode::AdvanceSplit, Some(quote_id)) =
         (mode, draft.quote_id)
@@ -496,7 +498,13 @@ pub(super) async fn get_invoice_draft_editor(
                 let quantity = invoice_json_decimal(line, "quantity").unwrap_or(Decimal::ZERO);
                 selected.insert(index, (quantity, line_comments::line_comment(line)));
             }
-            for (line_index, item) in ctx.line_items.as_array().into_iter().flatten().enumerate() {
+            let source_lines = ctx.line_items.as_array().cloned().unwrap_or_default();
+            let delivery = super::final_delivery::delivery_plan(
+                &source_lines,
+                &ctx.order_service_facts,
+                Some(invoice_id),
+            );
+            for (line_index, item) in source_lines.iter().enumerate() {
                 let service_id = item
                     .get("source_order_leistung_id")
                     .and_then(Value::as_str)
@@ -507,8 +515,12 @@ pub(super) async fn get_invoice_draft_editor(
                 let quoted = invoice_json_decimal(item, "quantity")
                     .unwrap_or(Decimal::ZERO)
                     .round_commercial(2);
+                let final_draft = draft.invoice_type == "final" && !draft.termination_final;
+                let line_delivery = delivery.lines.get(line_index).cloned().unwrap_or_default();
                 let billable = if draft.invoice_type == "advance" {
                     quoted
+                } else if final_draft {
+                    line_delivery.final_total(quoted)
                 } else {
                     service_id
                         .and_then(|id| ctx.service_quantities.get(&id).copied())
@@ -522,7 +534,7 @@ pub(super) async fn get_invoice_draft_editor(
                         .round_commercial(2))
                 .max(Decimal::ZERO);
                 let current = selected.get(&line_index);
-                if open <= Decimal::ZERO && current.is_none() {
+                if open <= Decimal::ZERO && current.is_none() && !final_draft {
                     continue;
                 }
                 // The editor's running total bills a part the way the server
@@ -551,7 +563,37 @@ pub(super) async fn get_invoice_draft_editor(
                     "billed_gross": decimal_to_string(billed.gross),
                     "selected_quantity": current.map(|(quantity, _)| decimal_to_string(*quantity)),
                     "comment": current.and_then(|(_, comment)| comment.clone()),
+                    "delivery_basis": if line_delivery.tracked() { "actual" } else { "estimate" },
+                    "quantity_capped": !final_draft,
                 }));
+            }
+            if draft.invoice_type == "final" && !draft.termination_final {
+                let current = super::final_delivery::current_order_service_lines(&draft.line_items);
+                order_service_lines = delivery
+                    .extras
+                    .iter()
+                    .map(|extra| {
+                        let mut value = super::final_delivery::extra_service_json(extra);
+                        let picked = current
+                            .iter()
+                            .find(|selection| selection.order_leistung_id == extra.fact.id);
+                        if let Some(map) = value.as_object_mut() {
+                            map.insert(
+                                "selected_quantity".to_string(),
+                                picked
+                                    .and_then(|selection| selection.quantity.parse_decimal())
+                                    .map_or(Value::Null, |quantity| {
+                                        json!(decimal_to_string(quantity))
+                                    }),
+                            );
+                            map.insert(
+                                "comment".to_string(),
+                                json!(picked.and_then(|selection| selection.comment.clone())),
+                            );
+                        }
+                        value
+                    })
+                    .collect();
             }
         } else {
             match load_prepayment_advance_groups(&state, &ctx).await {
@@ -632,6 +674,7 @@ pub(super) async fn get_invoice_draft_editor(
         "lines_mode": mode.name(),
         "lines_locked_reason": mode.reason(),
         "quote_lines": quote_lines,
+        "order_service_lines": order_service_lines,
         "advance": advance,
     }))
     .into_response()
@@ -662,6 +705,9 @@ pub(super) struct UpdateInvoiceDraftRequest {
     /// lines and the order.
     #[serde(default, deserialize_with = "document_terms::explicit_nullable")]
     service_period: Option<Option<document_terms::ServicePeriodInput>>,
+    /// Final drafts: the delivered services outside the quote it bills;
+    /// absent keeps the draft's own (`final_delivery`).
+    order_services: Option<Vec<super::final_delivery::OrderServiceSelection>>,
 }
 
 /// What the draft notes for its document and the period it states without
@@ -767,10 +813,18 @@ pub(super) async fn update_invoice_draft(
         },
     };
 
+    if body.order_services.is_some() && body.line_items.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Send the quote lines with the services outside the quote",
+        );
+    }
+
     let mode = lines_mode(&draft);
     let mut rebuilt: Option<(InvoiceCreationSnapshot, &'static str)> = None;
     // The quote lines the rebuilt allocations are checked against.
     let mut rebuilt_quote_lines = Value::Null;
+    let mut extra_service_ids = Vec::new();
     if let Some(items) = body.line_items.as_deref() {
         let (LinesMode::QuotePositions, Some(quote_id)) = (mode, draft.quote_id) else {
             return lines_locked(mode.reason().unwrap_or("other_sources"));
@@ -782,11 +836,37 @@ pub(super) async fn update_invoice_draft(
         if let Some(message) = closed_quote_invoice_message(&ctx.quote_status) {
             return err(StatusCode::UNPROCESSABLE_ENTITY, message);
         }
-        match build_selected_invoice_snapshot(&state, &ctx, &draft.invoice_type, Some(items)).await
-        {
-            Ok(snapshot) => rebuilt = Some((snapshot, "quote_positions")),
+        let mut snapshot =
+            match build_selected_invoice_snapshot(&state, &ctx, &draft.invoice_type, Some(items))
+                .await
+            {
+                Ok(snapshot) => snapshot,
+                Err(response) => return response,
+            };
+        let kept;
+        let selections = match body.order_services.as_deref() {
+            Some(selections) => selections,
+            None => {
+                kept = super::final_delivery::current_order_service_lines(&draft.line_items);
+                kept.as_slice()
+            }
+        };
+        match super::final_delivery::append_order_service_lines(
+            &mut snapshot,
+            &ctx,
+            &draft.invoice_type,
+            selections,
+        ) {
+            Ok(ids) => extra_service_ids = ids,
             Err(response) => return response,
         }
+        if snapshot.line_items.as_array().is_none_or(Vec::is_empty) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Select at least one invoice item",
+            );
+        }
+        rebuilt = Some((snapshot, "quote_positions"));
         rebuilt_quote_lines = ctx.line_items.clone();
     } else if let Some(split) = body.advance_split.as_deref() {
         let (LinesMode::AdvanceSplit, Some(quote_id)) = (mode, draft.quote_id) else {
@@ -874,6 +954,15 @@ pub(super) async fn update_invoice_draft(
         if *kind == "quote_positions" {
             let quote_id = locked.quote_id.unwrap_or_default();
             if let Err(response) = lock_invoiceable_quote_tx(&mut transaction, quote_id).await {
+                return response;
+            }
+            if let Err(response) = super::final_delivery::ensure_order_services_unbilled_tx(
+                &mut transaction,
+                Some(invoice_id),
+                &extra_service_ids,
+            )
+            .await
+            {
                 return response;
             }
             for statement in [

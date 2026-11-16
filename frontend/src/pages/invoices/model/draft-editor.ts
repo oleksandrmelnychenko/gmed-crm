@@ -7,7 +7,7 @@
  * (`PUT /invoices/{id}/draft`) checks everything again.
  */
 
-import { moneyLinePartAmounts, normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
+import { moneyFinalLinePartAmounts, moneyLinePartAmounts, normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
 
 import {
   receivedPaymentFormFrom,
@@ -39,6 +39,9 @@ export type DraftEditorQuoteLine = {
   line_gross?: string;
   selected_quantity: string | null;
   comment: string | null;
+  /** False on a final invoice: it bills the delivered quantity, above the quote too (owner 2026-11-17). */
+  quantity_capped?: boolean;
+  delivery_basis?: "actual" | "estimate";
 };
 
 export type DraftEditorAdvanceGroup = {
@@ -64,6 +67,8 @@ export type DraftEditorPayload = {
   /** The period of the lines and the order. */
   service_period_default?: { from: string; to: string } | null;
   quote_lines: DraftEditorQuoteLine[];
+  /** Final drafts: delivered services outside the quote (kept unless sent). */
+  order_service_lines?: { order_leistung_id: string; selected_quantity: string | null }[];
   advance: {
     amount_gross: string;
     allocation: "manual" | "own_services_first";
@@ -143,11 +148,12 @@ export type DraftLinesProblem = "no_line" | "quantity_invalid" | "quantity_over_
 export function draftLinesProblem(payload: DraftEditorPayload, form: DraftForm): DraftLinesProblem | null {
   if (payload.lines_mode !== "quote_positions") return null;
   const chosen = payload.quote_lines.filter((line) => form.lines[line.line_index]?.selected);
-  if (chosen.length === 0) return "no_line";
+  const keptServices = (payload.order_service_lines ?? []).some((line) => line.selected_quantity !== null);
+  if (chosen.length === 0 && !keptServices) return "no_line";
   for (const line of chosen) {
     const quantity = readQuantity(form.lines[line.line_index]?.quantity ?? "");
     if (!Number.isFinite(quantity) || quantity <= 0) return "quantity_invalid";
-    if (toCents(quantity) > toCents(Number(line.open_quantity))) return "quantity_over_open";
+    if (line.quantity_capped !== false && toCents(quantity) > toCents(Number(line.open_quantity))) return "quantity_over_open";
   }
   return null;
 }
@@ -175,7 +181,7 @@ export type SplitRow = { net: number; vat: number; gross: number };
  * never above that rest (QA 2026-11-15, A-1).
  */
 export function linePartAmounts(line: DraftEditorQuoteLine, quantity: number): SplitRow {
-  return moneyLinePartAmounts({
+  return (line.quantity_capped === false ? moneyFinalLinePartAmounts : moneyLinePartAmounts)({
     quantity,
     unitPriceNet: Number(line.unit_price ?? 0),
     vatRatePercent: Number(line.vat_rate ?? 0),

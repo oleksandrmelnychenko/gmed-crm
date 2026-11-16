@@ -96,6 +96,60 @@ pub fn line_part_amounts(
     }
 }
 
+/// Amounts a final invoice bills of a quote line: the delivered quantity,
+/// which may pass the quoted one (owner 2026-11-17). Up to the quote it is
+/// [`line_part_amounts`]; a line billed for the first time is priced as a
+/// whole; otherwise the quantity beyond the quote is added at the unit price.
+pub fn final_line_part_amounts(
+    part_quantity: Decimal,
+    billed_quantity: Decimal,
+    line_quantity: Decimal,
+    unit_price_net: Decimal,
+    vat_rate: Decimal,
+    line: LineAmounts,
+    billed: LineAmounts,
+) -> LineAmounts {
+    let total = billed_quantity + part_quantity;
+    if total <= line_quantity {
+        return line_part_amounts(
+            part_quantity,
+            billed_quantity,
+            line_quantity,
+            unit_price_net,
+            vat_rate,
+            line,
+            billed,
+        );
+    }
+    if billed_quantity <= Decimal::ZERO {
+        return line_amounts(part_quantity, unit_price_net, vat_rate);
+    }
+    let within = (line_quantity - billed_quantity).max(Decimal::ZERO);
+    let rest = if within > Decimal::ZERO {
+        line_part_amounts(
+            within,
+            billed_quantity,
+            line_quantity,
+            unit_price_net,
+            vat_rate,
+            line,
+            billed,
+        )
+    } else {
+        LineAmounts {
+            net: Decimal::ZERO,
+            vat: Decimal::ZERO,
+            gross: Decimal::ZERO,
+        }
+    };
+    let excess = line_amounts(part_quantity - within, unit_price_net, vat_rate);
+    LineAmounts {
+        net: rest.net + excess.net,
+        vat: rest.vat + excess.vat,
+        gross: rest.gross + excess.gross,
+    }
+}
+
 /// Net unit price (in cents) of a single-unit line whose gross should be
 /// `gross` at `vat_rate` percent, e.g. an agreed gross amount that is billed
 /// as one line. Prefers a net whose [`line_amounts`] gross is exactly `gross`;
@@ -225,6 +279,51 @@ pub fn parse_non_negative_amount(raw: &str) -> Option<Decimal> {
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn a_final_part_bills_the_delivered_quantity_above_or_below_the_quote() {
+        // 3 h quoted at 60,00 net, 19 %: 180,00 / 34,20 / 214,20.
+        let line = line_amounts(dec("3"), dec("60"), dec("19"));
+        let none = LineAmounts {
+            net: Decimal::ZERO,
+            vat: Decimal::ZERO,
+            gross: Decimal::ZERO,
+        };
+        let five = final_line_part_amounts(
+            dec("5"),
+            Decimal::ZERO,
+            dec("3"),
+            dec("60"),
+            dec("19"),
+            line,
+            none,
+        );
+        assert_eq!(five.gross, dec("357.00"));
+        let two = final_line_part_amounts(
+            dec("2"),
+            Decimal::ZERO,
+            dec("3"),
+            dec("60"),
+            dec("19"),
+            line,
+            none,
+        );
+        assert_eq!(two.gross, dec("142.80"));
+        // 1 h billed by an interim invoice, 4 h more on the final: the rest of
+        // the line plus 2 h beyond it.
+        let billed = line_amounts(dec("1"), dec("60"), dec("19"));
+        let rest = final_line_part_amounts(
+            dec("4"),
+            dec("1"),
+            dec("3"),
+            dec("60"),
+            dec("19"),
+            line,
+            billed,
+        );
+        assert_eq!(rest.net, dec("240.00"));
+        assert_eq!(rest.gross, dec("285.60"));
+    }
 
     #[test]
     fn non_negative_amounts_are_read_as_typed() {

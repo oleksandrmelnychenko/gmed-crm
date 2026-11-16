@@ -710,6 +710,71 @@ fn quote_lines_match_persisted(value: &Value, persisted: &[QuoteLineItem]) -> bo
     !stored.is_empty() && stored == normalized_quote_line_signatures(persisted)
 }
 
+/// The quote lines with what invoices bill of them and what a final invoice
+/// proposes, and the delivered services outside the quote (owner
+/// 2026-11-17, `invoices::final_delivery`), from a quote row.
+fn invoiceable_quote_lines(row: &sqlx::postgres::PgRow) -> (Value, Value) {
+    let line_items = row
+        .try_get::<Value, _>("line_items")
+        .unwrap_or_else(|_| json!([]));
+    let facts = crate::routes::invoices::final_delivery::parse_facts(
+        &row.try_get::<Value, _>("order_service_facts")
+            .unwrap_or_else(|_| json!([])),
+    );
+    let closed = row
+        .try_get::<Vec<i32>, _>("final_closed_lines")
+        .unwrap_or_default();
+    let plan = crate::routes::invoices::final_delivery::delivery_plan(
+        line_items.as_array().map(Vec::as_slice).unwrap_or_default(),
+        &facts,
+        None,
+    );
+    let extras = plan
+        .extras
+        .iter()
+        .map(crate::routes::invoices::final_delivery::extra_service_json)
+        .collect::<Vec<_>>();
+    let mut lines = add_remaining_quote_quantities(
+        line_items,
+        &row.try_get::<Value, _>("invoiced_quantities")
+            .unwrap_or_else(|_| json!({})),
+        &row.try_get::<Value, _>("service_quantities")
+            .unwrap_or_else(|_| json!({})),
+        &row.try_get::<Value, _>("invoiced_amounts")
+            .unwrap_or_else(|_| json!({})),
+    );
+    for (index, item) in lines.as_array_mut().into_iter().flatten().enumerate() {
+        let quoted = quote_decimal_value(item.get("quantity")).round_commercial(2);
+        let invoiced = quote_decimal_value(item.get("invoiced_quantity"));
+        let delivery = plan.lines.get(index).cloned().unwrap_or_default();
+        let closed_by_final = i32::try_from(index).is_ok_and(|index| closed.contains(&index));
+        let Some(map) = item.as_object_mut() else {
+            continue;
+        };
+        // Beside an active final invoice only a line credited on it in full
+        // is open again.
+        if closed_by_final {
+            map.insert("remaining_quantity".to_string(), json!("0"));
+            map.insert("fully_invoiced".to_string(), json!(true));
+        }
+        map.insert(
+            "delivery_basis".to_string(),
+            json!(if delivery.tracked() {
+                "actual"
+            } else {
+                "estimate"
+            }),
+        );
+        map.insert(
+            "final_quantity".to_string(),
+            Value::String(decimal_to_string(
+                (delivery.final_total(quoted) - invoiced).max(Decimal::ZERO),
+            )),
+        );
+    }
+    (lines, Value::Array(extras))
+}
+
 fn add_remaining_quote_quantities(
     mut line_items: Value,
     allocated_quantities: &Value,
@@ -4268,6 +4333,8 @@ async fn load_quote_detail(
                                        = LOWER(BTRIM(service.description)))
                         )
                   ), '[]'::jsonb) AS services_outside_quote,
+                  order_service_delivery_facts(q.order_id) AS order_service_facts,
+                  quote_final_closed_lines(q.id) AS final_closed_lines,
                   -- What a settlement invoice adds on top of the quote lines
                   -- (QA 2026-11-01, T3-7): the dialog total left it out.
                   open_overage.net AS open_package_overage_net,
@@ -4341,6 +4408,7 @@ async fn load_quote_detail(
         })?
     };
     ensure_subject_access(state, auth, subject).await?;
+    let invoiceable = invoiceable_quote_lines(&row);
 
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -4369,12 +4437,8 @@ async fn load_quote_detail(
         "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
         "open_package_overage_net": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_net").unwrap_or(Decimal::ZERO)),
         "open_package_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_gross").unwrap_or(Decimal::ZERO)),
-        "line_items": add_remaining_quote_quantities(
-            row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
-            &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
-            &row.try_get::<Value, _>("service_quantities").unwrap_or_else(|_| serde_json::json!({})),
-            &row.try_get::<Value, _>("invoiced_amounts").unwrap_or_else(|_| serde_json::json!({})),
-        ),
+        "line_items": invoiceable.0,
+        "delivered_services_outside_quote": invoiceable.1,
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         // Staff only: quotes are never served to the patient portal or a payer.
         "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),
@@ -4468,6 +4532,8 @@ async fn list_quotes(
                                        = LOWER(BTRIM(service.description)))
                         )
                   ), '[]'::jsonb) AS services_outside_quote,
+                  order_service_delivery_facts(q.order_id) AS order_service_facts,
+                  quote_final_closed_lines(q.id) AS final_closed_lines,
                   -- What a settlement invoice adds on top of the quote lines
                   -- (QA 2026-11-01, T3-7): the dialog total left it out.
                   open_overage.net AS open_package_overage_net,
@@ -4609,6 +4675,7 @@ async fn list_quotes(
                         }
                     }
                 };
+                let invoiceable = invoiceable_quote_lines(&row);
 
                 items.push(serde_json::json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -4655,12 +4722,8 @@ async fn list_quotes(
                     "payment_term_days": crate::routes::invoices::payment_term_days_from(
                         row.try_get::<Option<String>, _>("payment_term_days_setting").unwrap_or_default().as_deref(),
                     ),
-                    "line_items": add_remaining_quote_quantities(
-                        row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
-                        &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
-            &row.try_get::<Value, _>("service_quantities").unwrap_or_else(|_| serde_json::json!({})),
-            &row.try_get::<Value, _>("invoiced_amounts").unwrap_or_else(|_| serde_json::json!({})),
-                    ),
+                    "line_items": invoiceable.0,
+                    "delivered_services_outside_quote": invoiceable.1,
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                     "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),
                     "superseded_by_quote_id": row.try_get::<Option<Uuid>, _>("superseded_by_quote_id").unwrap_or_default(),

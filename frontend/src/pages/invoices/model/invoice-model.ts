@@ -10,10 +10,13 @@ import { hasCapability, type Actor } from "@/lib/permissions";
 import { payerRelationshipKindLabel, type PayerRelationshipKind } from "@/pages/leads/model/lead-payer";
 import { blankReceivedPayment } from "./document-terms";
 
+import { createFinalInvoiceSelection, isFinalSelectionValid } from "./final-invoice";
+
 import type {
   AccountingLedgerPayload,
   AdvanceBasis,
   CreateForm,
+  DeliveredOrderService,
   DunningEvent,
   Filters,
   InvoiceItem,
@@ -335,13 +338,15 @@ export const INVOICE_LINE_COMMENT_MAX_LENGTH = 300;
 export function invoiceLineSelectionPayload(
   form: Pick<CreateForm, "selectedLineIndexes" | "lineQuantities" | "lineComments">,
 ) {
-  return form.selectedLineIndexes.map((lineIndex) => {
+  // A final invoice line at 0 is left out (not delivered).
+  return form.selectedLineIndexes.flatMap((lineIndex) => {
     const comment = (form.lineComments[String(lineIndex)] ?? "").trim();
-    return {
+    const quantity = Number(form.lineQuantities[String(lineIndex)] || 0);
+    return quantity > 0 ? [{
       line_index: lineIndex,
-      quantity: Number(form.lineQuantities[String(lineIndex)] || 0),
+      quantity,
       ...(comment ? { comment } : {}),
-    };
+    }] : [];
   });
 }
 
@@ -356,8 +361,14 @@ export function invoiceLineQuantityAvailable(
   return Number.isFinite(quantity) ? Math.max(0, quantity) : 0;
 }
 
-export function createInvoiceLineSelection(lines: InvoiceLineItem[], invoiceType: InvoiceType) {
+export function createInvoiceLineSelection(
+  lines: InvoiceLineItem[],
+  invoiceType: InvoiceType,
+  extras: DeliveredOrderService[] = [],
+) {
+  if (invoiceType === "final") return createFinalInvoiceSelection(lines, extras);
   return {
+    orderServiceQuantities: {},
     selectedLineIndexes: lines.flatMap((line, index) =>
       invoiceLineQuantityAvailable(line, invoiceType) > 0 ? [index] : [],
     ),
@@ -381,7 +392,8 @@ export function invoiceSelectionPackageOverage(
   const net = Number(quote?.open_package_overage_net ?? 0);
   const none = { net: 0, vat: 0, gross: 0 };
   if (form.invoiceType === "advance" || !Number.isFinite(gross) || gross <= 0) return none;
-  const billsTheRest = lines.every((line, index) => {
+  // The final invoice settles the quote, whatever quantities it bills.
+  const billsTheRest = form.invoiceType === "final" || lines.every((line, index) => {
     const available = invoiceLineQuantityAvailable(line, form.invoiceType);
     return available === 0 || (form.selectedLineIndexes.includes(index)
       && Number(form.lineQuantities[String(index)]) === available);
@@ -402,7 +414,8 @@ export function isOverageOnlyInvoice(
     && Boolean(quote?.line_items.every((line) => invoiceLineQuantityAvailable(line, "final") === 0));
 }
 
-export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateForm) {
+export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateForm, extras: DeliveredOrderService[] = []) {
+  if (form.invoiceType === "final") return isFinalSelectionValid(lines, form, extras);
   const selected = new Set(form.selectedLineIndexes);
   if (!selected.size || selected.size !== form.selectedLineIndexes.length) return false;
   for (const index of selected) {
@@ -410,12 +423,8 @@ export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateFo
     const quantity = Number(form.lineQuantities[String(index)]);
     if (!line || !Number.isFinite(quantity) || quantity <= 0 ||
       quantity > invoiceLineQuantityAvailable(line, form.invoiceType)) return false;
-    if (form.invoiceType === "final" &&
-      quantity !== invoiceLineQuantityAvailable(line, form.invoiceType)) return false;
   }
-  return form.invoiceType !== "final" || lines.every((line, index) =>
-    invoiceLineQuantityAvailable(line, "final") === 0 || selected.has(index),
-  );
+  return true;
 }
 
 // Nothing can be invoiced from these quotes any more. A quote is superseded when
@@ -442,7 +451,12 @@ export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: Invo
   if (invoiceType === "advance" && quote.active_invoice_types?.includes("advance")) {
     return supplementaryAdvancePossible(quote);
   }
-  return quote.line_items.some((line) => invoiceLineQuantityAvailable(line, "final") > 0);
+  return quote.line_items.some((line) => invoiceLineQuantityAvailable(line, "final") > 0)
+    // A final invoice bills what was delivered, also beyond the estimate.
+    || (invoiceType === "final" && (
+      quote.line_items.some((line) => Number(line.final_quantity ?? 0) > 0)
+      || Boolean(quote.delivered_services_outside_quote?.length)
+    ));
 }
 
 export function calculateInvoiceSelectionTotals(

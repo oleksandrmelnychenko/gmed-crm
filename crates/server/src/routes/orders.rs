@@ -5898,6 +5898,20 @@ async fn get_order_economics(
         + advances
             .try_get::<rust_decimal::Decimal, _>("advance_outstanding_gross")
             .unwrap_or(rust_decimal::Decimal::ZERO);
+    // An issued final invoice settles the order with what was delivered
+    // (owner 2026-11-17): estimate lines left out are not "still to bill".
+    let final_invoice_issued = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM invoices
+               WHERE order_id = $1 AND invoice_type = 'final'
+                 AND status NOT IN ('draft', 'cancelled')
+                 AND (total_gross <= 0 OR credited_amount < total_gross)
+           )"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
     let mut warnings = Vec::new();
     if currency_mismatch_count > 0 {
         warnings.push("external_invoice_currency_mismatch");
@@ -5961,6 +5975,7 @@ async fn get_order_economics(
             "advance_invoiced_gross": economics_money(advance_invoiced_gross),
             "prepayment_applied_gross": economics_money(prepayment_applied_gross),
             "billed_to_patient_gross": economics_money(billed_to_patient_gross),
+            "final_invoice_issued": final_invoice_issued,
             "patient_outstanding_gross": economics_money(patient_outstanding_gross),
             "invoice_settled_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_settled_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "invoice_outstanding_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross").unwrap_or(rust_decimal::Decimal::ZERO)),

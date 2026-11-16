@@ -4771,11 +4771,12 @@ function useOrdersPageContent() {
                           {orderNotYetBilledGross(
                             orderDetail.total_estimated,
                             orderEconomics.actual.billed_to_patient_gross,
+                            orderEconomics.actual.final_invoice_issued,
                           ) > 0 ? (
                             <p className="text-xs text-muted-foreground" data-testid="order-not-yet-billed">
                               {lang === "de"
-                                ? `Noch nicht in Rechnung gestellt: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}`
-                                : `Ещё не выставлено счётом: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}`}
+                                ? `Noch nicht in Rechnung gestellt: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross, orderEconomics.actual.final_invoice_issued), orderEconomics.currency)}`
+                                : `Ещё не выставлено счётом: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross, orderEconomics.actual.final_invoice_issued), orderEconomics.currency)}`}
                             </p>
                           ) : null}
                           <OrderConciergeSales economics={orderEconomics} lang={lang} formatMoney={formatOptionalMoney} />

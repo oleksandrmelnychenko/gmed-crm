@@ -168,6 +168,29 @@ export function moneyLinePartAmounts(part: {
   return toCents(own.net) <= toCents(rest.net) && toCents(own.gross) <= toCents(rest.gross) ? own : rest;
 }
 
+/**
+ * What a final invoice bills of a quote line, as the server bills it
+ * (`money::final_line_part_amounts`, owner 2026-11-17): up to the quote like
+ * `moneyLinePartAmounts`; a line billed for the first time priced as a whole;
+ * otherwise the quantity beyond the quote added at the unit price.
+ */
+export function moneyFinalLinePartAmounts(part: Parameters<typeof moneyLinePartAmounts>[0]): MoneyLineAmounts {
+  const billedQuantity = Number.isFinite(part.billedQuantity) ? part.billedQuantity : 0;
+  const total = toCents(billedQuantity + part.quantity);
+  if (!Number.isFinite(part.lineQuantity) || total <= toCents(part.lineQuantity)) return moneyLinePartAmounts(part);
+  if (billedQuantity <= 0) return moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent);
+  const within = Math.max(0, roundCents(part.lineQuantity - billedQuantity));
+  const rest = within > 0
+    ? moneyLinePartAmounts({ ...part, quantity: within })
+    : { net: 0, vat: 0, gross: 0 };
+  const excess = moneyLineAmounts(roundCents(part.quantity - within), part.unitPriceNet, part.vatRatePercent);
+  return {
+    net: roundCents(rest.net + excess.net),
+    vat: roundCents(rest.vat + excess.vat),
+    gross: roundCents(rest.gross + excess.gross),
+  };
+}
+
 function moneyNumber(value: unknown): number {
   const numeric =
     typeof value === "number"

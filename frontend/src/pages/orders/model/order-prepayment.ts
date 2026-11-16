@@ -87,7 +87,9 @@ export function orderPrepaymentPayload(terms: OrderPrepaymentTerms) {
  * counts issued invoices only, so 788 ordered and 550 billed read as settled
  * (QA 2026-11-01, X3 A-0011).
  */
-export function orderNotYetBilledGross(orderTotal: unknown, billedGross: string | undefined) {
+export function orderNotYetBilledGross(orderTotal: unknown, billedGross: string | undefined, finalInvoiceIssued = false) {
+  // The final invoice bills what was delivered; estimate lines it left out are not owed (owner 2026-11-17).
+  if (finalInvoiceIssued) return 0;
   const rest = Number(orderTotal ?? 0) - Number(billedGross ?? 0);
   return Number.isFinite(rest) && rest >= 0.005 ? Math.round(rest * 100) / 100 : 0;
 }

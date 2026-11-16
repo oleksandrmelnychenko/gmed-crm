@@ -14,6 +14,7 @@ import type {
   QuoteOption,
 } from "../model/types";
 import type { DraftEditorPayload } from "../model/draft-editor";
+import type { FinalInvoicePreview } from "../model/final-invoice";
 
 type JsonPayload = Record<string, unknown>;
 
@@ -102,6 +103,11 @@ export function fetchAccountingLedger(year: string, currency = "EUR") {
  */
 export function fetchPrepaymentAdvancePreview(quoteId: string) {
   return apiFetch<PrepaymentAdvancePreview>(`/quotes/${quoteId}/advance-preview`);
+}
+
+/** The final invoice these lines make and the advance set-off of its release. */
+export function fetchFinalInvoicePreview(quoteId: string, payload: JsonPayload) {
+  return postJson<FinalInvoicePreview>(`/quotes/${quoteId}/final-preview`, payload);
 }
 
 export function createInvoice(quoteId: string, payload: JsonPayload) {

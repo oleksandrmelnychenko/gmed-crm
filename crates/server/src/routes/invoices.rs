@@ -43,6 +43,8 @@ mod document_terms;
 mod drafts;
 mod dunning_blocks;
 mod dunning_letters;
+pub(crate) mod final_delivery;
+mod final_preview;
 mod ledger_text;
 pub(crate) mod line_comments;
 mod patient_notices;
@@ -246,6 +248,10 @@ pub fn router() -> Router<AppState> {
             get(preview_prepayment_advance),
         )
         .route(
+            "/quotes/{quote_id}/final-preview",
+            post(final_preview::preview_final_invoice),
+        )
+        .route(
             "/patients/{patient_id}/billing-workspace",
             get(get_patient_billing_workspace),
         )
@@ -302,6 +308,10 @@ struct CreateInvoiceRequest {
     payment_received: Option<document_terms::ReceivedPaymentInput>,
     /// The service period, when it is not the one of the lines and order.
     service_period: Option<document_terms::ServicePeriodInput>,
+    /// Final invoices only: delivered services of the order outside the
+    /// quote (`final_delivery`).
+    #[serde(default)]
+    order_services: Vec<final_delivery::OrderServiceSelection>,
 }
 
 #[derive(Deserialize)]
@@ -320,6 +330,10 @@ struct CreatePatientBillingInvoiceRequest {
     /// Ready concierge services billed at their sale price (F-C8).
     #[serde(default)]
     concierge_service_ids: Vec<Uuid>,
+    /// Final invoices only: delivered services of the order outside the
+    /// quote (`final_delivery`).
+    #[serde(default)]
+    order_services: Vec<final_delivery::OrderServiceSelection>,
 }
 
 #[derive(Deserialize)]
@@ -722,6 +736,12 @@ struct QuoteInvoiceContext {
     /// Current quantity of the order's not cancelled services: an approved
     /// report or a split planned block changes it after the quote was made.
     service_quantities: BTreeMap<Uuid, Decimal>,
+    /// The order's services with their delivery state: what a final
+    /// invoice proposes and accepts (`final_delivery`).
+    order_service_facts: Vec<final_delivery::OrderServiceFact>,
+    /// Quote lines an active final invoice settles: nothing more is billed
+    /// of them beside it (`quote_line_closed_by_final`).
+    final_closed_lines: BTreeSet<usize>,
     /// The draft whose lines are being rebuilt (see `drafts`): its own
     /// allocations and package overages count as open, not as billed.
     editing_invoice_id: Option<Uuid>,
@@ -4026,6 +4046,8 @@ async fn load_quote_invoice_context(
                       FROM order_leistungen service
                       WHERE service.order_id = o.id AND service.status <> 'cancelled'
                   ), '{}'::jsonb) AS service_quantities,
+                  order_service_delivery_facts(o.id) AS order_service_facts,
+                  quote_final_closed_lines(q.id) AS final_closed_lines,
                   p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
@@ -4096,6 +4118,16 @@ async fn load_quote_invoice_context(
                 ))
             })
             .collect(),
+        order_service_facts: final_delivery::parse_facts(
+            &row.try_get::<Value, _>("order_service_facts")
+                .unwrap_or_else(|_| serde_json::json!([])),
+        ),
+        final_closed_lines: row
+            .try_get::<Vec<i32>, _>("final_closed_lines")
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|index| usize::try_from(index).ok())
+            .collect(),
         editing_invoice_id: None,
     }))
 }
@@ -4107,10 +4139,6 @@ fn invoice_json_decimal(item: &Value, key: &str) -> Option<Decimal> {
         _ => None,
     }
 }
-
-/// Error code of a final invoice refused because services of the order grew
-/// beyond its quote.
-const QUOTE_BEHIND_ACTUAL_SERVICES: &str = "quote_behind_actual_services";
 
 /// What invoices already bill of one quote line: the quantity and the amounts
 /// of their allocations (same reading as `quote_line_invoiced_quantities`).
@@ -4189,7 +4217,10 @@ pub(super) async fn ensure_quote_line_parts_within_totals(
              AND allocation.quote_line_index = ANY($2)
              AND invoice.status <> 'cancelled'
              AND NOT invoice_quote_line_credited(invoice.id, allocation.quote_line_index)
-           GROUP BY allocation.quote_line_index"#,
+           GROUP BY allocation.quote_line_index
+           -- A final invoice bills the delivered quantity, also above the
+           -- quote line (owner 2026-11-17).
+           HAVING NOT bool_or(invoice.invoice_type = 'final')"#,
     )
     .bind(quote_id)
     .bind(touched_lines)
@@ -4352,10 +4383,20 @@ async fn build_selected_invoice_snapshot(
                 "Failed to load remaining invoice quantities",
             )
         })?;
+    // A final invoice bills what was actually delivered (owner 2026-11-17):
+    // any quantity above or below the quote, a line left out or at 0 is not
+    // billed. A termination settlement keeps its own rules.
+    let actual_final = invoice_type == "final" && !ctx.order_contract_terminated;
+    let delivery = final_delivery::delivery_plan(
+        quote_items,
+        &ctx.order_service_facts,
+        ctx.editing_invoice_id,
+    );
     let mut requested = BTreeMap::<usize, Decimal>::new();
     let mut requested_comments = BTreeMap::<usize, String>::new();
+    let mut dropped_lines = BTreeSet::<usize>::new();
     if let Some(items) = requested_items {
-        if items.is_empty() {
+        if items.is_empty() && !actual_final {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "At least one invoice line must be selected",
@@ -4375,13 +4416,26 @@ async fn build_selected_invoice_snapshot(
                 ));
             };
             let quantity = quantity.round_commercial(2);
+            if actual_final && quantity == Decimal::ZERO {
+                if !dropped_lines.insert(item.line_index)
+                    || requested.contains_key(&item.line_index)
+                {
+                    return Err(err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invoice line was selected more than once",
+                    ));
+                }
+                continue;
+            }
             if quantity <= Decimal::ZERO {
                 return Err(err(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Invoice line quantity must be greater than zero",
                 ));
             }
-            if requested.insert(item.line_index, quantity).is_some() {
+            if dropped_lines.contains(&item.line_index)
+                || requested.insert(item.line_index, quantity).is_some()
+            {
                 return Err(err(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Invoice line was selected more than once",
@@ -4407,7 +4461,6 @@ async fn build_selected_invoice_snapshot(
     let mut skipped_cancelled_lines = false;
     let mut leaves_quantities_open = false;
     let mut billed_below_quote = false;
-    let mut services_above_quote = Vec::new();
 
     for (line_index, source_item) in quote_items.iter().enumerate() {
         let quoted_quantity = invoice_json_decimal(source_item, "quantity")
@@ -4436,43 +4489,117 @@ async fn build_selected_invoice_snapshot(
             skipped_cancelled_lines = true;
             continue;
         }
-        // A settlement invoice bills what was actually delivered (doc 2.4):
-        // 3,5 approved hours of a line quoted with 4 are billed as 3,5. More
-        // than the quote cannot go through it: the patient accepted the quoted
-        // quantity, so a new quote covers the difference (QA 2026-10-31, R3-1).
+        // An interim invoice bills what was actually delivered (doc 2.4):
+        // 3,5 approved hours of a line quoted with 4 are billed as 3,5, never
+        // more than the quote (QA 2026-10-31, R3-1). The final invoice bills
+        // the delivered quantity, above or below the quote (owner 2026-11-17).
         let service_quantity = source_item
             .get("source_order_leistung_id")
             .and_then(Value::as_str)
             .and_then(|value| Uuid::parse_str(value).ok())
             .and_then(|service_id| ctx.service_quantities.get(&service_id).copied())
             .map(|quantity| quantity.round_commercial(2));
-        if invoice_type == "final"
-            && !ctx.order_contract_terminated
-            && service_quantity.is_some_and(|quantity| quantity > quoted_quantity)
-        {
-            services_above_quote.push(
-                source_item
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Invoice line")
-                    .to_string(),
-            );
-        }
-        let billable_quantity =
-            service_quantity.map_or(quoted_quantity, |quantity| quantity.min(quoted_quantity));
+        let billable_quantity = if actual_final {
+            delivery
+                .lines
+                .get(line_index)
+                .map_or(quoted_quantity, |line| line.final_total(quoted_quantity))
+        } else {
+            service_quantity.map_or(quoted_quantity, |quantity| quantity.min(quoted_quantity))
+        };
         let already_allocated = allocated
             .get(&line_index)
             .copied()
             .unwrap_or(Decimal::ZERO)
             .round_commercial(2);
         // An advance consumes no quantity, yet a line an interim invoice already
-        // bills is billed twice by it (QA 2026-11-01, Y2 B1).
+        // bills is billed twice by it (QA 2026-11-01, Y2 B1). Beside an
+        // active final invoice only a line credited on it in full is open.
         let remaining = if invoice_type == "advance" {
             (quoted_quantity - already_allocated).max(Decimal::ZERO)
+        } else if invoice_type == "interim" && ctx.final_closed_lines.contains(&line_index) {
+            Decimal::ZERO
         } else {
-            billed_below_quote |= billable_quantity < quoted_quantity;
+            billed_below_quote |= billable_quantity != quoted_quantity;
             (billable_quantity - already_allocated).max(Decimal::ZERO)
         };
+        if actual_final {
+            // The delivered quantity is a proposal: staff bill what they type.
+            let selected_quantity = match requested_items {
+                Some(_) => requested.get(&line_index).copied(),
+                None => Some(remaining).filter(|quantity| *quantity > Decimal::ZERO),
+            };
+            let Some(selected_quantity) = selected_quantity else {
+                continue;
+            };
+            consumed_requested_lines.insert(line_index);
+            billed_below_quote |= already_allocated + selected_quantity != quoted_quantity;
+            let unit_price = invoice_json_decimal(source_item, "unit_price")
+                .unwrap_or(Decimal::ZERO)
+                .round_cents();
+            let vat_rate = invoice_json_decimal(source_item, "vat_rate")
+                .unwrap_or(Decimal::ZERO)
+                .round_commercial(2);
+            if unit_price < Decimal::ZERO || vat_rate < Decimal::ZERO {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Quote contains invalid price or VAT data",
+                ));
+            }
+            let billed = billed_amounts.get(&line_index).copied().unwrap_or_default();
+            let part = money::final_line_part_amounts(
+                selected_quantity,
+                already_allocated,
+                quoted_quantity,
+                unit_price,
+                vat_rate,
+                quote_line_amounts(source_item),
+                money::LineAmounts {
+                    net: billed.net,
+                    vat: billed.gross - billed.net,
+                    gross: billed.gross,
+                },
+            );
+            let mut selected_item = source_item.clone();
+            if let Some(map) = selected_item.as_object_mut() {
+                for (field, value) in [
+                    ("quantity", selected_quantity),
+                    ("line_net", part.net),
+                    ("line_vat", part.vat),
+                    ("line_gross", part.gross),
+                    ("quoted_quantity", quoted_quantity),
+                ] {
+                    map.insert(field.to_string(), Value::String(decimal_to_string(value)));
+                }
+                map.insert("quote_line_index".to_string(), json!(line_index));
+            }
+            if let Some(comment) = requested_comments.remove(&line_index) {
+                line_comments::set_line_comment(&mut selected_item, Some(comment));
+            }
+            total_net = (total_net + part.net).round_cents();
+            total_vat = (total_vat + part.vat).round_cents();
+            total_gross = (total_gross + part.gross).round_cents();
+            selected_items.push(selected_item);
+            allocations.push(InvoiceLineAllocationSnapshot {
+                quote_line_index: i32::try_from(line_index).unwrap_or(i32::MAX),
+                order_leistung_id: source_item
+                    .get("source_order_leistung_id")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok()),
+                quantity: selected_quantity,
+                description: source_item
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Invoice line")
+                    .to_string(),
+                unit_price_net: unit_price,
+                vat_rate,
+                amount_net: part.net,
+                amount_vat: part.vat,
+                amount_gross: part.gross,
+            });
+            continue;
+        }
         if remaining <= Decimal::ZERO {
             continue;
         }
@@ -4590,14 +4717,6 @@ async fn build_selected_invoice_snapshot(
         }
     }
 
-    if !services_above_quote.is_empty() {
-        return Err(coded_err(
-            StatusCode::CONFLICT,
-            QUOTE_BEHIND_ACTUAL_SERVICES,
-            "Services of the order exceed this quote; create a new quote for the actual quantities",
-            json!({ "services_label": services_above_quote.join(", ") }),
-        ));
-    }
     if !incomplete_final_lines.is_empty() {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -4610,7 +4729,9 @@ async fn build_selected_invoice_snapshot(
             "A selected quote line has already been fully invoiced",
         ));
     }
-    if selected_items.is_empty() {
+    // A final invoice may bill only services outside the quote; the caller
+    // refuses one without any line.
+    if selected_items.is_empty() && !actual_final {
         // Overage approved after the quote was billed in full has no invoice
         // to land on: an interim invoice without lines bills it alone (QA
         // 2026-11-01, X3 NEW-1).
@@ -8689,9 +8810,16 @@ async fn create_patient_billing_invoice(
         }
         None
     };
+    if quote_context.is_none() && !body.order_services.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Quote lines require a quote",
+        );
+    }
 
+    let mut extra_service_ids = Vec::new();
     let mut snapshot = if let Some(context) = quote_context.as_ref() {
-        let value = match build_selected_invoice_snapshot(
+        let mut value = match build_selected_invoice_snapshot(
             &state,
             context,
             &invoice_type,
@@ -8702,6 +8830,15 @@ async fn create_patient_billing_invoice(
             Ok(value) => value,
             Err(response) => return response,
         };
+        match final_delivery::append_order_service_lines(
+            &mut value,
+            context,
+            &invoice_type,
+            &body.order_services,
+        ) {
+            Ok(ids) => extra_service_ids = ids,
+            Err(response) => return response,
+        }
         if let Err(response) =
             validate_invoice_creation_for_quote(&state, context, &invoice_type, false).await
         {
@@ -8805,6 +8942,15 @@ async fn create_patient_billing_invoice(
         if let Some(context) = quote_context.as_ref()
             && let Err(response) =
                 lock_invoiceable_quote_tx(&mut transaction, context.quote_id).await
+        {
+            return response;
+        }
+        if let Err(response) = final_delivery::ensure_order_services_unbilled_tx(
+            &mut transaction,
+            None,
+            &extra_service_ids,
+        )
+        .await
         {
             return response;
         }
@@ -9356,6 +9502,12 @@ async fn create_invoice_from_quote(
             "Only an advance invoice bills the required prepayment",
         );
     }
+    if invoice_type != "final" && !body.order_services.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only a final invoice bills services outside the quote",
+        );
+    }
     if prepayment_basis && body.line_items.is_some() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -9369,7 +9521,16 @@ async fn create_invoice_from_quote(
         build_selected_invoice_snapshot(&state, &ctx, &invoice_type, body.line_items.as_deref())
             .await
     };
-    let invoice_snapshot = match invoice_snapshot {
+    let mut invoice_snapshot = match invoice_snapshot {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let extra_service_ids = match final_delivery::append_order_service_lines(
+        &mut invoice_snapshot,
+        &ctx,
+        &invoice_type,
+        &body.order_services,
+    ) {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -9377,6 +9538,16 @@ async fn create_invoice_from_quote(
         validate_invoice_creation_for_quote(&state, &ctx, &invoice_type, prepayment_basis).await
     {
         return resp;
+    }
+    if invoice_snapshot
+        .line_items
+        .as_array()
+        .is_none_or(Vec::is_empty)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Select at least one invoice item",
+        );
     }
     // Without an amount the money received is the invoice total.
     if let Some(input) = body.payment_received.as_ref() {
@@ -9409,6 +9580,15 @@ async fn create_invoice_from_quote(
         }
     };
     if let Err(resp) = lock_invoiceable_quote_tx(&mut transaction, ctx.quote_id).await {
+        return resp;
+    }
+    if let Err(resp) = final_delivery::ensure_order_services_unbilled_tx(
+        &mut transaction,
+        None,
+        &extra_service_ids,
+    )
+    .await
+    {
         return resp;
     }
     let payer =
@@ -9655,7 +9835,7 @@ async fn mark_released_invoice_services(
                         THEN invoice.line_items ELSE '[]'::jsonb END
                ) AS item(value)
                WHERE invoice.id = $1
-                 AND item.value ->> 'source' = 'termination_order_service'
+                 AND item.value ->> 'source' IN ('termination_order_service', 'final_order_service')
            ), released AS (
                SELECT billed.service_id,
                       COALESCE((
@@ -9676,7 +9856,7 @@ async fn mark_released_invoice_services(
                           ) AS item(value)
                           WHERE invoice.released_at IS NOT NULL
                             AND invoice.status <> 'cancelled'
-                            AND item.value ->> 'source' = 'termination_order_service'
+                            AND item.value ->> 'source' IN ('termination_order_service', 'final_order_service')
                             AND item.value ->> 'source_order_leistung_id' = billed.service_id::text
                       ), 0) AS quantity
                FROM billed
@@ -9686,7 +9866,15 @@ async fn mark_released_invoice_services(
            FROM released
            WHERE service.id = released.service_id
              AND service.status NOT IN ('invoiced', 'cancelled')
-             AND released.quantity >= round(service.quantity, 2)"#,
+             AND (
+                 released.quantity >= round(service.quantity, 2)
+                 -- The final invoice settles what it bills, also a delivered
+                 -- quantity billed lower (owner 2026-11-17).
+                 OR EXISTS (
+                     SELECT 1 FROM invoices final_invoice
+                     WHERE final_invoice.id = $1 AND final_invoice.invoice_type = 'final'
+                 )
+             )"#,
     )
     .bind(invoice_id)
     .execute(&mut **transaction)
@@ -16732,7 +16920,7 @@ async fn update_invoice_status(
                                       THEN cancelled_invoice.line_items ELSE '[]'::jsonb END
                              ) AS item(value)
                              WHERE cancelled_invoice.id = $1
-                               AND item.value ->> 'source' = 'termination_order_service'
+                               AND item.value ->> 'source' IN ('termination_order_service', 'final_order_service')
                          )
                          AND NOT EXISTS (
                              SELECT 1

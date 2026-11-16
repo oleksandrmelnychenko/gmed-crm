@@ -534,12 +534,14 @@ describe("invoice creation totals", () => {
 describe("invoice creation selection", () => {
   const lines = [line({ quantity: "3", remaining_quantity: "1" }), line({ remaining_quantity: "0" })];
 
-  it("initializes final invoices with only the remaining quantities", () => {
+  it("initializes final invoices with the delivered quantities and advances with the quoted scope", () => {
+    // Without a proposal from the server the remaining quantity is proposed.
     expect(createInvoiceLineSelection(lines, "final")).toEqual({
-      selectedLineIndexes: [0], lineQuantities: { "0": "1", "1": "0" },
+      selectedLineIndexes: [0, 1], lineQuantities: { "0": "1", "1": "0" }, orderServiceQuantities: {},
     });
+    expect(createInvoiceLineSelection([line({ quantity: "3", final_quantity: "5" })], "final").lineQuantities).toEqual({ "0": "5" });
     expect(createInvoiceLineSelection(lines, "advance")).toEqual({
-      selectedLineIndexes: [0, 1], lineQuantities: { "0": "3", "1": "2" },
+      selectedLineIndexes: [0, 1], lineQuantities: { "0": "3", "1": "2" }, orderServiceQuantities: {},
     });
   });
 
@@ -549,17 +551,20 @@ describe("invoice creation selection", () => {
     })).toBe(false);
   });
 
-  it("allows partial interim quantities but requires the full remainder for final invoices", () => {
+  it("caps interim quantities and lets a final invoice bill the delivered quantity", () => {
     const form = { ...blankCreateForm("quote"), selectedLineIndexes: [0], lineQuantities: { "0": "0.5" } };
     expect(isInvoiceSelectionValid(lines, { ...form, invoiceType: "interim" })).toBe(true);
-    expect(isInvoiceSelectionValid(lines, form)).toBe(false);
-    expect(isInvoiceSelectionValid(lines, { ...form, lineQuantities: { "0": "1" } })).toBe(true);
+    expect(isInvoiceSelectionValid(lines, { ...form, invoiceType: "interim", lineQuantities: { "0": "2" } })).toBe(false);
+    // Owner 2026-11-17: below or above the quote, 0 leaves a line out.
+    expect(isInvoiceSelectionValid(lines, form)).toBe(true);
+    expect(isInvoiceSelectionValid(lines, { ...form, lineQuantities: { "0": "5" } })).toBe(true);
+    expect(isInvoiceSelectionValid(lines, { ...form, lineQuantities: { "0": "0", "1": "0" } })).toBe(false);
   });
 
-  it("rejects a final invoice missing a remaining line", () => {
+  it("lets a final invoice leave a line out", () => {
     expect(isInvoiceSelectionValid([line(), line()], {
-      ...blankCreateForm("quote"), selectedLineIndexes: [0], lineQuantities: { "0": "2" },
-    })).toBe(false);
+      ...blankCreateForm("quote"), selectedLineIndexes: [0, 1], lineQuantities: { "0": "2", "1": "0" },
+    })).toBe(true);
   });
 
   it("sends a remark only for the selected positions that have one", () => {

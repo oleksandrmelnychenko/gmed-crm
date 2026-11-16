@@ -23,7 +23,11 @@ async function prepare(page: Page, lang = "ru") {
   ];
   const order = { id: orderId, order_number: "A-TEST-1", patient_id: patientId, patient_name: "Anna Beispiel", patient_pid: "P-TEST-1", process_gates: { billing_release_status: "granted", billing_release_note: null, package_coverage_status: "not_covered" }, leistungen: lines.map(line => ({ id: line.source_order_leistung_id, status: "approved" })) };
   const invoice = { ...quote, id: invoiceId, invoice_number: "INV-TEST-1", quote_id: quoteId, invoice_type: "final", status: "draft", issued_at: "2026-09-07T10:00:00Z", created_at: "2026-09-07T10:00:00Z", updated_at: "2026-09-07T10:00:00Z", total_net: "1200", total_vat: "228", total_gross: "1428", paid_amount: "0", balance_due: "1428", due_date: null, paid_at: null, notes: null, available_prepayments: [], prepayment_allocations: [] };
-  const fixture = { quote, quotes, order, invoice, postError: "", quotesError: false, writes: [] as unknown[], commentWrites: [] as unknown[], noteWrites: [] as unknown[], pdfReads: 0, errors: [] as string[] };
+  const finalPreview = {
+    total_net: "1200", total_vat: "228", total_gross: "1428", deducted_gross: "0", due_gross: "1428",
+    advances: [] as unknown[], interim_invoices: [] as unknown[],
+  };
+  const fixture = { quote: quote as typeof quote & Record<string, unknown>, quotes, order, invoice, finalPreview, previewWrites: [] as unknown[], postError: "", quotesError: false, writes: [] as unknown[], commentWrites: [] as unknown[], noteWrites: [] as unknown[], pdfReads: 0, errors: [] as string[] };
   page.on("pageerror", error => fixture.errors.push(error.message));
   await page.addInitScript(language => {
     localStorage.setItem("gmed_access_token", "invoice-test-token");
@@ -56,6 +60,11 @@ async function prepare(page: Page, lang = "ru") {
         quote_id: quoteId, billed_advances_gross: "0", total_net: "420.17", total_vat: "79.83", total_gross: "500.00",
         lines: [{ is_cost_passthrough: false, vat_rate: "19", net: "420.17", vat: "79.83", gross: "500.00" }],
       } });
+    }
+    // The set-off the release of the final invoice makes (owner 2026-11-17).
+    if (path === `/quotes/${quoteId}/final-preview`) {
+      fixture.previewWrites.push(route.request().postDataJSON());
+      return route.fulfill({ json: fixture.finalPreview });
     }
     if (path === "/quotes" && fixture.quotesError) return route.fulfill({ status: 500, json: { error: "Quotes unavailable" } });
     let body: unknown = [];
@@ -120,7 +129,7 @@ test("an unapproved order service does not block creating the final invoice", as
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
   await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  expect(fixture.writes).toEqual([{ invoice_type: "final", due_date: null, notes: null, internal_note: null, line_items: fixture.quote.line_items.map((_, line_index) => ({ line_index, quantity: 1 })) }]);
+  expect(fixture.writes).toEqual([{ invoice_type: "final", due_date: null, notes: null, internal_note: null, line_items: fixture.quote.line_items.map((_, line_index) => ({ line_index, quantity: 1 })), order_services: [] }]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -286,7 +295,7 @@ test("the internal note is saved apart from the printed remark, also after relea
   expect(fixture.errors).toEqual([]);
 });
 
-test("final invoice refresh uses the new remainder without losing notes", async ({ page }) => {
+test("a quote refresh keeps the typed final quantities and notes", async ({ page }) => {
   const fixture = await prepare(page);
   const dialog = await openCreate(page);
   // The printed customer remark comes first; the staff-only internal note follows.
@@ -294,12 +303,79 @@ test("final invoice refresh uses the new remainder without losing notes", async 
   const internalNote = dialog.getByRole("textbox", { name: "Внутренняя заметка (не печатается)" });
   await notes.fill("Keep this note");
   await internalNote.fill("Keep this internal note");
+  await dialog.getByRole("spinbutton", { name: "Количество: Service 1", exact: true }).fill("2");
   fixture.quote.line_items[0].remaining_quantity = "0.5";
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(dialog.getByRole("spinbutton", { name: "Количество: Service 1", exact: true })).toHaveValue("0.5");
+  await expect(dialog.getByRole("spinbutton", { name: "Количество: Service 1", exact: true })).toHaveValue("2");
   await expect(notes).toHaveValue("Keep this note");
   await expect(internalNote).toHaveValue("Keep this internal note");
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
+});
+
+// Owner 2026-11-17: the final invoice bills what was delivered, not the estimate 1:1.
+test("a final invoice proposes the delivered quantities, services outside the estimate and the advance set-off", async ({ page }) => {
+  const fixture = await prepare(page);
+  const hours = {
+    description: "Dolmetscherstunden", quantity: "3", unit: "hour", remaining_quantity: "3", final_quantity: "5", delivery_basis: "actual",
+    unit_price: "60", vat_rate: "19", line_net: "180", line_vat: "34.2", line_gross: "214.2", is_cost_passthrough: false,
+    invoiced_quantity: "0", invoiced_net: "0", invoiced_gross: "0", source_order_leistung_id: "service-h",
+  };
+  const transfer = {
+    description: "Transfer", quantity: "2", remaining_quantity: "2", final_quantity: "2", delivery_basis: "estimate",
+    unit_price: "50", vat_rate: "19", line_net: "100", line_vat: "19", line_gross: "119", is_cost_passthrough: false,
+    invoiced_quantity: "0", invoiced_net: "0", invoiced_gross: "0", source_order_leistung_id: "service-t",
+  };
+  Object.assign(fixture.quote, {
+    total_gross: "333.2",
+    line_items: [hours, transfer],
+    delivered_services_outside_quote: [{
+      order_leistung_id: "service-x", description: "Zusatztransfer Klinik", name: "Zusatztransfer Klinik", unit: null,
+      quantity: "1", unit_price: "80", vat_rate: "19", is_cost_passthrough: false, quote_line_index: null,
+    }],
+  });
+  Object.assign(fixture.finalPreview, {
+    total_gross: "552.16", deducted_gross: "300", due_gross: "252.16",
+    advances: [
+      { invoice_id: "adv-1", invoice_number: "AR-2026-0001", total_gross: "300", paid_gross: "300", available_gross: "300", deduction_gross: "300",
+        deduction_rows: [{ kind: "taxed", vat_rate: "19", net: "252.10", vat: "47.90", gross: "300" }] },
+      { invoice_id: "adv-2", invoice_number: "AR-2026-0002", total_gross: "100", paid_gross: "0", available_gross: "0", deduction_gross: "0", deduction_rows: [] },
+    ],
+    interim_invoices: [{ invoice_id: "int-1", invoice_number: "ZR-2026-0001", total_gross: "119", status: "paid" }],
+  });
+  const dialog = await openCreate(page);
+  const lines = dialog.getByTestId("final-invoice-line");
+  await expect(lines.nth(0).getByTestId("final-line-comparison")).toContainText("по смете 3");
+  await expect(lines.nth(0).getByTestId("final-line-comparison")).toContainText("фактически 5");
+  await expect(lines.nth(0).getByTestId("final-line-above-estimate")).toHaveText("больше сметы");
+  await expect(lines.nth(0).getByTestId("final-line-difference")).toContainText("+2");
+  await expect(lines.nth(0).getByTestId("final-line-difference")).toContainText("142,80");
+  // No delivery record: the estimate quantity, marked as such.
+  await expect(lines.nth(1).getByTestId("final-line-comparison")).toContainText("по смете");
+  await dialog.getByRole("spinbutton", { name: "Количество: Transfer", exact: true }).fill("0");
+  await expect(lines.nth(1).getByTestId("final-line-not-delivered")).toHaveText("не оказано");
+  await expect(dialog.getByTestId("final-order-service")).toContainText("Zusatztransfer Klinik");
+  await expect(dialog.getByTestId("final-summary-estimate")).toContainText("333,20");
+  await expect(dialog.getByTestId("final-summary-actual")).toContainText("452,20");
+  await expect(dialog.getByTestId("final-summary-difference")).toContainText("+119,00");
+  const settlement = dialog.getByTestId("final-invoice-settlement");
+  await expect(settlement.getByTestId("final-preview-advance").nth(0)).toContainText("AR-2026-0001");
+  await expect(settlement.getByTestId("final-preview-advance").nth(0)).toContainText("−300,00");
+  await expect(settlement.getByTestId("final-preview-advance").nth(1)).toContainText("не оплачен — не зачитывается");
+  await expect(settlement.getByTestId("final-preview-interims")).toContainText("ZR-2026-0001");
+  await expect(settlement.getByTestId("final-preview-due")).toContainText("252,16");
+  await expect.poll(() => fixture.previewWrites.at(-1)).toEqual({
+    line_items: [{ line_index: 0, quantity: 5 }],
+    order_services: [{ order_leistung_id: "service-x", quantity: 1 }],
+  });
+  await page.screenshot({ path: "../artifacts/design-qa/invoice-create-final-actuals-ru.png", animations: "disabled" });
+  await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(fixture.writes).toEqual([{
+    invoice_type: "final", due_date: null, notes: null, internal_note: null,
+    line_items: [{ line_index: 0, quantity: 5 }],
+    order_services: [{ order_leistung_id: "service-x", quantity: 1 }],
+  }]);
+  expect(fixture.errors).toEqual([]);
 });
 
 test("failed quote refresh stays blocked and shows retry beside submit", async ({ page }) => {

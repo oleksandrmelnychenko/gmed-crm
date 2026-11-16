@@ -376,6 +376,8 @@ export type OrderEconomics = {
     prepayment_applied_gross?: string;
     /** Settlement invoices plus issued advances, each advance counted once. */
     billed_to_patient_gross?: string;
+    /** An issued final invoice settles the order: nothing is «still to bill». */
+    final_invoice_issued?: boolean;
     /** Open settlement invoices plus the unpaid part of issued advances. */
     patient_outstanding_gross?: string;
     patient_cash_received_gross: string;

@@ -213,6 +213,20 @@ pub(super) async fn services_billed_above_actuals(
         r#"SELECT service.description
            FROM order_leistungen service
            WHERE service.status <> 'cancelled'
+             -- A final invoice may bill more than a service still planned:
+             -- staff set the quantity no record holds yet (owner 2026-11-17).
+             -- Above a recorded delivery the draft is stale and refused.
+             AND NOT (
+                 service.status = 'planned'
+                 AND EXISTS (
+                     SELECT 1 FROM invoices releasing
+                     WHERE releasing.id = $1 AND releasing.invoice_type = 'final'
+                       AND NOT EXISTS (
+                           SELECT 1 FROM order_termination_settlements settlement
+                           WHERE settlement.final_invoice_id = releasing.id
+                       )
+                 )
+             )
              AND service.id IN (
                  SELECT allocation.order_leistung_id
                  FROM invoice_order_line_allocations allocation
