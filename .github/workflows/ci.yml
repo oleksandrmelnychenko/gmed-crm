@@ -360,8 +360,17 @@ jobs:
           INVOICE_PARSER_API_KEY: synthetic-compose-validation-key-000000000
         run: docker compose -f services/invoice-parser/compose.yml config --quiet
 
-  containers:
+  # One leg per image, side by side. The three builds used to run one after
+  # another in a single job (about 25 min, the sum of the builds). Each leg
+  # builds the same Dockerfile and runs the same runtime checks as before;
+  # the compose validations need no image and get a leg of their own.
+  container-images:
+    name: container-images (${{ matrix.image }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [backend, frontend, clinical-document-parser, compose]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -371,9 +380,11 @@ jobs:
       # model stage are reused. Nothing is written: the repository cache
       # quota is full and the DEV and Rust caches must not be evicted.
       - name: Set up Buildx
+        if: matrix.image != 'compose'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Build backend image
+        if: matrix.image == 'backend'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -384,6 +395,7 @@ jobs:
           cache-from: type=gha,scope=dev-server
 
       - name: Smoke test backend OCR languages
+        if: matrix.image == 'backend'
         run: >-
           docker run --rm --entrypoint sh gmed-backend:ci
           -c 'for lang in deu eng rus ukr; do tesseract --list-langs | grep -qx "$lang"; done'
@@ -391,11 +403,13 @@ jobs:
       # Imported Word templates are converted to PDF by LibreOffice inside
       # the backend (crates/server/src/docx_render.rs).
       - name: Smoke test backend Word converter
+        if: matrix.image == 'backend'
         run: >-
           docker run --rm --entrypoint sh gmed-backend:ci
           -c 'soffice --headless --version | grep -q LibreOffice'
 
       - name: Build frontend image
+        if: matrix.image == 'frontend'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: frontend
@@ -406,6 +420,7 @@ jobs:
           cache-from: type=gha,scope=dev-frontend
 
       - name: Download and verify the pinned translation model
+        if: matrix.image == 'clinical-document-parser'
         run: |
           set -euo pipefail
           archive=services/clinical-document-parser/translation-model.argosmodel
@@ -414,6 +429,7 @@ jobs:
           echo "6cd847f0c06c9c66013e6b0932e07fd54a6d90894659c02bf6c5247b72fb25b1  $archive" | sha256sum --check
 
       - name: Build clinical document parser image
+        if: matrix.image == 'clinical-document-parser'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: services/clinical-document-parser
@@ -424,9 +440,11 @@ jobs:
           cache-from: type=gha,scope=dev-clinical-document-parser
 
       - name: Verify parser image is non-root
+        if: matrix.image == 'clinical-document-parser'
         run: test "$(docker run --rm --entrypoint id gmed-clinical-document-parser:ci -u)" -ne 0
 
       - name: Smoke test isolated Paddle runtime
+        if: matrix.image == 'clinical-document-parser'
         # Same confinement as the service in docker-compose.release.yml: no
         # network, read-only root filesystem, /tmp in memory, no capabilities.
         run: >-
@@ -437,6 +455,7 @@ jobs:
           -c "import time; from PIL import Image,ImageDraw,ImageFont; from app.extraction import _get_paddle_runtime, _run_paddle; from app.parser import parse_clinical_text; image=Image.new('RGB',(1600,420),'white'); font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',72); ImageDraw.Draw(image).multiline_text((60,60),'Diagnosen\nArterielle Hypertonie',font=font,fill='black',spacing=28); outcome=_run_paddle(image,time.monotonic()+120); image.close(); _get_paddle_runtime().close(); recognized=outcome.text.casefold(); draft=parse_clinical_text(outcome.text); assert outcome.engine == 'paddle' and not outcome.timed_out and all(token in recognized for token in ('diagnosen','hypertonie')) and any(candidate.target == 'diagnosis' and 'hypertonie' in candidate.value.casefold() for candidate in draft.candidates)"
 
       - name: Smoke test Ukrainian Tesseract runtime
+        if: matrix.image == 'clinical-document-parser'
         run: >-
           docker run --rm --network none --read-only --tmpfs /tmp:size=512m,mode=1777
           --cap-drop ALL --security-opt no-new-privileges:true
@@ -445,6 +464,7 @@ jobs:
           -c "import time; from PIL import Image,ImageDraw,ImageFont; from app.extraction import _run_tesseract; image=Image.new('RGB',(1600,420),'white'); font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',72); ImageDraw.Draw(image).multiline_text((60,60),'Діагноз\nАртеріальна гіпертонія',font=font,fill='black',spacing=28); outcome=_run_tesseract(image,'ukr+eng',time.monotonic()+60); image.close(); recognized=outcome.text.casefold(); assert not outcome.timed_out and all(token in recognized for token in ('діагноз','гіпертонія'))"
 
       - name: Validate release compose stack
+        if: matrix.image == 'compose'
         env:
           GMED_JWT_SECRET: ci-secret-at-least-32-characters-long!!
           GMED_MESSAGE_ENCRYPTION_KEYS: v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
@@ -453,6 +473,7 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.release.yml config > /dev/null
 
       - name: Validate production GHCR compose stack
+        if: matrix.image == 'compose'
         env:
           GMED_DATABASE_URL: postgres://gmed:ci-password@postgres:5432/gmed
           GMED_JWT_SECRET: ci-secret-at-least-32-characters-long!!
@@ -478,6 +499,18 @@ jobs:
           -f docker-compose.prod-hetzner.yml
           -f docker-compose.ghcr.yml
           config > /dev/null
+
+  # The required status check: green only when every image leg and the
+  # compose validations passed.
+  containers:
+    if: always()
+    needs: [container-images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All container checks passed
+        env:
+          IMAGES: ${{ needs.container-images.result }}
+        run: test "$IMAGES" = success
 
   einvoice-validation:
     # Outgoing e-invoices must pass the official EN 16931 / ZUGFeRD rules, not
