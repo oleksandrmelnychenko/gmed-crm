@@ -170,7 +170,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const copy = de ? {
     title: "Patientenabrechnung",
     order: "Bezugsauftrag (optional)", noOrder: "Ohne Auftrag", currency: "Währung", quote: "Angebot für Leistungen", noQuote: "Nur Fremdkosten – ohne Angebot", type: "Rechnungsart",
-    interim: "Zwischenrechnung", final: "Schlussrechnung", due: "Fällig am", services: "Leistungen", expenses: "Weiterberechenbare Kosten",
+    interim: "Zwischenrechnung", final: "Schlussrechnung", due: "Zahlbar bis", services: "Leistungen", expenses: "Weiterberechenbare Kosten",
     waiting: "Weitere Kosten", amount: "Betrag", source: "Ursprung", payment: "Zahlung", patientInvoice: "Patientenrechnung",
     noServices: "Für diesen Auftrag gibt es keine offenen Angebotspositionen.", selectQuote: "Kein Angebot gewählt: Wählen Sie oben ein Angebot, um seine Positionen abzurechnen.", noOrderQuotes: "Für diesen Auftrag gibt es kein offenes Angebot.", noOrderForQuote: "Angebotspositionen gibt es nur mit einem Bezugsauftrag.", noExpenses: "Keine von GMED bezahlten, noch nicht berechneten Kosten.",
     create: "Rechnungsentwurf erstellen", creating: "Entwurf wird erstellt…", retry: "Aktualisieren", failed: "Die Abrechnungsdaten konnten nicht geladen werden.",
@@ -213,7 +213,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   } : {
     title: "Выставление пациенту",
     order: "Заказ (необязательно)", noOrder: "Без заказа", currency: "Валюта", quote: "Предложение с услугами", noQuote: "Только расходы — без предложения", type: "Тип счёта",
-    interim: "Промежуточный", final: "Финальный", due: "Срок оплаты", services: "Услуги", expenses: "Расходы для перевыставления",
+    interim: "Промежуточный", final: "Финальный", due: "Оплатить до", services: "Услуги", expenses: "Расходы для перевыставления",
     waiting: "Остальные расходы", amount: "Сумма", source: "Источник", payment: "Оплата", patientInvoice: "Счёт пациенту",
     noServices: "По этому заказу нет доступных позиций предложения.", selectQuote: "Предложение не выбрано: выберите предложение выше, чтобы выставить его позиции.", noOrderQuotes: "По этому заказу нет открытого предложения.", noOrderForQuote: "Позиции предложения доступны только при выбранном заказе.", noExpenses: "Нет оплаченных GMED расходов, которые ещё не выставлены пациенту.",
     create: "Создать черновик счёта", creating: "Создаём черновик…", retry: "Обновить", failed: "Не удалось загрузить данные для выставления.",

@@ -42,7 +42,7 @@ type Copy = Record<string, string>;
 const COPY: Record<"ru" | "de", Copy> = {
   ru: {
     title: "Редактировать черновик",
-    dueDate: "Срок оплаты",
+    dueDate: "Оплатить до",
     notes: "Примечание в счёте",
     recipient: "Получатель счёта…",
     lines: "Позиции из сметы",
@@ -78,7 +78,7 @@ const COPY: Record<"ru" | "de", Copy> = {
   },
   de: {
     title: "Entwurf bearbeiten",
-    dueDate: "Fällig am",
+    dueDate: "Zahlbar bis",
     notes: "Anmerkung auf der Rechnung",
     recipient: "Rechnungsempfänger…",
     lines: "Positionen aus dem Angebot",

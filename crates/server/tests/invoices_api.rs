@@ -6049,7 +6049,7 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
     assert!(text.contains("Zahlungserinnerung"), "{text}");
     assert!(text.contains(&invoice_number), "{text}");
     assert!(text.contains("119,00 €"), "{text}");
-    assert!(text.contains("Neue Zahlungsfrist"), "{text}");
+    assert!(text.contains("Zahlbar bis"), "{text}");
     assert!(
         text.contains(
             &(today + chrono::Duration::days(14))

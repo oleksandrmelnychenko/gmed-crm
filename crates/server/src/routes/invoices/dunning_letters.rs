@@ -257,10 +257,6 @@ fn dunning_letter_label(language: &str, key: &str) -> &'static str {
         ("ru", "open_amount") => "Сумма к оплате",
         ("en", "open_amount") => "Amount outstanding",
         (_, "open_amount") => "Offener Betrag",
-        ("uk", "new_due_date") => "Новий термін оплати",
-        ("ru", "new_due_date") => "Новый срок оплаты",
-        ("en", "new_due_date") => "New payment deadline",
-        (_, "new_due_date") => "Neue Zahlungsfrist",
         ("uk", "payment_reference") => "Призначення платежу",
         ("ru", "payment_reference") => "Назначение платежа",
         ("en", "payment_reference") => "Payment reference",
@@ -428,6 +424,12 @@ pub(super) fn build_dunning_letter_pdf(
             dunning_letter_label(language, "original_due_date"),
             format_invoice_pdf_date(context.invoice_due_date),
         ),
+        // The letter's own deadline, labelled like the invoice's due date
+        // (owner 2026-11-16).
+        (
+            invoice_pdf_label(language, "due_date"),
+            format_invoice_pdf_date(Some(context.payment_due_date)),
+        ),
     ];
     if !context.patient_name.is_empty() {
         cells.push((
@@ -496,7 +498,7 @@ pub(super) fn build_dunning_letter_pdf(
         true,
     );
     layout.summary_row(
-        dunning_letter_label(language, "new_due_date"),
+        invoice_pdf_label(language, "due_date"),
         &format_invoice_pdf_date(Some(context.payment_due_date)),
         true,
         false,
@@ -750,8 +752,25 @@ mod tests {
         assert!(reminder.contains("1.190,00 €"));
         assert!(reminder.contains("-500,00 €"));
         assert!(reminder.contains("690,00 €"));
-        assert!(reminder.contains("Neue Zahlungsfrist"));
-        assert!(reminder.contains("03.11.2026"));
+        // Header: the letter date, the invoice date and the new deadline as
+        // «Zahlbar bis»; the sentence names the same deadline.
+        assert!(reminder.contains("Datum\n20.10.2026"), "{reminder}");
+        assert!(
+            reminder.contains("Rechnungsdatum\n27.09.2026"),
+            "{reminder}"
+        );
+        assert!(
+            reminder.contains("Ursprünglich fällig am\n11.10.2026"),
+            "{reminder}"
+        );
+        assert!(reminder.contains("Zahlbar bis\n03.11.2026"), "{reminder}");
+        // The sentence wraps in the PDF text.
+        let flowing = reminder.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flowing.contains("Bitte überweisen Sie den offenen Betrag bis zum 03.11.2026."),
+            "{reminder}"
+        );
+        assert!(!reminder.contains("Neue Zahlungsfrist"), "{reminder}");
         assert!(reminder.contains("Verwendungszweck"));
         assert!(reminder.contains("DE02120300000000202051"));
 
@@ -763,7 +782,11 @@ mod tests {
 
         let russian = text(&context("second", "ru"));
         assert!(russian.contains("Первое требование об оплате"));
-        assert!(russian.contains("Новый срок оплаты"));
+        assert!(russian.contains("Оплатить до\n03.11.2026"), "{russian}");
+        let english = text(&context("first", "en"));
+        assert!(english.contains("Payable by\n03.11.2026"), "{english}");
+        let ukrainian = text(&context("first", "uk"));
+        assert!(ukrainian.contains("Сплатити до\n03.11.2026"), "{ukrainian}");
     }
 
     /// Owner decision 2026-11-12: a credit on another invoice is not taken

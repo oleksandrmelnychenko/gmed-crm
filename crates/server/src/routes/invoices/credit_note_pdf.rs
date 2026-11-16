@@ -1794,6 +1794,22 @@ mod tests {
         assert!(text.contains("10115 Berlin"), "{text}");
     }
 
+    /// Owner 2026-11-16: a credit note or Stornorechnung is not paid by a
+    /// date, so it prints its own date and the invoice's, never an empty
+    /// «Zahlbar bis» row.
+    #[test]
+    fn credit_note_and_storno_print_dates_but_no_payable_by_row() {
+        for transaction_type in ["credit_note", STORNO_DOCUMENT] {
+            let bytes = build_credit_note_pdf(&context(None, transaction_type)).unwrap();
+            let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+            assert!(text.contains("Datum\n27.09.2026"), "{text}");
+            assert!(text.contains("Rechnungsdatum\n01.09.2026"), "{text}");
+            for due in ["Zahlbar bis", "Fällig am"] {
+                assert!(!text.contains(due), "{transaction_type}: {text}");
+            }
+        }
+    }
+
     #[test]
     fn a_third_party_payer_reads_no_reason() {
         let mut note = context(None, "credit_note");

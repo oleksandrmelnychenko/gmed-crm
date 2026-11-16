@@ -1270,7 +1270,7 @@ export const ru = {
   invoices_status: "Статус",
   invoices_amount: "Сумма",
   invoices_issued_at: "Выставлен",
-  invoices_due_at: "Срок оплаты",
+  invoices_due_at: "Оплатить до",
   invoices_paid_at: "Дата оплаты",
   invoices_draft: "Черновик",
   invoices_issued: "Выставлен",

@@ -362,7 +362,7 @@ function DoctorFollowUpCreateForm({
           ))}
         </NativeComboboxSelect>
       </Field>
-      <Field label={tr.invoices_due_at}>
+      <Field label={tr.appointments_common_due_at}>
         <Input
           type="datetime-local"
           value={form.dueAt}

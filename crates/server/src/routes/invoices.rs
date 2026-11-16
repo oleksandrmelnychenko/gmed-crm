@@ -872,6 +872,9 @@ struct InvoicePdfContext {
     pdf_visible_to_patient: bool,
     issued_at: DateTime<Utc>,
     due_date: Option<NaiveDate>,
+    /// `invoice_payment_term_days`: a draft without a due date previews the
+    /// one its release would give (invoice date plus this term).
+    payment_term_days: u64,
     total_net: String,
     total_vat: String,
     total_gross: String,
@@ -3154,10 +3157,11 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "vat_exemption_note") => "Освобождение от НДС",
         ("en", "vat_exemption_note") => "VAT exemption",
         (_, "vat_exemption_note") => "Steuerbefreiung",
-        ("uk", "due_date") => "Термін оплати",
-        ("ru", "due_date") => "Срок оплаты",
-        ("en", "due_date") => "Due date",
-        (_, "due_date") => "Fällig am",
+        // Owner 2026-11-16: issue date and «payable by» date are two rows.
+        ("uk", "due_date") => "Сплатити до",
+        ("ru", "due_date") => "Оплатить до",
+        ("en", "due_date") => "Payable by",
+        (_, "due_date") => "Zahlbar bis",
         ("uk", "patient_id") => "ID пацієнта",
         ("ru", "patient_id") => "ID пациента",
         ("en", "patient_id") => "Patient ID",
@@ -6328,6 +6332,11 @@ async fn load_invoice_pdf_context_on(
     )
     .await?;
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
+    let payment_term_days = if row.try_get::<bool, _>("released").unwrap_or(false) {
+        release::DEFAULT_INVOICE_PAYMENT_TERM_DAYS
+    } else {
+        release::load_invoice_payment_term_days(&mut *conn).await?
+    };
     // A draft previews the recipient its release will freeze: the
     // Leistungsempfänger line, the declared e-mail and tax numbers.
     let recipient = document::read_recipient(
@@ -6383,6 +6392,7 @@ async fn load_invoice_pdf_context_on(
         due_date: row
             .try_get::<Option<NaiveDate>, _>("due_date")
             .unwrap_or_default(),
+        payment_term_days,
         total_net: decimal_to_string(
             row.try_get::<Decimal, _>("total_net")
                 .unwrap_or(Decimal::ZERO),
@@ -6621,6 +6631,20 @@ fn render_invoice_pdf_deducted_advances(
     );
 }
 
+/// The invoice date and the due date printed on the invoice. An issued
+/// invoice prints its own; a draft the ones its release today would give it
+/// (see `release::release_due_date`).
+fn invoice_pdf_issue_and_due_dates(context: &InvoicePdfContext) -> (NaiveDate, Option<NaiveDate>) {
+    if context.released {
+        return (invoice_document_date(context.issued_at), context.due_date);
+    }
+    let today = invoice_document_date(Utc::now());
+    let due_date = context
+        .due_date
+        .or_else(|| today.checked_add_days(chrono::Days::new(context.payment_term_days)));
+    (today, due_date)
+}
+
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
     let language = context.language.as_str();
     // A draft has no number and no invoice date yet: it is printed as a
@@ -6730,6 +6754,10 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         );
     }
 
+    // Rechnungsdatum and Zahlbar bis are two rows (owner 2026-11-16). A
+    // draft previews the dates a release today would give it; the draft
+    // notice and number above mark it as not issued.
+    let (issue_date, due_date) = invoice_pdf_issue_and_due_dates(context);
     let mut meta_cells = vec![
         (
             invoice_pdf_label(language, "invoice_number"),
@@ -6737,17 +6765,16 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         ),
         (
             invoice_pdf_label(language, "issued_on"),
-            format_invoice_pdf_date(
-                context
-                    .released
-                    .then(|| invoice_document_date(context.issued_at)),
-            ),
-        ),
-        (
-            invoice_pdf_label(language, "due_date"),
-            format_invoice_pdf_date(context.due_date),
+            format_invoice_pdf_date(Some(issue_date)),
         ),
     ];
+    // An old invoice without a due date prints no empty row.
+    if let Some(due_date) = due_date {
+        meta_cells.push((
+            invoice_pdf_label(language, "due_date"),
+            format_invoice_pdf_date(Some(due_date)),
+        ));
+    }
     // § 14 Abs. 4 Nr. 6 UStG: never without the time of supply. An advance
     // invoice is titled as a prepayment request already.
     let settlement = context.invoice_type != "advance";
@@ -16677,6 +16704,7 @@ mod tests {
             pdf_visible_to_patient: true,
             issued_at: Utc::now(),
             due_date: Some(NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()),
+            payment_term_days: 14,
             total_net: "145.00".to_string(),
             total_vat: "0.00".to_string(),
             total_gross: "145.00".to_string(),
@@ -16842,7 +16870,89 @@ mod tests {
         }
     }
 
-    /// A draft renders as a marked preview: no number, no invoice date.
+    fn issued_context(invoice_type: &str) -> InvoicePdfContext {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.invoice_type = invoice_type.to_string();
+        // 23:30 UTC is already the next day in Berlin.
+        context.issued_at = "2026-11-15T23:30:00Z".parse().unwrap();
+        context.due_date = Some(NaiveDate::from_ymd_opt(2026, 11, 30).unwrap());
+        context
+    }
+
+    /// Owner 2026-11-16: every invoice prints its invoice date and the date
+    /// it is payable by as two separate rows.
+    #[test]
+    fn issued_invoices_print_invoice_date_and_payable_by_as_two_rows() {
+        for invoice_type in ["advance", "interim", "final"] {
+            let text = pdf_text(&issued_context(invoice_type));
+            assert!(
+                text.contains("Rechnungsdatum\n16.11.2026"),
+                "{invoice_type}: {text}"
+            );
+            assert!(
+                text.contains("Zahlbar bis\n30.11.2026"),
+                "{invoice_type}: {text}"
+            );
+            assert!(!text.contains("Fällig am"), "{invoice_type}: {text}");
+        }
+        // A payer invoice is the same document addressed to the payer.
+        let mut payer = issued_context("final");
+        payer.recipient.is_payer = true;
+        let text = pdf_text(&payer);
+        assert!(text.contains("Rechnungsdatum\n16.11.2026"), "{text}");
+        assert!(text.contains("Zahlbar bis\n30.11.2026"), "{text}");
+        for (language, issued, due) in [
+            ("en", "Invoice date", "Payable by"),
+            ("ru", "Дата счёта", "Оплатить до"),
+            ("uk", "Дата рахунку", "Сплатити до"),
+        ] {
+            let mut context = issued_context("final");
+            context.language = language.to_string();
+            let text = pdf_text(&context);
+            assert!(text.contains(&format!("{issued}\n16.11.2026")), "{text}");
+            assert!(text.contains(&format!("{due}\n30.11.2026")), "{text}");
+        }
+    }
+
+    /// An old invoice without a due date prints no empty «Zahlbar bis» row.
+    #[test]
+    fn invoice_without_due_date_prints_no_payable_by_row() {
+        let mut context = issued_context("final");
+        context.due_date = None;
+        let text = pdf_text(&context);
+        assert!(text.contains("Rechnungsdatum\n16.11.2026"), "{text}");
+        assert!(!text.contains("Zahlbar bis"), "{text}");
+    }
+
+    /// A draft previews the dates its release today would give it: today as
+    /// the invoice date and the prepared due date, else today plus the term.
+    #[test]
+    fn draft_preview_shows_todays_invoice_date_and_the_due_date() {
+        let mut context = issued_context("final");
+        context.released = false;
+        context.invoice_number = String::new();
+        context.payment_term_days = 10;
+        let today = super::invoice_document_date(Utc::now());
+        let format = |date: NaiveDate| date.format("%d.%m.%Y").to_string();
+        let text = pdf_text(&context);
+        assert!(text.contains("ENTWURF – keine gültige Rechnung"), "{text}");
+        assert!(
+            text.contains(&format!("Rechnungsdatum\n{}", format(today))),
+            "{text}"
+        );
+        assert!(text.contains("Zahlbar bis\n30.11.2026"), "{text}");
+        context.due_date = None;
+        let text = pdf_text(&context);
+        let due = today.checked_add_days(chrono::Days::new(10)).unwrap();
+        assert!(
+            text.contains(&format!("Zahlbar bis\n{}", format(due))),
+            "{text}"
+        );
+    }
+
+    /// A draft renders as a marked preview without a number; its dates are
+    /// the ones a release today would give it.
     #[test]
     fn draft_preview_is_marked_and_carries_no_number() {
         let mut context = sample_context();

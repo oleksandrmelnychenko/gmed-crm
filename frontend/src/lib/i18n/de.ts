@@ -1275,7 +1275,7 @@ export const de = {
   invoices_status: "Status",
   invoices_amount: "Betrag",
   invoices_issued_at: "Ausgestellt am",
-  invoices_due_at: "Fällig am",
+  invoices_due_at: "Zahlbar bis",
   invoices_paid_at: "Bezahlt am",
   invoices_draft: "Entwurf",
   invoices_issued: "Ausgestellt",
