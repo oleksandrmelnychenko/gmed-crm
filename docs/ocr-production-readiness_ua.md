@@ -188,10 +188,14 @@ CI компілює parser, запускає unit/benchmark tests, synthetic coh
 runtime на синтетичному зображенні з текстом. Smoke test проходить лише якщо
 Paddle фактично розпізнав контрольні медичні слова, а не просто повернувся без
 помилки.
-Release workflow до `build-and-sign` повторює Rust format/clippy/tests,
-frontend lint/tests/build, print-binding і repository-hygiene audits, а також
-parser/benchmark/live-synthetic preflight. Тому GHCR image не публікується й не
-підписується паралельно з неперевіреним application або OCR/parser кодом.
+Release workflow повторює Rust format/clippy/tests, frontend lint/tests/build,
+print-binding і repository-hygiene audits, а також
+parser/benchmark/live-synthetic preflight. Images збираються, перевіряються й
+скануються паралельно з цими gate-ами, але потрапляють у GHCR лише за digest,
+без тегів і без підпису. Job `sign` ставить теги й підписує digest-и тільки
+після того, як пройшли всі gate-и та всі збірки, тож PROD (який приймає лише
+підписані digest-и) не може отримати image неперевіреного application або
+OCR/parser коду.
 
 Локальний еквівалент основних gate-ів запускається з кореня репозиторію:
 

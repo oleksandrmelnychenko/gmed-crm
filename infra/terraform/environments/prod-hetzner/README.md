@@ -487,9 +487,10 @@ Dependabot / `cargo deny` instead of blocking every release.
 **Step 1.** Push a `v*` tag, or explicitly dispatch `Release Build` from
 GitHub Actions for a manual promotion. A normal push to `main` produces
 only DEV images through `Dev Build`; it cannot produce an image trusted
-by PROD. The release workflow runs `Build and push` + `Sign image
-(keyless)` for all four application images and prints the digests in
-the run summary:
+by PROD. The release workflow runs `Build and push by digest` for all
+four application images beside the quality gates; once every gate and
+build passed, its `sign` job tags them, runs `Sign images (keyless)` and
+prints the digests in the run summary:
 
 ```text
 ## server

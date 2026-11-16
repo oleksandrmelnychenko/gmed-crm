@@ -517,6 +517,8 @@ jobs:
           name: release-image-${{ matrix.name }}
           path: release-image
           if-no-files-found: error
+          # "Re-run all jobs" builds new digests under the same name.
+          overwrite: true
           retention-days: 7
 
   # Runs only when every gate and every image build/scan passed: tags the
