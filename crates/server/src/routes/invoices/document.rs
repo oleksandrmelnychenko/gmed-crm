@@ -357,25 +357,85 @@ pub(super) async fn load_invoice_service_period(
         return Ok(day_span(&supplier_days));
     }
 
-    if let Some(order_id) = order_id {
-        let row = sqlx::query(
-            r#"SELECT min(date) AS first_day, max(date) AS last_day
-               FROM appointments
-               WHERE order_id = $1 AND status <> 'cancelled'"#,
-        )
-        .bind(order_id)
-        .fetch_one(&mut *conn)
-        .await?;
-        if let (Some(first), Some(last)) = (
-            row.try_get::<Option<NaiveDate>, _>("first_day")
-                .unwrap_or_default(),
-            row.try_get::<Option<NaiveDate>, _>("last_day")
-                .unwrap_or_default(),
-        ) {
-            return Ok(Some((first, last)));
-        }
+    match order_id {
+        Some(order_id) => order_planned_period(conn, order_id).await,
+        None => Ok(None),
     }
-    Ok(None)
+}
+
+/// The order's planned period: its first and last appointment, else the
+/// start and end set on the order (owner 2026-11-17). The «Новый счёт»
+/// dialog proposes the same period (`ORDER_PLANNED_PERIOD_SQL`).
+pub(crate) async fn order_planned_period(
+    conn: &mut PgConnection,
+    order_id: Uuid,
+) -> Result<Option<(NaiveDate, NaiveDate)>, sqlx::Error> {
+    let sql = format!(
+        "SELECT planned.first_day, planned.last_day FROM orders o, {ORDER_PLANNED_PERIOD_SQL} WHERE o.id = $1"
+    );
+    let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .bind(order_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    Ok(row.and_then(|row| {
+        row.try_get::<Option<NaiveDate>, _>("first_day")
+            .unwrap_or_default()
+            .zip(
+                row.try_get::<Option<NaiveDate>, _>("last_day")
+                    .unwrap_or_default(),
+            )
+    }))
+}
+
+/// `LATERAL` subquery `planned(first_day, last_day)` of an order `o`: the
+/// first and last appointment not cancelled, else `date_from`/`date_to`.
+pub(crate) const ORDER_PLANNED_PERIOD_SQL: &str = r#"LATERAL (
+    SELECT CASE WHEN visits.first_day IS NOT NULL THEN visits.first_day
+                WHEN o.date_from IS NOT NULL AND o.date_to IS NOT NULL THEN o.date_from END
+               AS first_day,
+           CASE WHEN visits.first_day IS NOT NULL THEN visits.last_day
+                WHEN o.date_from IS NOT NULL AND o.date_to IS NOT NULL THEN o.date_to END
+               AS last_day
+    FROM (
+        SELECT min(appointment.date) AS first_day, max(appointment.date) AS last_day
+        FROM appointments appointment
+        WHERE appointment.order_id = o.id AND appointment.status <> 'cancelled'
+    ) visits
+) planned"#;
+
+/// The service period staff set on the invoice: a range, or only its end
+/// («bis MM.YYYY»).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StatedServicePeriod {
+    pub from: Option<NaiveDate>,
+    pub to: NaiveDate,
+}
+
+impl StatedServicePeriod {
+    pub(crate) fn from_columns(from: Option<NaiveDate>, to: Option<NaiveDate>) -> Option<Self> {
+        to.map(|to| Self { from, to })
+    }
+
+    /// The period as a day range, when both ends are known.
+    pub(crate) fn range(self) -> Option<(NaiveDate, NaiveDate)> {
+        self.from.map(|from| (from, self.to))
+    }
+}
+
+/// Money that arrived before the invoice was issued, as the invoice states it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReceivedPayment {
+    pub received_on: NaiveDate,
+    pub amount: Decimal,
+}
+
+impl ReceivedPayment {
+    pub(crate) fn from_columns(on: Option<NaiveDate>, amount: Option<Decimal>) -> Option<Self> {
+        on.zip(amount).map(|(received_on, amount)| Self {
+            received_on,
+            amount,
+        })
+    }
 }
 
 /// Service days (Europe/Berlin) of the Concierge service lines.

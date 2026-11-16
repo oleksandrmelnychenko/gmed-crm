@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { chooseComboboxOption } from "./helpers";
+import { chooseComboboxOption, pickerSection, startClockAt } from "./helpers";
 
 const orderId = "00000000-0000-0000-0000-000000000901";
 const patientId = "00000000-0000-0000-0000-000000000301";
@@ -384,4 +384,43 @@ test("a double click on create leaves no dialog behind the invoice's sheet", asy
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(page.getByRole("dialog", { name: "Новый счёт", exact: true })).toHaveCount(0);
   expect(fixture.writes).toHaveLength(1);
+});
+
+// Owner 2026-11-17: money that arrived before the invoice is noted in the
+// create dialog; the due date stays empty (release date + term).
+test("a payment received before the invoice is sent with the new invoice", async ({ page }) => {
+  const fixture = await prepare(page);
+  Object.assign(fixture.quote, { order_period_from: "2026-10-20", order_period_to: "2026-10-25", payment_term_days: 14 });
+  await startClockAt(page);
+  const dialog = await openCreate(page);
+  await expect(dialog.getByTestId("release-due-date-default")).toHaveText("+14 дней от выставления (26.10.2026)");
+  await expect(dialog.getByTestId("invoice-service-period")).toContainText("Период оказания услуг");
+  await dialog.getByRole("checkbox", { name: "Оплата уже поступила", exact: true }).check();
+  const received = dialog.getByRole("group", { name: "Дата поступления" });
+  await received.getByRole("spinbutton", { name: pickerSection.day }).fill("10");
+  await received.getByRole("spinbutton", { name: pickerSection.month }).fill("10");
+  await received.getByRole("spinbutton", { name: pickerSection.year }).fill("2026");
+  await received.getByRole("spinbutton", { name: pickerSection.year }).press("Tab");
+  await dialog.getByRole("textbox", { name: "Сумма оплаты", exact: true }).fill("500");
+  await chooseComboboxOption(page, dialog.getByRole("combobox", { name: "Способ оплаты", exact: true }), "Наличные");
+  await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const write = fixture.writes[0] as Record<string, unknown>;
+  expect(write).toMatchObject({ invoice_type: "final", due_date: null, payment_received: { received_on: "2026-10-10", payment_method: "cash" } });
+  expect(Number((write.payment_received as { amount_gross: string }).amount_gross)).toBe(500);
+  // The order's period unchanged: the server reads it itself.
+  expect(write).not.toHaveProperty("service_period");
+  expect(fixture.errors).toEqual([]);
+});
+
+test("issuing a draft names the button and marks a due date shorter than the term", async ({ page }) => {
+  const fixture = await prepare(page);
+  Object.assign(fixture.invoice, { payment_term_days: 14, due_date: "2026-10-20" });
+  await startClockAt(page);
+  await page.goto(`/invoices?invoice=${invoiceId}`);
+  await page.getByTestId("invoice-issue-draft").click();
+  const status = page.getByRole("dialog").filter({ has: page.getByTestId("release-due-date") });
+  await expect(status.getByTestId("release-due-date-short")).toContainText("26.10.2026");
+  await expect(status.getByRole("button", { name: "Выставить счёт", exact: true })).toBeVisible();
+  expect(fixture.errors).toEqual([]);
 });

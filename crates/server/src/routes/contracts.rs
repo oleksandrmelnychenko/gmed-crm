@@ -4505,6 +4505,20 @@ async fn list_quotes(
                   successor.quote_number AS superseded_by_quote_number,
                   o.patient_id, o.source_lead_id, o.order_number, o.currency, o.contract_id,
                   o.prepayment_required, NULLIF(o.prepayment_amount, 0) AS order_prepayment_amount,
+                  -- The order's planned period, as an invoice states it
+                  -- (`document::ORDER_PLANNED_PERIOD_SQL`).
+                  COALESCE(
+                      (SELECT min(appointment.date) FROM appointments appointment
+                        WHERE appointment.order_id = o.id AND appointment.status <> 'cancelled'),
+                      CASE WHEN o.date_to IS NOT NULL THEN o.date_from END
+                  ) AS order_period_from,
+                  COALESCE(
+                      (SELECT max(appointment.date) FROM appointments appointment
+                        WHERE appointment.order_id = o.id AND appointment.status <> 'cancelled'),
+                      CASE WHEN o.date_from IS NOT NULL THEN o.date_to END
+                  ) AS order_period_to,
+                  (SELECT value #>> '{}' FROM system_settings
+                    WHERE key = 'invoice_payment_term_days') AS payment_term_days_setting,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
@@ -4635,6 +4649,12 @@ async fn list_quotes(
                         .try_get::<Option<Decimal>, _>("order_prepayment_amount")
                         .unwrap_or_default()
                         .map(decimal_to_string),
+                    "order_period_from": row.try_get::<Option<NaiveDate>, _>("order_period_from").unwrap_or_default().map(|v| v.to_string()),
+                    "order_period_to": row.try_get::<Option<NaiveDate>, _>("order_period_to").unwrap_or_default().map(|v| v.to_string()),
+                    // Due date of a release without one: invoice date + term.
+                    "payment_term_days": crate::routes::invoices::payment_term_days_from(
+                        row.try_get::<Option<String>, _>("payment_term_days_setting").unwrap_or_default().as_deref(),
+                    ),
                     "line_items": add_remaining_quote_quantities(
                         row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),

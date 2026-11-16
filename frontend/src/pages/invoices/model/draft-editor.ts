@@ -9,6 +9,18 @@
 
 import { moneyLinePartAmounts, normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
 
+import {
+  receivedPaymentFormFrom,
+  receivedPaymentPayload,
+  samePeriod,
+  sameReceivedPayment,
+  servicePeriodPayload,
+  type ReceivedPaymentForm,
+  type ReceivedPaymentPayload,
+  type ServicePeriodForm,
+  type ServicePeriodPayload,
+} from "./document-terms";
+
 export type DraftEditorQuoteLine = {
   line_index: number;
   description: string;
@@ -43,6 +55,14 @@ export type DraftEditorPayload = {
   notes: string | null;
   lines_mode: "quote_positions" | "advance_split" | "locked";
   lines_locked_reason: string | null;
+  /** Days a release without a due date adds to the invoice date. */
+  payment_term_days?: number;
+  /** Money noted as received before the invoice. */
+  payment_received?: ReceivedPaymentPayload | null;
+  /** Service period set by staff; null = the default below. */
+  service_period?: ServicePeriodPayload | null;
+  /** The period of the lines and the order. */
+  service_period_default?: { from: string; to: string } | null;
   quote_lines: DraftEditorQuoteLine[];
   advance: {
     amount_gross: string;
@@ -60,7 +80,23 @@ export type DraftForm = {
   lines: Record<number, DraftLineForm>;
   /** Gross per advance group, as typed ("119,00"), in the order of `advance.groups`. */
   split: string[];
+  receivedPayment: ReceivedPaymentForm;
+  servicePeriod: ServicePeriodForm;
 };
+
+function storedPeriod(payload: DraftEditorPayload): ServicePeriodForm {
+  return { from: payload.service_period?.from ?? "", to: payload.service_period?.to ?? "" };
+}
+
+/** The period the release prints without one set by staff. */
+export function draftPeriodDefault(payload: DraftEditorPayload): ServicePeriodForm {
+  return { from: payload.service_period_default?.from ?? "", to: payload.service_period_default?.to ?? "" };
+}
+
+/** The period shown: the one set by staff, else the default. */
+function shownPeriod(payload: DraftEditorPayload): ServicePeriodForm {
+  return payload.service_period ? storedPeriod(payload) : draftPeriodDefault(payload);
+}
 
 function quantityText(value: string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "";
@@ -87,6 +123,8 @@ export function draftFormFrom(payload: DraftEditorPayload): DraftForm {
     notes: payload.notes ?? "",
     lines,
     split: (payload.advance?.groups ?? []).map((group) => amountText(group.amount_gross)),
+    receivedPayment: receivedPaymentFormFrom(payload.payment_received),
+    servicePeriod: shownPeriod(payload),
   };
 }
 
@@ -246,7 +284,22 @@ export function draftUpdatePayload(payload: DraftEditorPayload, form: DraftForm)
       amount_gross: normalizeMoneyInput(form.split[index] ?? "") ?? "0",
     }));
   }
+  if (draftReceivedPaymentChanged(payload, form)) {
+    body.payment_received = receivedPaymentPayload(form.receivedPayment);
+  }
+  if (draftPeriodChanged(payload, form)) {
+    // The default again = none set by staff.
+    body.service_period = servicePeriodPayload(form.servicePeriod, draftPeriodDefault(payload));
+  }
   return body;
+}
+
+export function draftReceivedPaymentChanged(payload: DraftEditorPayload, form: DraftForm): boolean {
+  return !sameReceivedPayment(form.receivedPayment, receivedPaymentFormFrom(payload.payment_received), 0);
+}
+
+export function draftPeriodChanged(payload: DraftEditorPayload, form: DraftForm): boolean {
+  return !samePeriod(form.servicePeriod, shownPeriod(payload));
 }
 
 /** Whether anything in the editor differs from the stored draft. */
@@ -255,6 +308,8 @@ export function draftFormDirty(payload: DraftEditorPayload, form: DraftForm): bo
     form.dueDate !== (payload.due_date ?? "") ||
     form.notes.trim() !== (payload.notes ?? "").trim() ||
     draftLinesChanged(payload, form) ||
-    advanceSplitChanged(payload, form.split)
+    advanceSplitChanged(payload, form.split) ||
+    draftReceivedPaymentChanged(payload, form) ||
+    draftPeriodChanged(payload, form)
   );
 }

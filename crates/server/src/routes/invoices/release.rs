@@ -332,14 +332,23 @@ pub(super) async fn refresh_draft_catalog_texts(
 pub(super) async fn load_invoice_payment_term_days(
     conn: &mut PgConnection,
 ) -> Result<u64, sqlx::Error> {
-    Ok(sqlx::query_scalar::<_, String>(
-        "SELECT value #>> '{}' FROM system_settings WHERE key = 'invoice_payment_term_days'",
-    )
-    .fetch_optional(conn)
-    .await?
-    .and_then(|value| value.trim().parse::<u64>().ok())
-    .filter(|days| (1..=365).contains(days))
-    .unwrap_or(DEFAULT_INVOICE_PAYMENT_TERM_DAYS))
+    Ok(payment_term_days_from(
+        sqlx::query_scalar::<_, String>(PAYMENT_TERM_DAYS_SQL)
+            .fetch_optional(conn)
+            .await?
+            .as_deref(),
+    ))
+}
+
+/// The stored payment term as text (a subquery, usable in a select list).
+pub(crate) const PAYMENT_TERM_DAYS_SQL: &str =
+    "SELECT value #>> '{}' FROM system_settings WHERE key = 'invoice_payment_term_days'";
+
+/// The payment term a stored setting gives: 1 to 365 days, else the default.
+pub(crate) fn payment_term_days_from(raw: Option<&str>) -> u64 {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|days| (1..=365).contains(days))
+        .unwrap_or(DEFAULT_INVOICE_PAYMENT_TERM_DAYS)
 }
 
 /// The due date a released invoice carries: the requested one, else the one

@@ -1,3 +1,4 @@
+import type { ReceivedPaymentForm, ServicePeriodForm } from "./document-terms";
 import type { InvoiceCreditTransfer, InvoiceCreditTransferTarget } from "./overpayment";
 
 export type InvoiceType = "advance" | "interim" | "final";
@@ -390,6 +391,12 @@ export type PayerRelationOption = {
 };
 
 export type InvoiceItem = {
+  /** Days a release without a due date adds to the invoice date. */
+  payment_term_days?: number;
+  /** Money noted on the draft as received before the invoice. */
+  payment_received?: { received_on: string; amount_gross: string | null; payment_method: string | null } | null;
+  /** Service period set by staff (only `to`: «bis MM.YYYY»). */
+  service_period?: { from: string | null; to: string } | null;
   currency?: string;
   id: string;
   quote_id: string | null;
@@ -614,6 +621,11 @@ export type QuoteOption = {
   order_advances_billed?: string;
   /** A raised prepayment cannot be billed on this quote as a further advance. */
   supplementary_advance_blocked?: boolean;
+  /** The order's planned period: first and last appointment, else its start and end. */
+  order_period_from?: string | null;
+  order_period_to?: string | null;
+  /** Days a release without a due date adds to the invoice date. */
+  payment_term_days?: number;
   total_gross: unknown;
   line_items: InvoiceLineItem[];
 };
@@ -643,6 +655,10 @@ export type CreateForm = {
   lineQuantities: Record<string, string>;
   /** Remarks typed for selected positions, by quote line index. */
   lineComments: Record<string, string>;
+  /** Money that arrived before the invoice (Billing/CEO). */
+  receivedPayment: ReceivedPaymentForm;
+  /** The service period typed by staff; null = the order's planned one. */
+  servicePeriod: ServicePeriodForm | null;
 };
 
 export type StatusForm = {

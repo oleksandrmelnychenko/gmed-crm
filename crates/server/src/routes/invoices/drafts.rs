@@ -38,7 +38,7 @@ use uuid::Uuid;
 use super::{
     CreateInvoiceLineSelection, InvoiceCreationSnapshot, MoneyInput, QuoteInvoiceContext,
     build_selected_invoice_snapshot, closed_quote_invoice_message, coded_err, decimal_to_string,
-    ensure_interim_leaves_open_advance, ensure_patient_access,
+    document_terms, ensure_interim_leaves_open_advance, ensure_patient_access,
     ensure_quote_line_parts_within_totals, err, invoice_json_decimal,
     invoice_snapshot_has_package_overage, line_comments, link_package_consumptions_tx,
     load_allocated_quote_quantities, load_billed_quote_lines, load_invoice_detail,
@@ -241,6 +241,7 @@ struct DraftRow {
     invoice_number: Option<String>,
     invoice_type: String,
     quote_id: Option<Uuid>,
+    order_id: Option<Uuid>,
     total_net: Decimal,
     total_vat: Decimal,
     total_gross: Decimal,
@@ -258,7 +259,7 @@ impl DraftRow {
 
 const DRAFT_SELECT: &str = r#"SELECT invoice.patient_id, invoice.status::text AS status,
               invoice.released_at IS NOT NULL AS released, invoice.invoice_number,
-              invoice.invoice_type, invoice.quote_id, invoice.total_net, invoice.total_vat,
+              invoice.invoice_type, invoice.quote_id, invoice.order_id, invoice.total_net, invoice.total_vat,
               invoice.total_gross, invoice.line_items, invoice.due_date, invoice.notes,
               EXISTS (
                   SELECT 1 FROM order_termination_settlements settlement
@@ -275,6 +276,7 @@ fn draft_row(row: &sqlx::postgres::PgRow) -> DraftRow {
         invoice_number: row.try_get("invoice_number").unwrap_or_default(),
         invoice_type: row.try_get("invoice_type").unwrap_or_default(),
         quote_id: row.try_get("quote_id").unwrap_or_default(),
+        order_id: row.try_get("order_id").unwrap_or_default(),
         total_net: row.try_get("total_net").unwrap_or(Decimal::ZERO),
         total_vat: row.try_get("total_vat").unwrap_or(Decimal::ZERO),
         total_gross: row.try_get("total_gross").unwrap_or(Decimal::ZERO),
@@ -607,11 +609,26 @@ pub(super) async fn get_invoice_draft_editor(
             }
         }
     }
+    let (terms, default_period, payment_term_days) =
+        match draft_terms_for_editor(&state, invoice_id, &draft).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
     Json(json!({
         "invoice_id": invoice_id,
         "invoice_type": draft.invoice_type,
         "due_date": draft.due_date.map(|value| value.to_string()),
         "notes": draft.notes,
+        "payment_received": terms
+            .received_payment
+            .as_ref()
+            .map(document_terms::ReceivedPayment::to_json),
+        "service_period": terms.service_period.map(document_terms::ServicePeriod::to_json),
+        "payment_term_days": payment_term_days,
+        "service_period_default": default_period.map(|(from, to)| json!({
+            "from": from.to_string(),
+            "to": to.to_string(),
+        })),
         "lines_mode": mode.name(),
         "lines_locked_reason": mode.reason(),
         "quote_lines": quote_lines,
@@ -637,6 +654,53 @@ pub(super) struct UpdateInvoiceDraftRequest {
     notes: Option<String>,
     line_items: Option<Vec<CreateInvoiceLineSelection>>,
     advance_split: Option<Vec<AdvanceSplitInput>>,
+    /// Money received before the invoice (Billing/CEO); absent keeps it,
+    /// null removes it.
+    #[serde(default, deserialize_with = "document_terms::explicit_nullable")]
+    payment_received: Option<Option<document_terms::ReceivedPaymentInput>>,
+    /// The service period; absent keeps it, null returns to the one of the
+    /// lines and the order.
+    #[serde(default, deserialize_with = "document_terms::explicit_nullable")]
+    service_period: Option<Option<document_terms::ServicePeriodInput>>,
+}
+
+/// What the draft notes for its document and the period it states without
+/// one set by staff.
+async fn draft_terms_for_editor(
+    state: &AppState,
+    invoice_id: Uuid,
+    draft: &DraftRow,
+) -> Result<
+    (
+        document_terms::DraftTerms,
+        Option<(NaiveDate, NaiveDate)>,
+        u64,
+    ),
+    axum::response::Response,
+> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %invoice_id, "load the document terms of the draft");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the invoice",
+        )
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    let terms = document_terms::load(&mut conn, invoice_id)
+        .await
+        .map_err(failed)?;
+    let default_period = document_terms::default_service_period(
+        &mut conn,
+        &draft.invoice_type,
+        draft.order_id,
+        &draft.line_items,
+    )
+    .await
+    .map_err(failed)?;
+    let payment_term_days = super::release::load_invoice_payment_term_days(&mut conn)
+        .await
+        .map_err(failed)?;
+    Ok((terms, default_period, payment_term_days))
 }
 
 fn lines_locked(reason: &'static str) -> axum::response::Response {
@@ -694,6 +758,14 @@ pub(super) async fn update_invoice_draft(
             "Send either quote lines or an advance split",
         );
     }
+    let requested_period = match body.service_period.as_ref() {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(input)) => match document_terms::parse_service_period(input) {
+            Ok(value) => Some(Some(value)),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+    };
 
     let mode = lines_mode(&draft);
     let mut rebuilt: Option<(InvoiceCreationSnapshot, &'static str)> = None;
@@ -750,6 +822,22 @@ pub(super) async fn update_invoice_draft(
             "advance_split",
         ));
     }
+
+    // Without an amount the money received is the (rebuilt) invoice total.
+    let requested_payment = match body.payment_received.as_ref() {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(input)) => match document_terms::parse_received_payment(
+            input,
+            crate::app_time::today(),
+            rebuilt
+                .as_ref()
+                .map_or(draft.total_gross, |(snapshot, _)| snapshot.total_gross),
+        ) {
+            Ok(value) => Some(Some(value)),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+    };
 
     let mut transaction = match state.db.begin().await {
         Ok(value) => value,
@@ -961,6 +1049,33 @@ pub(super) async fn update_invoice_draft(
         tracing::error!(%error, %invoice_id, "store the draft header");
         return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
     }
+    let terms_before = match document_terms::load(&mut transaction, invoice_id).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load the document terms of the draft");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    let mut terms_after = terms_before.clone();
+    if let Some(payment) = requested_payment {
+        terms_after.received_payment = payment;
+    }
+    if let Some(period) = requested_period {
+        terms_after.service_period = period;
+    }
+    // Only the roles that record payments note one (owner 2026-11-17); a
+    // draft of another role keeps what they noted.
+    if terms_after.received_payment != terms_before.received_payment
+        && !auth.can(Capability::InvoicesFinance)
+    {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if terms_after != terms_before
+        && let Err(error) = document_terms::store(&mut transaction, invoice_id, &terms_after).await
+    {
+        tracing::error!(%error, %invoice_id, "store the document terms of the draft");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
 
     let after = rebuilt.as_ref().map(|(snapshot, kind)| {
         json!({
@@ -985,11 +1100,25 @@ pub(super) async fn update_invoice_draft(
                 "total_vat": decimal_to_string(locked.total_vat),
                 "total_gross": decimal_to_string(locked.total_gross),
                 "line_count": locked.line_items.as_array().map_or(0, Vec::len),
+                "payment_received": terms_before
+                    .received_payment
+                    .as_ref()
+                    .map(document_terms::ReceivedPayment::to_json),
+                "service_period": terms_before
+                    .service_period
+                    .map(document_terms::ServicePeriod::to_json),
             },
             "after": {
                 "due_date": due_date.map(|value| value.to_string()),
                 "notes": notes,
                 "lines": after,
+                "payment_received": terms_after
+                    .received_payment
+                    .as_ref()
+                    .map(document_terms::ReceivedPayment::to_json),
+                "service_period": terms_after
+                    .service_period
+                    .map(document_terms::ServicePeriod::to_json),
             },
         }),
     )

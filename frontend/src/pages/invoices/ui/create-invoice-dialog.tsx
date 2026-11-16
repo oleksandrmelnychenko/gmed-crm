@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { FilePlus2, ReceiptText, NotebookPen, Banknote, BookMarked, ListOrdered, Calculator, AlertCircle, FileText, LoaderCircle } from "lucide-react";
+import { FilePlus2, ReceiptText, NotebookPen, Banknote, BookMarked, ListOrdered, Calculator, AlertCircle, FileText, LoaderCircle, CalendarRange, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -41,6 +41,18 @@ import { partlyCreditedHint } from "../model/billing-release";
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import type { CreateForm, InvoiceType, PrepaymentAdvancePreview, QuoteOption } from "../model/types";
+import { appDateKey } from "@/lib/app-time-zone";
+import { INVOICE_PAYMENT_METHODS } from "../model/payment-correction";
+import {
+  paymentMethodLabel,
+  quotePeriodDefaults,
+  receivedPaymentProblem,
+  receivedPaymentProblemText,
+  servicePeriodProblem,
+  servicePeriodProblemText,
+} from "../model/document-terms";
+import { GuardedDateInput } from "./guarded-date-input";
+import { ReleaseDueDateField } from "./release-due-date-field";
 
 type Props = {
   open: boolean;
@@ -141,10 +153,25 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const overageOnly = isOverageOnlyInvoice(selectedQuote, form);
   const interimLimit = overageOnly ? null : interimLimitBesideOpenAdvance(selectedQuote, lines, form);
   const overOpenAdvance = interimLimit != null && selectionTotals.gross > interimLimit.maxGross;
-  const valid = prepaymentMode
+  const selectionValid = prepaymentMode
     ? quoteAvailable && Boolean(prepaymentSplit && prepaymentSplit.gross > 0)
     : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form)) && totals.gross > 0 && !overOpenAdvance;
-  const footerMessage = error || optionsError || previewError || (selectedQuote && !valid && !(prepaymentMode && !prepaymentSplit)
+  // Money received before the invoice (Billing/CEO) and the service period
+  // (owner 2026-11-17); the release records the payment with its day.
+  const canRecordPayment = hasCapability(user, "invoices.finance");
+  const [receivedDateRefused, setReceivedDateRefused] = useState(false);
+  const periodDefaults = quotePeriodDefaults(selectedQuote);
+  const period = form.servicePeriod ?? periodDefaults;
+  const periodProblem = servicePeriodProblem(period);
+  const received = form.receivedPayment;
+  const receivedProblem = receivedPaymentProblem(received, totals.gross, appDateKey());
+  const termsProblem = periodProblem
+    ? servicePeriodProblemText(periodProblem, de)
+    : receivedProblem && (received.receivedOn || receivedProblem !== "missing_date")
+      ? receivedPaymentProblemText(receivedProblem, de)
+      : null;
+  const valid = selectionValid && !periodProblem && !receivedProblem && !receivedDateRefused;
+  const footerMessage = error || optionsError || previewError || (selectedQuote && termsProblem ? termsProblem : null) || (selectedQuote && !selectionValid && !(prepaymentMode && !prepaymentSplit)
     ? overOpenAdvance
       ? (de
           ? `Die offene Vorauszahlungsrechnung fordert bereits ${money(interimLimit.openAdvance)} für dieses Angebot. Diese Zwischenrechnung darf höchstens ${money(interimLimit.maxGross)} betragen.`
@@ -256,8 +283,9 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     </NativeComboboxSelect>
                   </FormField>
                   <FormField label={t.invoices_due_at}>
-                    <Input type="date" aria-label={t.invoices_due_at} disabled={formBusy} value={form.dueDate} className={cn(inputClass, "w-full min-w-0")}
-                      onChange={(event) => onFormChange((current) => ({ ...current, dueDate: event.target.value }))} />
+                    <ReleaseDueDateField ariaLabel={t.invoices_due_at} disabled={formBusy} value={form.dueDate} className={cn(inputClass, "w-full min-w-0")}
+                      termDays={selectedQuote?.payment_term_days}
+                      onChange={(value) => onFormChange((current) => ({ ...current, dueDate: value }))} />
                   </FormField>
                 </div>
                 {final && servicesOutsideQuote.length ? (
@@ -273,6 +301,61 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   </p>
                 ) : null}
                 </section>
+
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="invoice-service-period">
+                  <AdminSectionTitle icon={CalendarRange}>
+                    {form.invoiceType === "advance"
+                      ? (de ? "Voraussichtlicher Leistungszeitraum" : "Предполагаемый период оказания услуг")
+                      : (de ? "Leistungszeitraum" : "Период оказания услуг")}
+                  </AdminSectionTitle>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField label={de ? "Von" : "С"}>
+                      <Input type="date" aria-label={de ? "Leistungszeitraum von" : "Период услуг с"} disabled={formBusy} value={period.from}
+                        className={cn(inputClass, "w-full min-w-0")}
+                        onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? periodDefaults), from: event.target.value } }))} />
+                    </FormField>
+                    <FormField label={de ? "Bis" : "По"}>
+                      <Input type="date" aria-label={de ? "Leistungszeitraum bis" : "Период услуг по"} disabled={formBusy} value={period.to}
+                        className={cn(inputClass, "w-full min-w-0")}
+                        onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? periodDefaults), to: event.target.value } }))} />
+                    </FormField>
+                  </div>
+                </section>
+
+                {canRecordPayment ? (
+                  <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="invoice-received-payment">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <input type="checkbox" className={checkboxClass} checked={received.enabled} disabled={formBusy}
+                        onChange={(event) => {
+                          const enabled = event.target.checked;
+                          onFormChange((current) => ({ ...current, receivedPayment: { ...current.receivedPayment, enabled } }));
+                        }} />
+                      <Wallet className="size-4 text-muted-foreground" aria-hidden />
+                      {de ? "Zahlung bereits eingegangen" : "Оплата уже поступила"}
+                    </label>
+                    {received.enabled ? (
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        <FormField label={de ? "Eingangsdatum" : "Дата поступления"}>
+                          <GuardedDateInput aria-label={de ? "Eingangsdatum" : "Дата поступления"} max={appDateKey()} disabled={formBusy}
+                            value={received.receivedOn} className={cn(inputClass, "w-full min-w-0")}
+                            onRefusedChange={setReceivedDateRefused}
+                            onChange={(event) => onFormChange((current) => ({ ...current, receivedPayment: { ...current.receivedPayment, receivedOn: event.target.value } }))} />
+                        </FormField>
+                        <FormField label={de ? "Betrag" : "Сумма"}>
+                          <Input inputMode="decimal" aria-label={de ? "Betrag der Zahlung" : "Сумма оплаты"} disabled={formBusy}
+                            value={received.amount} placeholder={money(totals.gross)} className={cn(inputClass, "w-full min-w-0 text-right tabular-nums")}
+                            onChange={(event) => onFormChange((current) => ({ ...current, receivedPayment: { ...current.receivedPayment, amount: event.target.value } }))} />
+                        </FormField>
+                        <FormField label={de ? "Zahlungsart" : "Способ оплаты"}>
+                          <NativeComboboxSelect aria-label={de ? "Zahlungsart" : "Способ оплаты"} disabled={formBusy} value={received.method} className={selectClass}
+                            onChange={(event) => onFormChange((current) => ({ ...current, receivedPayment: { ...current.receivedPayment, method: event.target.value } }))}>
+                            {INVOICE_PAYMENT_METHODS.map((method) => <option key={method} value={method}>{paymentMethodLabel(method, de)}</option>)}
+                          </NativeComboboxSelect>
+                        </FormField>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
 
                 {form.invoiceType === "advance" && selectedQuote && requiredPrepayment != null ? (
                   <fieldset className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">

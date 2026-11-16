@@ -8,6 +8,7 @@ import {
 import { formatMoneyAmount, moneyLineAmounts, moneyLinePartAmounts, roundCents, toCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 import { payerRelationshipKindLabel, type PayerRelationshipKind } from "@/pages/leads/model/lead-payer";
+import { blankReceivedPayment } from "./document-terms";
 
 import type {
   AccountingLedgerPayload,
@@ -172,6 +173,21 @@ export function defaultReleaseDueDate(today: Date, termDays = DEFAULT_INVOICE_PA
 }
 
 /**
+ * The due date field of a draft (owner 2026-11-17): empty = the release sets
+ * invoice date + term; a typed date stays, marked when it gives less than the
+ * term counted from a release today.
+ */
+export function releaseDueDateState(value: string, today: Date, termDays = DEFAULT_INVOICE_PAYMENT_TERM_DAYS) {
+  const defaultDate = defaultReleaseDueDate(today, termDays);
+  return {
+    defaultDate,
+    termDays,
+    empty: !value,
+    shorterThanTerm: Boolean(value) && value < defaultDate,
+  };
+}
+
+/**
  * Why the status form cannot be saved as it is: a draft is released with a due
  * date on or after the invoice date (today); a released invoice keeps its due date.
  */
@@ -307,6 +323,8 @@ export function blankCreateForm(quoteId = ""): CreateForm {
     selectedLineIndexes: [],
     lineQuantities: {},
     lineComments: {},
+    receivedPayment: blankReceivedPayment(),
+    servicePeriod: null,
   };
 }
 

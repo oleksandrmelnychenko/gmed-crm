@@ -7,8 +7,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { SectionHeading } from "@/components/ui/section-heading";
-import { Banner as ShellBanner, inputClass, textareaClass } from "@/components/ui-shell";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { Banner as ShellBanner, inputClass, selectClass, textareaClass } from "@/components/ui-shell";
 import { appDateKey } from "@/lib/app-time-zone";
+import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
 import { formatMoneyAmount } from "@/lib/money";
 
 import { fetchInvoiceDraftEditor, updateInvoiceDraft } from "../data/invoice-api";
@@ -25,6 +28,16 @@ import {
   type DraftForm,
 } from "../model/draft-editor";
 import { localizeInvoiceError } from "../model/invoice-errors";
+import {
+  paymentMethodLabel,
+  receivedPaymentProblem,
+  receivedPaymentProblemText,
+  servicePeriodProblem,
+  servicePeriodProblemText,
+} from "../model/document-terms";
+import { INVOICE_PAYMENT_METHODS } from "../model/payment-correction";
+import { GuardedDateInput } from "./guarded-date-input";
+import { ReleaseDueDateField } from "./release-due-date-field";
 
 type Props = {
   open: boolean;
@@ -78,6 +91,14 @@ const COPY: Record<"ru" | "de", Copy> = {
     sum_mismatch: "Сумма долей должна равняться сумме аванса.",
     due_past: "Срок оплаты не может быть раньше даты счёта (сегодня).",
     loadError: "Не удалось загрузить черновик.",
+    servicePeriod: "Период оказания услуг",
+    expectedServicePeriod: "Предполагаемый период оказания услуг",
+    periodFrom: "С",
+    periodTo: "По",
+    paymentReceived: "Оплата уже поступила",
+    receivedOn: "Дата поступления",
+    receivedAmount: "Сумма",
+    paymentMethod: "Способ оплаты",
   },
   de: {
     title: "Entwurf bearbeiten",
@@ -115,6 +136,14 @@ const COPY: Record<"ru" | "de", Copy> = {
     sum_mismatch: "Die Anteile müssen zusammen den Betrag der Anzahlung ergeben.",
     due_past: "Die Fälligkeit darf nicht vor dem Rechnungsdatum (heute) liegen.",
     loadError: "Der Entwurf konnte nicht geladen werden.",
+    servicePeriod: "Leistungszeitraum",
+    expectedServicePeriod: "Voraussichtlicher Leistungszeitraum",
+    periodFrom: "Von",
+    periodTo: "Bis",
+    paymentReceived: "Zahlung bereits eingegangen",
+    receivedOn: "Eingangsdatum",
+    receivedAmount: "Betrag",
+    paymentMethod: "Zahlungsart",
   },
 };
 
@@ -136,6 +165,10 @@ export function DraftInvoiceEditorDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [receivedDateRefused, setReceivedDateRefused] = useState(false);
+  const { user } = useAuth();
+  // Money received before the invoice is noted by Billing/CEO only.
+  const canRecordPayment = hasCapability(user, "invoices.finance");
 
   useEffect(() => {
     if (!open) return;
@@ -164,7 +197,16 @@ export function DraftInvoiceEditorDialog({
   const dueProblem = form?.dueDate && form.dueDate < today ? copy.due_past : null;
   const linesProblem = payload && form ? draftLinesProblem(payload, form) : null;
   const splitProblem = payload && form ? advanceSplitProblem(payload, form.split) : null;
-  const problem = dueProblem ?? (linesProblem ? copy[linesProblem] : null) ?? (splitProblem ? copy[splitProblem] : null);
+  // An empty amount is the invoice total (set by the server).
+  const receivedProblem = form ? receivedPaymentProblem(form.receivedPayment, 1, today) : null;
+  const periodProblem = form ? servicePeriodProblem(form.servicePeriod) : null;
+  const problem =
+    dueProblem ??
+    (linesProblem ? copy[linesProblem] : null) ??
+    (splitProblem ? copy[splitProblem] : null) ??
+    (periodProblem ? servicePeriodProblemText(periodProblem, lang === "de") : null) ??
+    (receivedProblem ? receivedPaymentProblemText(receivedProblem, lang === "de") : null) ??
+    (receivedDateRefused ? receivedPaymentProblemText("future_date", lang === "de") : null);
   const preview = payload && form && payload.advance ? advanceSplitPreview(payload, form.split) : null;
   const linesTotal = payload && form ? draftLinesTotal(payload, form) : null;
   const ownLinesTotal = payload && form
@@ -209,13 +251,12 @@ export function DraftInvoiceEditorDialog({
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-1.5 text-sm">
                   <span className="font-medium text-foreground">{copy.dueDate}</span>
-                  <Input
-                    type="date"
+                  <ReleaseDueDateField
                     className={inputClass}
-                    min={today}
+                    ariaLabel={copy.dueDate}
+                    termDays={payload.payment_term_days}
                     value={form.dueDate}
-                    onChange={(event) => setForm({ ...form, dueDate: event.target.value })}
-                    data-testid="invoice-draft-due-date"
+                    onChange={(value) => setForm({ ...form, dueDate: value })}
                   />
                 </label>
                 <div className="flex items-end">
@@ -243,6 +284,63 @@ export function DraftInvoiceEditorDialog({
                   />
                 </label>
               </div>
+
+              <section className="space-y-2" data-testid="invoice-draft-service-period">
+                <h3 className="text-sm font-medium text-foreground">
+                  {payload.invoice_type === "advance" ? copy.expectedServicePeriod : copy.servicePeriod}
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-muted-foreground">{copy.periodFrom}</span>
+                    <Input type="date" className={inputClass} aria-label={`${copy.servicePeriod}: ${copy.periodFrom}`}
+                      value={form.servicePeriod.from}
+                      onChange={(event) => setForm({ ...form, servicePeriod: { ...form.servicePeriod, from: event.target.value } })} />
+                  </label>
+                  <label className="space-y-1.5 text-sm">
+                    <span className="text-muted-foreground">{copy.periodTo}</span>
+                    <Input type="date" className={inputClass} aria-label={`${copy.servicePeriod}: ${copy.periodTo}`}
+                      value={form.servicePeriod.to}
+                      onChange={(event) => setForm({ ...form, servicePeriod: { ...form.servicePeriod, to: event.target.value } })} />
+                  </label>
+                </div>
+              </section>
+
+              {canRecordPayment || form.receivedPayment.enabled ? (
+                <section className="space-y-2" data-testid="invoice-draft-received-payment">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <input type="checkbox" checked={form.receivedPayment.enabled} disabled={!canRecordPayment}
+                      onChange={(event) => setForm({ ...form, receivedPayment: { ...form.receivedPayment, enabled: event.target.checked } })} />
+                    {copy.paymentReceived}
+                  </label>
+                  {form.receivedPayment.enabled ? (
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-muted-foreground">{copy.receivedOn}</span>
+                        <GuardedDateInput className={inputClass} aria-label={copy.receivedOn} max={today}
+                          disabled={!canRecordPayment} value={form.receivedPayment.receivedOn}
+                          onRefusedChange={setReceivedDateRefused}
+                          onChange={(event) => setForm({ ...form, receivedPayment: { ...form.receivedPayment, receivedOn: event.target.value } })} />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-muted-foreground">{copy.receivedAmount}</span>
+                        <MoneyInput className={`${inputClass} text-right`} aria-label={copy.receivedAmount}
+                          disabled={!canRecordPayment} value={form.receivedPayment.amount}
+                          onChange={(event) => setForm({ ...form, receivedPayment: { ...form.receivedPayment, amount: event.target.value } })} />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-muted-foreground">{copy.paymentMethod}</span>
+                        <NativeComboboxSelect className={selectClass} aria-label={copy.paymentMethod}
+                          disabled={!canRecordPayment} value={form.receivedPayment.method}
+                          onChange={(event) => setForm({ ...form, receivedPayment: { ...form.receivedPayment, method: event.target.value } })}>
+                          {INVOICE_PAYMENT_METHODS.map((method) => (
+                            <option key={method} value={method}>{paymentMethodLabel(method, lang === "de")}</option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </label>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
 
               {payload.lines_mode === "locked" ? (
                 <ShellBanner tone="warning">

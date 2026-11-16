@@ -775,3 +775,460 @@ async fn a_repeated_issue_request_writes_one_audit_row_and_lines_are_refused() {
         1
     );
 }
+
+// Money received before the invoice and the service period (owner 2026-11-17).
+
+fn berlin_today() -> chrono::NaiveDate {
+    gmed_server::app_time::today()
+}
+
+fn day_text(day: chrono::NaiveDate) -> String {
+    day.format("%d.%m.%Y").to_string()
+}
+
+async fn set_order_period(fixture: &Fixture, from: &str, to: &str) {
+    sqlx::query("UPDATE orders SET date_from = $2::date, date_to = $3::date WHERE id = $1")
+        .bind(fixture.order_id)
+        .bind(from)
+        .bind(to)
+        .execute(&fixture.pool)
+        .await
+        .unwrap();
+}
+
+async fn create_invoice(fixture: &Fixture, auth: &str, body: Value) -> (StatusCode, Value) {
+    json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", fixture.quote_id),
+        auth,
+        Some(body),
+    )
+    .await
+}
+
+async fn issue(
+    fixture: &Fixture,
+    auth: &str,
+    invoice_id: &str,
+    extra: Value,
+) -> (StatusCode, Value) {
+    let mut body = json!({ "status": "sent" });
+    if let (Some(body), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            body.insert(key.clone(), value.clone());
+        }
+    }
+    json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        auth,
+        Some(body),
+    )
+    .await
+}
+
+async fn pdf_text(fixture: &Fixture, invoice_id: &str) -> String {
+    let (status, bytes) = raw_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    pdf_extract::extract_text_from_mem(&bytes).unwrap()
+}
+
+async fn payments(fixture: &Fixture, invoice_id: &str) -> Vec<Value> {
+    let (status, body) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["items"].as_array().cloned().unwrap_or_default()
+}
+
+#[tokio::test]
+async fn money_received_before_the_invoice_is_recorded_with_its_day_on_issue() {
+    let Some(fixture) = fixture("received-full", SERVICES).await else {
+        return;
+    };
+    set_order_period(&fixture, "2026-11-20", "2026-11-25").await;
+    let received_on = berlin_today() - chrono::Days::new(2);
+    let (status, draft) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "advance",
+            "advance_basis": "positions",
+            "line_items": [{ "line_index": 0, "quantity": 2 }],
+            "payment_received": {
+                "received_on": received_on.to_string(),
+                "payment_method": "bank_transfer"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    // Without an amount: the invoice total.
+    assert_eq!(
+        dec(&draft["payment_received"]["amount_gross"]),
+        dec(&draft["total_gross"])
+    );
+    assert_eq!(draft["status"], "draft");
+    assert!(payments(&fixture, &invoice_id).await.is_empty());
+
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "paid", "{issued}");
+    let recorded = payments(&fixture, &invoice_id).await;
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    assert_eq!(recorded[0]["received_on"], received_on.to_string());
+    assert_eq!(
+        dec(&recorded[0]["amount_gross"]),
+        dec(&draft["total_gross"])
+    );
+    let linked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT payment_received_transaction_id FROM invoices WHERE id = $1::uuid",
+    )
+    .bind(&invoice_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .unwrap();
+    assert!(linked.is_some());
+    assert_eq!(
+        audit_count(&fixture.pool, "payment_recorded", &invoice_id).await,
+        1
+    );
+
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(text.contains("Zahlung erhalten am"), "{text}");
+    assert!(text.contains(&day_text(received_on)), "{text}");
+    assert!(text.contains("Bereits bezahlt"), "{text}");
+    assert!(!text.contains("Fällig am"), "{text}");
+    assert!(text.contains("Voraussichtlicher"), "{text}");
+    assert!(
+        text.contains("20.11.2026") && text.contains("25.11.2026"),
+        "{text}"
+    );
+
+    // The issued terms never change (GoBD).
+    let changed = sqlx::query(
+        "UPDATE invoices SET payment_received_on = payment_received_on - 1 WHERE id = $1::uuid",
+    )
+    .bind(&invoice_id)
+    .execute(&fixture.pool)
+    .await;
+    assert!(changed.is_err());
+}
+
+#[tokio::test]
+async fn a_part_payment_before_the_invoice_leaves_it_partly_paid() {
+    let Some(fixture) = fixture("received-part", SERVICES).await else {
+        return;
+    };
+    let received_on = berlin_today();
+    let (status, draft) =
+        create_interim(&fixture, json!([{ "line_index": 0, "quantity": 2 }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({
+            "payment_received": {
+                "received_on": received_on.to_string(),
+                "amount_gross": "100.00",
+                "payment_method": "cash"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "partially_paid", "{issued}");
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(text.contains("Zahlung erhalten am"), "{text}");
+    assert!(text.contains("100,00"), "{text}");
+    assert!(text.contains("Fällig am"), "{text}");
+    assert!(!text.contains("Bereits bezahlt"), "{text}");
+}
+
+#[tokio::test]
+async fn without_a_received_payment_the_release_records_none_and_sets_the_term() {
+    let Some(fixture) = fixture("received-none", SERVICES).await else {
+        return;
+    };
+    let (status, draft) =
+        create_interim(&fixture, json!([{ "line_index": 0, "quantity": 1 }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    assert!(draft["due_date"].is_null(), "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "sent");
+    assert!(issued["payment_received"].is_null());
+    assert!(payments(&fixture, &invoice_id).await.is_empty());
+    // No due date on the draft: invoice date + 14 days at the release.
+    assert_eq!(
+        issued["due_date"],
+        (berlin_today() + chrono::Days::new(14)).to_string()
+    );
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(!text.contains("Zahlung erhalten am"), "{text}");
+
+    // A typed due date stays as typed.
+    let typed = berlin_today() + chrono::Days::new(3);
+    let (status, draft) =
+        create_interim(&fixture, json!([{ "line_index": 1, "quantity": 1 }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "due_date": typed.to_string() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["due_date"], typed.to_string());
+}
+
+#[tokio::test]
+async fn only_billing_notes_a_received_payment_and_issues_the_draft() {
+    let Some(fixture) = fixture("received-roles", SERVICES).await else {
+        return;
+    };
+    let manager_id = seed_user(
+        &fixture.pool,
+        &format!("pm-{}", Uuid::new_v4().simple()),
+        "patient_manager",
+    )
+    .await;
+    let manager = bearer(manager_id, "patient_manager");
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           SELECT patient_id, $2, $2 FROM orders WHERE id = $1"#,
+    )
+    .bind(fixture.order_id)
+    .bind(manager_id)
+    .execute(&fixture.pool)
+    .await
+    .unwrap();
+    let received = json!({
+        "received_on": berlin_today().to_string(),
+        "payment_method": "bank_transfer"
+    });
+
+    let (status, body) = create_invoice(
+        &fixture,
+        &manager,
+        json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 0, "quantity": 1 }],
+            "payment_received": received
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, draft) = create_invoice(
+        &fixture,
+        &manager,
+        json!({ "invoice_type": "interim", "line_items": [{ "line_index": 0, "quantity": 1 }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, body) = put_draft(
+        &fixture,
+        &manager,
+        &invoice_id,
+        json!({ "payment_received": received }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "payment_received": received }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The manager's draft keeps what billing noted.
+    let (status, body) = put_draft(
+        &fixture,
+        &manager,
+        &invoice_id,
+        json!({ "notes": "Bitte überweisen" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body["payment_received"].is_null(), "{body}");
+    let (status, body) = put_draft(
+        &fixture,
+        &manager,
+        &invoice_id,
+        json!({ "payment_received": null }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, body) = issue(&fixture, &manager, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "paid", "{issued}");
+}
+
+#[tokio::test]
+async fn a_future_payment_day_is_refused_and_an_excess_needs_confirmation() {
+    let Some(fixture) = fixture("received-checks", SERVICES).await else {
+        return;
+    };
+    let tomorrow = berlin_today() + chrono::Days::new(1);
+    let (status, body) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 0, "quantity": 1 }],
+            "payment_received": { "received_on": tomorrow.to_string(), "payment_method": "cash" }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, draft) =
+        create_interim(&fixture, json!([{ "line_index": 0, "quantity": 1 }])).await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    for method in ["crypto", "legacy_import"] {
+        let (status, body) = put_draft(
+            &fixture,
+            &fixture.billing,
+            &invoice_id,
+            json!({ "payment_received": {
+                "received_on": berlin_today().to_string(),
+                "payment_method": method
+            } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "payment_received": { "received_on": tomorrow.to_string(), "payment_method": "cash" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // More than the invoice asks: the release asks to confirm the excess.
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "payment_received": {
+            "received_on": berlin_today().to_string(),
+            "amount_gross": "1000.00",
+            "payment_method": "bank_transfer"
+        } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "payment_exceeds_balance");
+    assert_eq!(body["confirm_field"], "confirm_overpayment");
+    let released: bool =
+        sqlx::query_scalar("SELECT released_at IS NOT NULL FROM invoices WHERE id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    assert!(!released, "a refused release issues nothing");
+    let (status, issued) = issue(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "confirm_overpayment": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "paid", "{issued}");
+}
+
+#[tokio::test]
+async fn the_service_period_comes_from_the_order_and_can_be_set_on_the_draft() {
+    let Some(fixture) = fixture("service-period", SERVICES).await else {
+        return;
+    };
+    set_order_period(&fixture, "2026-11-20", "2026-11-25").await;
+    let (status, draft) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "advance",
+            "advance_basis": "positions",
+            "line_items": [{ "line_index": 1, "quantity": 1 }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, editor) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/draft"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{editor}");
+    assert_eq!(editor["service_period_default"]["from"], "2026-11-20");
+    assert_eq!(editor["service_period_default"]["to"], "2026-11-25");
+    assert!(editor["service_period"].is_null());
+    assert_eq!(editor["payment_term_days"], 14);
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(
+        text.contains("20.11.2026") && text.contains("25.11.2026"),
+        "{text}"
+    );
+
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "service_period": { "from": null, "to": "2026-12-31" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["service_period"]["to"], "2026-12-31");
+    let (status, body) = put_draft(
+        &fixture,
+        &fixture.billing,
+        &invoice_id,
+        json!({ "service_period": { "from": "2026-12-31", "to": "2026-12-01" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(text.contains("bis 12.2026"), "{text}");
+    assert!(!text.contains("20.11.2026"), "{text}");
+}

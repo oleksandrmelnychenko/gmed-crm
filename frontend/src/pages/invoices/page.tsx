@@ -255,6 +255,8 @@ import {
   localizeInvoiceError,
 } from "./model/invoice-errors";
 import { GuardedDateInput } from "./ui/guarded-date-input";
+import { ReleaseDueDateField } from "./ui/release-due-date-field";
+import { createDocumentTermsPayload, quotePeriodDefaults } from "./model/document-terms";
 import { DunningBlockPanel, StornoDocumentCard } from "./ui/invoice-corrections-panel";
 import type {
   AccountingEntry,
@@ -2078,6 +2080,7 @@ function useStaffInvoicesPageContent() {
     setCreateError(null);
     try {
       const selectedLines = invoiceLineSelectionPayload(createForm);
+      const documentTerms = createDocumentTermsPayload(createForm, quotePeriodDefaults(selectedCreateQuote));
       const created = await createInvoice(createForm.quoteId, prepaymentAdvance
         ? {
             invoice_type: "advance",
@@ -2085,6 +2088,7 @@ function useStaffInvoicesPageContent() {
             due_date: createForm.dueDate || null,
             notes: createForm.notes.trim() || null,
             internal_note: createForm.internalNote.trim() || null,
+            ...documentTerms,
           }
         : {
             invoice_type: createForm.invoiceType,
@@ -2093,6 +2097,7 @@ function useStaffInvoicesPageContent() {
             notes: createForm.notes.trim() || null,
             internal_note: createForm.internalNote.trim() || null,
             ...(overageOnly ? {} : { line_items: selectedLines }),
+            ...documentTerms,
           });
       clearApiCache();
       setCreateOpen(false);
@@ -5385,15 +5390,25 @@ function useStaffInvoicesPageContent() {
                   </NativeComboboxSelect>
                 </Field>
                 <Field label={t.invoices_due_at}>
-                  <Input
-                    type="date"
-                    className={shellInputClassName}
-                    value={statusForm.dueDate}
-                    onChange={(event) =>
-                      setStatusForm((current) => ({ ...current, dueDate: event.target.value }))
-                    }
-                    disabled={!access.canManage || (detail ? !canEditInvoiceDueDate(detail) : false)}
-                  />
+                  {detail?.status === "draft" && statusForm.status === "sent" ? (
+                    <ReleaseDueDateField
+                      className={shellInputClassName}
+                      value={statusForm.dueDate}
+                      termDays={detail.payment_term_days}
+                      onChange={(value) => setStatusForm((current) => ({ ...current, dueDate: value }))}
+                      disabled={!access.canManage || !canEditInvoiceDueDate(detail)}
+                    />
+                  ) : (
+                    <Input
+                      type="date"
+                      className={shellInputClassName}
+                      value={statusForm.dueDate}
+                      onChange={(event) =>
+                        setStatusForm((current) => ({ ...current, dueDate: event.target.value }))
+                      }
+                      disabled={!access.canManage || (detail ? !canEditInvoiceDueDate(detail) : false)}
+                    />
+                  )}
                 </Field>
                 {detail?.status === "draft" && statusForm.status === "sent" ? (
                   <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground lg:col-span-2">
@@ -5474,7 +5489,9 @@ function useStaffInvoicesPageContent() {
                   }}
                 >
                   {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                  {text.saveInvoice}
+                  {detail?.status === "draft" && statusForm.status === "sent"
+                    ? (lang === "de" ? "Rechnung ausstellen" : "Выставить счёт")
+                    : text.saveInvoice}
                 </Button>
               </div>
             </div>

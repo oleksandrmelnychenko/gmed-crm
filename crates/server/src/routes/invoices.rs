@@ -39,6 +39,7 @@ mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
 mod document;
+mod document_terms;
 mod drafts;
 mod dunning_blocks;
 mod dunning_letters;
@@ -48,6 +49,7 @@ mod patient_notices;
 pub mod payer;
 pub(crate) mod rebilling_waivers;
 mod release;
+pub(crate) use release::payment_term_days_from;
 pub(crate) mod service_reversal;
 mod stored_documents;
 mod storno;
@@ -296,6 +298,10 @@ struct CreateInvoiceRequest {
     /// prepayment as "Anzahlung" lines; `positions` (default) bills the
     /// selected quote positions.
     advance_basis: Option<String>,
+    /// Money that arrived before the invoice (Billing/CEO only).
+    payment_received: Option<document_terms::ReceivedPaymentInput>,
+    /// The service period, when it is not the one of the lines and order.
+    service_period: Option<document_terms::ServicePeriodInput>,
 }
 
 #[derive(Deserialize)]
@@ -400,6 +406,10 @@ struct UpdateInvoiceStatusRequest {
     /// issued invoice only by credit note. Read so that a request carrying
     /// them is refused instead of answered with 200 (QA 2026-11-15, A-6).
     line_items: Option<Value>,
+    /// The payment received before the release exceeds what the invoice asks:
+    /// billing confirmed the excess as the patient's credit.
+    #[serde(default)]
+    confirm_overpayment: bool,
     /// Warnings about the recipient that billing confirmed for a release.
     #[serde(flatten)]
     confirmations: payer::ReleaseConfirmations,
@@ -560,6 +570,9 @@ fn payment_exceeds_balance(balance_due: Decimal, overpayment: Decimal) -> axum::
             "message": "Payment exceeds invoice balance; confirm the overpayment to record the excess as patient credit",
             "balance_due": decimal_to_string(balance_due),
             "overpayment_gross": decimal_to_string(overpayment),
+            // The release of a draft with a payment received before it
+            // asks for the same confirmation.
+            "confirm_field": "confirm_overpayment",
         })),
     )
         .into_response()
@@ -896,6 +909,10 @@ struct InvoicePdfContext {
     /// next to the period of the rendered ones. Without either and without a
     /// period the service date is the invoice date.
     services_not_rendered: document::ServicesNotRendered,
+    /// The period staff set on the invoice; it replaces `service_period`.
+    stated_service_period: Option<document::StatedServicePeriod>,
+    /// Money received before the invoice was issued (owner 2026-11-17).
+    received_payment: Option<document::ReceivedPayment>,
     order_number: String,
     quote_number: Option<String>,
     language: String,
@@ -3329,6 +3346,33 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "generated_footer") => "Сгенерировано",
         ("en", "generated_footer") => "Generated",
         (_, "generated_footer") => "Erzeugt",
+        // An advance bills services still ahead: their planned period.
+        ("uk", "expected_service_period") => "Очікуваний період надання послуг",
+        ("ru", "expected_service_period") => "Предполагаемый период оказания услуг",
+        ("en", "expected_service_period") => "Expected service period",
+        (_, "expected_service_period") => "Voraussichtlicher Leistungszeitraum",
+        ("uk", "expected_service_date") => "Очікувана дата надання послуг",
+        ("ru", "expected_service_date") => "Предполагаемая дата оказания услуг",
+        ("en", "expected_service_date") => "Expected service date",
+        (_, "expected_service_date") => "Voraussichtliches Leistungsdatum",
+        // A period of which only the end is known: «bis 11.2026».
+        ("uk", "period_until") => "до",
+        ("ru", "period_until") => "до",
+        ("en", "period_until") => "until",
+        (_, "period_until") => "bis",
+        // Money that arrived before the invoice was issued (owner 2026-11-17).
+        ("uk", "payment_received_on") => "Оплату отримано",
+        ("ru", "payment_received_on") => "Оплата получена",
+        ("en", "payment_received_on") => "Payment received on",
+        (_, "payment_received_on") => "Zahlung erhalten am",
+        ("uk", "payment_status") => "Статус оплати",
+        ("ru", "payment_status") => "Статус оплаты",
+        ("en", "payment_status") => "Payment status",
+        (_, "payment_status") => "Zahlungsstatus",
+        ("uk", "already_paid") => "Вже сплачено",
+        ("ru", "already_paid") => "Уже оплачено",
+        ("en", "already_paid") => "Already paid",
+        (_, "already_paid") => "Bereits bezahlt",
         _ => key,
     }
 }
@@ -5578,7 +5622,9 @@ async fn load_invoice_detail(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.line_items, i.notes,
-                  i.internal_note,
+                  i.internal_note, i.payment_received_on, i.payment_received_amount,
+                  i.payment_received_method, i.service_period_from, i.service_period_to,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'invoice_payment_term_days') AS payment_term_days_setting,
                   i.created_at, i.updated_at, i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.visibility_note, i.visibility_updated_at,
@@ -6170,6 +6216,32 @@ async fn load_invoice_detail(
         "display_status": invoice_display_status(&invoice_status, total_gross, credited_amount),
         "issued_at": row.try_get::<DateTime<Utc>, _>("issued_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|v| v.to_string()),
+        // The term a release without a due date gives (invoice date + days).
+        "payment_term_days": payment_term_days_from(row.try_get::<Option<String>, _>("payment_term_days_setting").unwrap_or_default().as_deref()),
+        // Noted on the draft, recorded and printed with the release.
+        "payment_received": row
+            .try_get::<Option<NaiveDate>, _>("payment_received_on")
+            .unwrap_or_default()
+            .map(|received_on| json!({
+                "received_on": received_on.to_string(),
+                "amount_gross": row
+                    .try_get::<Option<Decimal>, _>("payment_received_amount")
+                    .unwrap_or_default()
+                    .map(decimal_to_string),
+                "payment_method": row
+                    .try_get::<Option<String>, _>("payment_received_method")
+                    .unwrap_or_default(),
+            })),
+        "service_period": row
+            .try_get::<Option<NaiveDate>, _>("service_period_to")
+            .unwrap_or_default()
+            .map(|to| json!({
+                "from": row
+                    .try_get::<Option<NaiveDate>, _>("service_period_from")
+                    .unwrap_or_default()
+                    .map(|from| from.to_string()),
+                "to": to.to_string(),
+            })),
         "total_net": decimal_to_string(row.try_get::<Decimal, _>("total_net").unwrap_or(Decimal::ZERO)),
         "total_vat": decimal_to_string(row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO)),
         "total_gross": decimal_to_string(total_gross),
@@ -6274,6 +6346,8 @@ async fn load_invoice_pdf_context_on(
                   i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.prepayment_applied_amount, i.line_items, i.notes,
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
+                  i.service_period_from, i.service_period_to,
+                  i.payment_received_on, i.payment_received_amount,
                   o.order_number, i.currency, q.quote_number,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
                   p.languages,
@@ -6431,6 +6505,14 @@ async fn load_invoice_pdf_context_on(
         recipient,
         service_period,
         services_not_rendered,
+        stated_service_period: document::StatedServicePeriod::from_columns(
+            row.try_get("service_period_from").unwrap_or_default(),
+            row.try_get("service_period_to").unwrap_or_default(),
+        ),
+        received_payment: document::ReceivedPayment::from_columns(
+            row.try_get("payment_received_on").unwrap_or_default(),
+            row.try_get("payment_received_amount").unwrap_or_default(),
+        ),
         order_number: row
             .try_get::<Option<String>, _>("order_number")
             .unwrap_or_default()
@@ -6475,26 +6557,108 @@ fn invoice_pdf_sender_line(agency: &InvoicePdfAgency) -> String {
     parts.join(" · ")
 }
 
-fn format_invoice_pdf_service_period(
+/// The service period row: one day as «Leistungsdatum», a range as
+/// «Leistungszeitraum», only the end as «bis MM.YYYY»; services still ahead
+/// (an advance) as the expected ones.
+fn format_invoice_pdf_period(
     language: &str,
-    period: (NaiveDate, NaiveDate),
+    first: Option<NaiveDate>,
+    last: NaiveDate,
+    expected: bool,
 ) -> (&'static str, String) {
-    let (first, last) = period;
-    if first == last {
-        (
-            invoice_pdf_label(language, "service_date"),
-            format_invoice_pdf_date(Some(first)),
-        )
+    let period_label = if expected {
+        "expected_service_period"
     } else {
-        (
-            invoice_pdf_label(language, "service_period"),
+        "service_period"
+    };
+    match first {
+        Some(first) if first == last => (
+            invoice_pdf_label(
+                language,
+                if expected {
+                    "expected_service_date"
+                } else {
+                    "service_date"
+                },
+            ),
+            format_invoice_pdf_date(Some(first)),
+        ),
+        Some(first) => (
+            invoice_pdf_label(language, period_label),
             format!(
                 "{} – {}",
                 format_invoice_pdf_date(Some(first)),
                 format_invoice_pdf_date(Some(last))
             ),
-        )
+        ),
+        None => (
+            invoice_pdf_label(language, period_label),
+            format!(
+                "{} {}",
+                invoice_pdf_label(language, "period_until"),
+                last.format("%m.%Y")
+            ),
+        ),
     }
+}
+
+/// Money received before the invoice: what was payable after the credited
+/// advances, and what is left of it.
+fn invoice_pdf_received_figures(
+    context: &InvoicePdfContext,
+) -> Option<(document::ReceivedPayment, Decimal)> {
+    let received = context.received_payment?;
+    let gross = Decimal::from_str_exact(context.total_gross.trim()).unwrap_or(Decimal::ZERO);
+    let prepayment =
+        Decimal::from_str_exact(context.prepayment_applied_amount.trim()).unwrap_or(Decimal::ZERO);
+    let remaining = (gross - prepayment - received.amount)
+        .max(Decimal::ZERO)
+        .round_cents();
+    Some((received, remaining))
+}
+
+/// The totals of an invoice paid (in part) before it was issued: the invoice
+/// amount, the credited advances, the received payment with its day and what
+/// is still to pay.
+fn render_invoice_pdf_received_payment(
+    layout: &mut InvoicePdfLayout,
+    context: &InvoicePdfContext,
+    total_gross: &str,
+) {
+    let language = context.language.as_str();
+    let Some((received, remaining)) = invoice_pdf_received_figures(context) else {
+        return;
+    };
+    layout.summary_row(
+        invoice_pdf_label(language, "invoice_amount"),
+        total_gross,
+        true,
+        false,
+    );
+    if !invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
+        layout.summary_row(
+            invoice_pdf_label(language, "prepayment_applied"),
+            &format_invoice_pdf_deduction(&context.prepayment_applied_amount, &context.currency),
+            false,
+            false,
+        );
+    }
+    layout.summary_row(
+        &format!(
+            "{} {}",
+            invoice_pdf_label(language, "payment_received_on"),
+            format_invoice_pdf_date(Some(received.received_on))
+        ),
+        &format_invoice_pdf_deduction(&received.amount.to_string(), &context.currency),
+        false,
+        false,
+    );
+    layout.summary_row(
+        invoice_pdf_label(language, "amount_payable"),
+        &format_invoice_pdf_money(&remaining.to_string(), &context.currency),
+        true,
+        true,
+    );
 }
 
 fn invoice_pdf_vat_group_label(language: &str, row: &document::VatBreakdownRow) -> String {
@@ -6790,10 +6954,30 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             invoice_pdf_label(language, "service_date"),
             invoice_pdf_label(language, "service_not_rendered").to_string(),
         ));
+        // A period staff set for these services is when they are expected.
+        if let Some(stated) = context.stated_service_period {
+            meta_cells.push(format_invoice_pdf_period(
+                language,
+                stated.from,
+                stated.to,
+                true,
+            ));
+        }
     } else {
-        if let Some(period) = context.service_period {
-            let (label, value) = format_invoice_pdf_service_period(language, period);
-            meta_cells.push((label, value));
+        if let Some(stated) = context.stated_service_period {
+            meta_cells.push(format_invoice_pdf_period(
+                language,
+                stated.from,
+                stated.to,
+                !settlement,
+            ));
+        } else if let Some(period) = context.service_period {
+            meta_cells.push(format_invoice_pdf_period(
+                language,
+                Some(period.0),
+                period.1,
+                !settlement,
+            ));
         } else if settlement {
             // Without dated services the service date is the invoice date
             // (QA D-11).
@@ -6808,6 +6992,30 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             meta_cells.push((
                 invoice_pdf_label(language, "service_remaining"),
                 invoice_pdf_label(language, "service_not_rendered").to_string(),
+            ));
+        }
+    }
+    // Money that arrived before the invoice (owner 2026-11-17): its day, and
+    // its amount when something is left to pay; nothing left, no due date.
+    if let Some((received, remaining)) = invoice_pdf_received_figures(context) {
+        let day = format_invoice_pdf_date(Some(received.received_on));
+        meta_cells.push((
+            invoice_pdf_label(language, "payment_received_on"),
+            if remaining > Decimal::ZERO {
+                format!(
+                    "{day} · {}",
+                    format_invoice_pdf_money(&received.amount.to_string(), &context.currency)
+                )
+            } else {
+                day
+            },
+        ));
+        if remaining.is_zero() {
+            let due_label = invoice_pdf_label(language, "due_date");
+            meta_cells.retain(|(label, _)| *label != due_label);
+            meta_cells.push((
+                invoice_pdf_label(language, "payment_status"),
+                invoice_pdf_label(language, "already_paid").to_string(),
             ));
         }
     }
@@ -7021,8 +7229,11 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     // Credited advances reduce what is still to pay (§ 14 Abs. 5 UStG), so
     // the document shows them for the arithmetic to add up. Payments and
-    // credit notes recorded later are not part of the issued invoice.
-    if invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
+    // credit notes recorded later are not part of the issued invoice; money
+    // received before the release is (owner 2026-11-17).
+    if context.received_payment.is_some() {
+        render_invoice_pdf_received_payment(&mut layout, context, &total_gross);
+    } else if invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
         layout.summary_row(
             invoice_pdf_label(language, "invoice_amount"),
             &total_gross,
@@ -9087,6 +9298,23 @@ async fn create_invoice_from_quote(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    // Money received before the invoice is recorded by the roles that record
+    // payments (owner 2026-11-17).
+    if body.payment_received.is_some() && !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let mut document_terms = document_terms::DraftTerms {
+        received_payment: None,
+        service_period: match body
+            .service_period
+            .as_ref()
+            .map(document_terms::parse_service_period)
+        {
+            Some(Ok(value)) => Some(value),
+            Some(Err(message)) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+            None => None,
+        },
+    };
 
     let prepayment_basis = match body
         .advance_basis
@@ -9130,6 +9358,17 @@ async fn create_invoice_from_quote(
         validate_invoice_creation_for_quote(&state, &ctx, &invoice_type, prepayment_basis).await
     {
         return resp;
+    }
+    // Without an amount the money received is the invoice total.
+    if let Some(input) = body.payment_received.as_ref() {
+        match document_terms::parse_received_payment(
+            input,
+            crate::app_time::today(),
+            invoice_snapshot.total_gross,
+        ) {
+            Ok(value) => document_terms.received_payment = Some(value),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        }
     }
 
     // Drafts carry no invoice number; it is assigned when the invoice is
@@ -9197,6 +9436,16 @@ async fn create_invoice_from_quote(
                 payer::store_invoice_payer(&mut transaction, invoice_id, &payer.record, None).await
             {
                 tracing::error!(%error, %invoice_id, "store inherited invoice payer");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+            if document_terms != document_terms::DraftTerms::default()
+                && let Err(error) =
+                    document_terms::store(&mut transaction, invoice_id, &document_terms).await
+            {
+                tracing::error!(%error, %invoice_id, "store the received payment and service period");
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to create invoice",
@@ -9298,6 +9547,13 @@ async fn create_invoice_from_quote(
                     "quote_number": ctx.quote_number,
                     "order_number": ctx.order_number,
                     "line_allocations": invoice_snapshot.allocations.len(),
+                    "payment_received": document_terms
+                        .received_payment
+                        .as_ref()
+                        .map(document_terms::ReceivedPayment::to_json),
+                    "service_period": document_terms
+                        .service_period
+                        .map(document_terms::ServicePeriod::to_json),
                 }),
             )
             .await
@@ -10727,6 +10983,337 @@ async fn run_paid_invoice_follow_up(
     }
 }
 
+/// One receipt on an invoice, as recorded by billing or by the release of a
+/// draft that notes money received before it (owner 2026-11-17).
+struct PaymentReceipt<'a> {
+    request_id: Uuid,
+    amount_gross: Decimal,
+    payment_method: &'a str,
+    payment_reference: Option<String>,
+    received_on: NaiveDate,
+    note: Option<String>,
+    accept_overpayment: bool,
+    payer_name: Option<String>,
+    category_split: Option<&'a [PaymentCategorySplitPart]>,
+}
+
+struct RecordedPayment {
+    payment_id: Uuid,
+    overpayment_gross: Decimal,
+    applied_advances: Vec<advance_application::AppliedAdvance>,
+}
+
+/// Records a payment on the locked, released invoice of `context` inside the
+/// caller's transaction: the overpayment confirmation, the VAT split of an
+/// advance, the journal and accounting entries, the settlement status, the
+/// advances it lets a final invoice credit, and the audit rows. The caller
+/// commits and runs the follow-ups.
+async fn record_invoice_payment_tx(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    invoice_type: &str,
+    receipt: &PaymentReceipt<'_>,
+    actor_id: Uuid,
+) -> Result<RecordedPayment, axum::response::Response> {
+    let invoice_id = context.invoice_id;
+    let amount_gross = receipt.amount_gross;
+    let failed = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        )
+    };
+    if matches!(context.invoice_status.as_str(), "draft" | "cancelled") {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Payments require an active released invoice",
+        ));
+    }
+    let current_cash_paid: Decimal = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(
+                  CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END
+               ), 0)
+           FROM invoice_payment_transactions
+           WHERE invoice_id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "sum invoice payments");
+        failed()
+    })?;
+    let current_cash_refunded: Decimal = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(
+                  CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END
+               ), 0)
+           FROM invoice_refund_transactions
+           WHERE invoice_id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "sum invoice refunds");
+        failed()
+    })?;
+    let balance_due = (context.total_gross
+        - context.credited_amount
+        - context.prepayment_applied_amount
+        - (current_cash_paid - current_cash_refunded))
+        .max(Decimal::ZERO);
+    let overpayment_gross = (amount_gross - balance_due).max(Decimal::ZERO);
+    if overpayment_gross > Decimal::ZERO && !receipt.accept_overpayment {
+        return Err(payment_exceeds_balance(balance_due, overpayment_gross));
+    }
+    let category_split = match receipt.category_split {
+        Some(parts) => Some(
+            checked_payment_category_split(
+                transaction,
+                invoice_id,
+                invoice_type,
+                amount_gross,
+                overpayment_gross,
+                parts,
+            )
+            .await?,
+        ),
+        None => None,
+    };
+
+    // Who remitted the money when it was not the recipient (e.g. a grandparent
+    // paying the parents' invoice); informational, not a recipient change.
+    if receipt
+        .payer_name
+        .as_ref()
+        .is_some_and(|name| name.chars().count() > 200)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Payer name is too long (max 200)",
+        ));
+    }
+    let payment_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, request_id, amount_gross, payment_method,
+                payment_reference, received_on, note, created_by, payer_name
+           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .bind(receipt.request_id)
+    .bind(amount_gross)
+    .bind(receipt.payment_method)
+    .bind(receipt.payment_reference.clone())
+    .bind(receipt.received_on)
+    .bind(receipt.note.clone())
+    .bind(actor_id)
+    .bind(receipt.payer_name.clone())
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(payment_id) => payment_id,
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Payments require an active released invoice",
+            ));
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice payment");
+            return Err(failed());
+        }
+    };
+    if let Some(rows) = category_split.as_deref()
+        && let Err(e) =
+            store_payment_category_split(transaction, invoice_id, payment_id, rows, actor_id).await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "store payment VAT split");
+        return Err(failed());
+    }
+    if let Err(e) = insert_invoice_payment_accounting_entries(
+        transaction,
+        context,
+        payment_id,
+        "payment",
+        amount_gross,
+        receipt.payment_method,
+        receipt.payment_reference.as_deref(),
+        receipt.received_on,
+        actor_id,
+    )
+    .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert payment accounting entries");
+        return Err(failed());
+    }
+    if let Err(e) = recompute_invoice_settlement_status(transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after payment");
+        return Err(failed());
+    }
+    // An advance paid after the final invoice was released settles it now.
+    let applied_advances = match apply_advances_to_open_final_invoices(
+        transaction,
+        invoice_id,
+        actor_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "apply paid advance to final invoice");
+            return Err(failed());
+        }
+    };
+    if let Err(error) = write_invoice_audit_tx(
+        transaction,
+        actor_id,
+        "payment_recorded",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "request_id": receipt.request_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "overpayment_gross": decimal_to_string(overpayment_gross),
+            "payment_method": receipt.payment_method,
+            "payment_reference": receipt.payment_reference,
+            "payer_name": receipt.payer_name,
+            "received_on": receipt.received_on.to_string(),
+            "patient_id": context.patient_id,
+            "category_split": category_split.as_deref().map(advance_rows::rows_to_json),
+        }),
+    )
+    .await
+    {
+        tracing::error!(%error, "audit payment_recorded");
+        return Err(failed());
+    }
+    if let Err(error) = advance_application::audit_applied_advances_tx(
+        transaction,
+        actor_id,
+        "advance_paid",
+        &applied_advances,
+    )
+    .await
+    {
+        tracing::error!(%error, "audit advances applied by payment");
+        return Err(failed());
+    }
+    Ok(RecordedPayment {
+        payment_id,
+        overpayment_gross,
+        applied_advances,
+    })
+}
+
+/// The release of a draft that notes money received before it (owner
+/// 2026-11-17): the payment is recorded with that receipt day by the payment
+/// path, inside the release, after the advances the release credits.
+async fn record_received_payment_at_release(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+    accept_overpayment: bool,
+    actor_id: Uuid,
+) -> Result<Option<RecordedPayment>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT invoice.order_id, invoice.patient_id, invoice.invoice_number, invoice.status,
+                  invoice.invoice_type, invoice.total_vat, invoice.total_gross,
+                  invoice.credited_amount, invoice.prepayment_applied_amount,
+                  invoice.line_items, invoice.currency, invoice.payment_received_on,
+                  invoice.payment_received_amount, invoice.payment_received_method,
+                  invoice.payment_received_transaction_id
+           FROM invoices invoice
+           WHERE invoice.id = $1
+           FOR UPDATE"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %invoice_id, "load the payment received before the invoice");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        )
+    })?;
+    let (Some(received_on), Some(amount_gross), Some(payment_method)) = (
+        row.try_get::<Option<NaiveDate>, _>("payment_received_on")
+            .unwrap_or_default(),
+        row.try_get::<Option<Decimal>, _>("payment_received_amount")
+            .unwrap_or_default(),
+        row.try_get::<Option<String>, _>("payment_received_method")
+            .unwrap_or_default(),
+    ) else {
+        return Ok(None);
+    };
+    if row
+        .try_get::<Option<Uuid>, _>("payment_received_transaction_id")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return Ok(None);
+    }
+    if received_on > crate::app_time::today() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid payment date",
+        ));
+    }
+    let context = InvoicePaymentContext {
+        invoice_id,
+        order_id: row.try_get("order_id").unwrap_or_default(),
+        patient_id: row.try_get("patient_id").unwrap_or_default(),
+        invoice_number: row
+            .try_get::<Option<String>, _>("invoice_number")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+        invoice_status: row.try_get("status").unwrap_or_default(),
+        total_vat: row.try_get("total_vat").unwrap_or(Decimal::ZERO),
+        total_gross: row.try_get("total_gross").unwrap_or(Decimal::ZERO),
+        credited_amount: row.try_get("credited_amount").unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+        line_items: row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| json!([])),
+    };
+    let recorded = record_invoice_payment_tx(
+        transaction,
+        &context,
+        &row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+        &PaymentReceipt {
+            request_id: Uuid::new_v4(),
+            amount_gross,
+            payment_method: &payment_method,
+            payment_reference: None,
+            received_on,
+            note: None,
+            accept_overpayment,
+            payer_name: None,
+            category_split: None,
+        },
+        actor_id,
+    )
+    .await?;
+    sqlx::query("UPDATE invoices SET payment_received_transaction_id = $2 WHERE id = $1")
+        .bind(invoice_id)
+        .bind(recorded.payment_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %invoice_id, "link the payment received before the invoice");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            )
+        })?;
+    Ok(Some(recorded))
+}
+
 async fn create_invoice_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -10930,223 +11517,34 @@ async fn create_invoice_payment(
             Err(resp) => resp,
         };
     }
-    if matches!(context.invoice_status.as_str(), "draft" | "cancelled") {
-        return err(
-            StatusCode::CONFLICT,
-            "Payments require an active released invoice",
-        );
-    }
-    let current_cash_paid: Decimal = match sqlx::query_scalar(
-        r#"SELECT COALESCE(SUM(
-                  CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END
-               ), 0)
-           FROM invoice_payment_transactions
-           WHERE invoice_id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "sum invoice payments");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to record payment",
-            );
-        }
-    };
-    let current_cash_refunded: Decimal = match sqlx::query_scalar(
-        r#"SELECT COALESCE(SUM(
-                  CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END
-               ), 0)
-           FROM invoice_refund_transactions
-           WHERE invoice_id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "sum invoice refunds");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to record payment",
-            );
-        }
-    };
-    let balance_due = (context.total_gross
-        - context.credited_amount
-        - context.prepayment_applied_amount
-        - (current_cash_paid - current_cash_refunded))
-        .max(Decimal::ZERO);
-    let overpayment_gross = (amount_gross - balance_due).max(Decimal::ZERO);
-    if overpayment_gross > Decimal::ZERO && !body.accept_overpayment.unwrap_or(false) {
-        return payment_exceeds_balance(balance_due, overpayment_gross);
-    }
-    let category_split = match body.category_split.as_deref() {
-        Some(parts) => match checked_payment_category_split(
-            &mut transaction,
-            invoice_id,
-            &row.try_get::<String, _>("invoice_type").unwrap_or_default(),
-            amount_gross,
-            overpayment_gross,
-            parts,
-        )
-        .await
-        {
-            Ok(rows) => Some(rows),
-            Err(response) => return response,
-        },
-        None => None,
-    };
-
-    // Who remitted the money when it was not the recipient (e.g. a grandparent
-    // paying the parents' invoice); informational, not a recipient change.
     let payer_name = normalize_optional(body.payer_name.as_deref());
-    if payer_name
-        .as_ref()
-        .is_some_and(|name| name.chars().count() > 200)
-    {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Payer name is too long (max 200)",
-        );
-    }
-    let payment_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO invoice_payment_transactions (
-                invoice_id, transaction_type, request_id, amount_gross, payment_method,
-                payment_reference, received_on, note, created_by, payer_name
-           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING id"#,
-    )
-    .bind(invoice_id)
-    .bind(body.request_id)
-    .bind(amount_gross)
-    .bind(payment_method)
-    .bind(payment_reference.clone())
-    .bind(received_on)
-    .bind(note.clone())
-    .bind(auth.user_id)
-    .bind(payer_name.clone())
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(payment_id) => payment_id,
-        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
-            return err(
-                StatusCode::CONFLICT,
-                "Payments require an active released invoice",
-            );
-        }
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice payment");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to record payment",
-            );
-        }
-    };
-    if let Some(rows) = category_split.as_deref()
-        && let Err(e) = store_payment_category_split(
-            &mut transaction,
-            invoice_id,
-            payment_id,
-            rows,
-            auth.user_id,
-        )
-        .await
-    {
-        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "store payment VAT split");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to record payment",
-        );
-    }
-    if let Err(e) = insert_invoice_payment_accounting_entries(
+    let recorded = match record_invoice_payment_tx(
         &mut transaction,
         &context,
-        payment_id,
-        "payment",
-        amount_gross,
-        payment_method,
-        payment_reference.as_deref(),
-        received_on,
-        auth.user_id,
-    )
-    .await
-    {
-        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert payment accounting entries");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to record payment",
-        );
-    }
-    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after payment");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to record payment",
-        );
-    }
-    // An advance paid after the final invoice was released settles it now.
-    let applied_advances = match apply_advances_to_open_final_invoices(
-        &mut transaction,
-        invoice_id,
+        &row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+        &PaymentReceipt {
+            request_id: body.request_id,
+            amount_gross,
+            payment_method,
+            payment_reference: payment_reference.clone(),
+            received_on,
+            note: note.clone(),
+            accept_overpayment: body.accept_overpayment.unwrap_or(false),
+            payer_name,
+            category_split: body.category_split.as_deref(),
+        },
         auth.user_id,
     )
     .await
     {
         Ok(value) => value,
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "apply paid advance to final invoice");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to record payment",
-            );
-        }
+        Err(response) => return response,
     };
-    if let Err(error) = write_invoice_audit_tx(
-        &mut transaction,
-        auth.user_id,
-        "payment_recorded",
-        invoice_id,
-        serde_json::json!({
-            "payment_transaction_id": payment_id,
-            "request_id": body.request_id,
-            "amount_gross": decimal_to_string(amount_gross),
-            "overpayment_gross": decimal_to_string(overpayment_gross),
-            "payment_method": payment_method,
-            "payment_reference": payment_reference,
-            "payer_name": payer_name,
-            "received_on": received_on.to_string(),
-            "patient_id": patient_id,
-            "category_split": category_split.as_deref().map(advance_rows::rows_to_json),
-        }),
-    )
-    .await
-    {
-        tracing::error!(%error, "audit payment_recorded");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to record payment",
-        );
-    }
-    if let Err(error) = advance_application::audit_applied_advances_tx(
-        &mut transaction,
-        auth.user_id,
-        "advance_paid",
-        &applied_advances,
-    )
-    .await
-    {
-        tracing::error!(%error, "audit advances applied by payment");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to record payment",
-        );
-    }
+    let RecordedPayment {
+        payment_id,
+        overpayment_gross,
+        applied_advances,
+    } = recorded;
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice payment");
         return err(
@@ -14129,6 +14527,8 @@ async fn load_einvoice(
         r#"SELECT i.invoice_number, i.invoice_type, i.issued_at, i.created_at, i.due_date,
                   i.currency, i.total_net, i.total_vat, i.total_gross,
                   i.prepayment_applied_amount, i.line_items, i.notes, i.order_id,
+                  i.service_period_from, i.service_period_to,
+                  i.payment_received_on, i.payment_received_amount,
                   i.patient_id, o.order_number,
                   {recipient_columns},
                   (SELECT jsonb_object_agg(key, value #>> '{{}}') FROM system_settings
@@ -14170,8 +14570,19 @@ async fn load_einvoice(
     // Service period, services billed ahead and deducted advances as printed
     // on the invoice.
     let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
-    let (service_period, services_not_rendered) =
+    let (mut service_period, services_not_rendered) =
         document::load_invoice_service_timing(conn, &invoice_type, order_id, &line_items).await?;
+    // The period staff set replaces the computed one, as printed; one known
+    // only by its end month has no BT-73/74 days.
+    if services_not_rendered != document::ServicesNotRendered::All
+        && let Some(range) = document::StatedServicePeriod::from_columns(
+            row.try_get("service_period_from").unwrap_or_default(),
+            row.try_get("service_period_to").unwrap_or_default(),
+        )
+        .and_then(document::StatedServicePeriod::range)
+    {
+        service_period = Some(range);
+    }
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     let currency = row
         .try_get::<String, _>("currency")
@@ -14266,11 +14677,32 @@ async fn load_einvoice(
         .or(row.try_get::<DateTime<Utc>, _>("created_at").ok())
         .unwrap_or_else(Utc::now);
 
+    // Money received before the invoice is paid already (BT-113), as the
+    // printed invoice deducts it; nothing left to pay, no due date.
+    let advances_credited = row
+        .try_get::<Decimal, _>("prepayment_applied_amount")
+        .unwrap_or(Decimal::ZERO);
+    let received_before = document::ReceivedPayment::from_columns(
+        row.try_get("payment_received_on").unwrap_or_default(),
+        row.try_get("payment_received_amount").unwrap_or_default(),
+    )
+    .map_or(Decimal::ZERO, |received| {
+        received
+            .amount
+            .min((total_gross - advances_credited).max(Decimal::ZERO))
+    });
+    let prepaid_amount = advances_credited + received_before;
+    let due_date = if received_before > Decimal::ZERO && prepaid_amount >= total_gross {
+        None
+    } else {
+        row.try_get("due_date").unwrap_or_default()
+    };
+
     Ok(Some(zugferd::EInvoice {
         number: row.try_get("invoice_number").unwrap_or_default(),
         invoice_type,
         issue_date: invoice_document_date(issued_at),
-        due_date: row.try_get("due_date").unwrap_or_default(),
+        due_date,
         service_period,
         service_note: einvoice_service_note(services_not_rendered),
         currency,
@@ -14300,9 +14732,7 @@ async fn load_einvoice(
         },
         lines,
         total_gross,
-        prepaid_amount: row
-            .try_get("prepayment_applied_amount")
-            .unwrap_or(Decimal::ZERO),
+        prepaid_amount,
         prepaid_invoices: deducted_advances
             .iter()
             .map(|advance| zugferd::EInvoiceReference {
@@ -16492,6 +16922,30 @@ async fn update_invoice_status(
                 Vec::new()
             };
 
+            // Money that arrived before the invoice (owner 2026-11-17): the
+            // release records it with its receipt day, after the advances it
+            // credits and before the issued document is rendered.
+            let received_payment = if releasing {
+                match record_received_payment_at_release(
+                    &mut transaction,
+                    invoice_id,
+                    body.confirm_overpayment,
+                    auth.user_id,
+                )
+                .await
+                {
+                    Ok(value) => value,
+                    Err(response) => {
+                        for credit in &mut advance_credit_notes {
+                            credit.discard_document().await;
+                        }
+                        return response;
+                    }
+                }
+            } else {
+                None
+            };
+
             let settlement = match sqlx::query(
                 r#"SELECT status, paid_amount, prepayment_applied_amount, paid_at
                    FROM invoices
@@ -16577,6 +17031,9 @@ async fn update_invoice_status(
                         "released": releasing,
                         "invoice_number": released_number,
                         "stored_document_sha256": stored_sha256,
+                        "payment_received_transaction_id": received_payment
+                            .as_ref()
+                            .map(|payment| payment.payment_id),
                         "dunning_block_id": dunning_block_id,
                         "dunning_block_reason": block_reason,
                         "storno_document_id": issued_storno.as_ref().map(|storno| storno.id),
@@ -16630,6 +17087,27 @@ async fn update_invoice_status(
             .await;
             for credit in &advance_credit_notes {
                 credit.publish(&state, auth.user_id).await;
+            }
+            if let Some(payment) = &received_payment {
+                advance_application::follow_up_applied_advances(
+                    &state,
+                    &auth,
+                    "advance_paid",
+                    &payment.applied_advances,
+                )
+                .await;
+                crate::realtime::publish_invoice_event(
+                    &state,
+                    Some(auth.user_id),
+                    "invoice.payment_recorded",
+                    invoice_id,
+                    serde_json::json!({
+                        "payment_transaction_id": payment.payment_id,
+                        "overpayment_gross": decimal_to_string(payment.overpayment_gross),
+                        "patient_id": patient_id,
+                    }),
+                )
+                .await;
             }
             if let Some(paid_at) = paid_at
                 && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
@@ -16731,6 +17209,8 @@ mod tests {
             },
             service_period: None,
             services_not_rendered: document::ServicesNotRendered::None,
+            stated_service_period: None,
+            received_payment: None,
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
             language: "ru".to_string(),
@@ -17105,6 +17585,75 @@ mod tests {
         let text = pdf_text(&context);
         assert!(!text.contains("Leistungsdatum"), "{text}");
         assert!(!text.contains("noch nicht erbracht"), "{text}");
+    }
+
+    /// Owner 2026-11-17: money received before the invoice is stated with its
+    /// day; nothing left to pay, no due date; an advance names the expected
+    /// period, a period known only by its end prints its month.
+    #[test]
+    fn money_received_before_the_invoice_and_the_service_period_are_printed() {
+        let day = |month, day| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.invoice_type = "advance".to_string();
+        context.service_period = Some((day(11, 20), day(11, 25)));
+        context.received_payment = Some(document::ReceivedPayment {
+            received_on: day(11, 15),
+            amount: rust_decimal::Decimal::new(145, 0),
+        });
+        let text = pdf_text(&context);
+        assert!(
+            text.contains("Voraussichtlicher Leistungszeitraum"),
+            "{text}"
+        );
+        assert!(text.contains("20.11.2026 – 25.11.2026"), "{text}");
+        assert!(text.contains("Zahlung erhalten am"), "{text}");
+        assert!(text.contains("15.11.2026"), "{text}");
+        assert!(text.contains("Bereits bezahlt"), "{text}");
+        assert!(!text.contains("Fällig am"), "{text}");
+        assert!(!text.contains("30.06.2026"), "{text}");
+
+        // A part payment: its amount, what is left and the due date.
+        context.received_payment = Some(document::ReceivedPayment {
+            received_on: day(11, 15),
+            amount: rust_decimal::Decimal::new(100, 0),
+        });
+        let text = pdf_text(&context);
+        assert!(text.contains("100,00 €"), "{text}");
+        assert!(text.contains("45,00 €"), "{text}");
+        assert!(text.contains("Fällig am"), "{text}");
+        assert!(!text.contains("Bereits bezahlt"), "{text}");
+
+        // Staff set the period: only its end known on a final invoice.
+        context.invoice_type = "final".to_string();
+        context.received_payment = None;
+        context.stated_service_period = Some(document::StatedServicePeriod {
+            from: None,
+            to: day(12, 31),
+        });
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistungszeitraum"), "{text}");
+        assert!(text.contains("bis 12.2026"), "{text}");
+        assert!(!text.contains("Voraussichtlicher"), "{text}");
+        assert!(!text.contains("Zahlung erhalten am"), "{text}");
+
+        // The same rows in the patient's languages.
+        context.invoice_type = "advance".to_string();
+        context.stated_service_period = None;
+        context.received_payment = Some(document::ReceivedPayment {
+            received_on: day(11, 15),
+            amount: rust_decimal::Decimal::new(145, 0),
+        });
+        for (language, received, paid) in [
+            ("ru", "Оплата получена", "Уже оплачено"),
+            ("uk", "Оплату отримано", "Вже сплачено"),
+            ("en", "Payment received on", "Already paid"),
+        ] {
+            context.language = language.to_string();
+            let text = pdf_text(&context);
+            assert!(text.contains(received), "{language}: {text}");
+            assert!(text.contains(paid), "{language}: {text}");
+        }
     }
 
     /// QA 2026-11-10, D-01: the release check announced "Leistung noch nicht
