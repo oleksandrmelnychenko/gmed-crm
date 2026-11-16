@@ -505,6 +505,9 @@ async fn migrated_template_database(backend: &TestDatabaseBackend) -> Result<Str
     backend
         .template_database
         .get_or_try_init(|| async {
+            if let Some(shared) = shared_template_name()? {
+                return shared_migrated_template(&backend.admin_database_url, shared).await;
+            }
             let admin_pool = connect_pool(&backend.admin_database_url, "postgres", 1)
                 .await
                 .map_err(|error| format!("connect admin database: {error}"))?;
@@ -538,6 +541,113 @@ async fn migrated_template_database(backend: &TestDatabaseBackend) -> Result<Str
         })
         .await
         .cloned()
+}
+
+/// Advisory lock key held while one process builds the shared template.
+const SHARED_TEMPLATE_LOCK: i64 = 0x676d_6564_7470_6c00;
+
+/// `TEST_DATABASE_SHARED_TEMPLATE` names one migrated template for every test
+/// process on the server. cargo-nextest runs each test in its own process, so
+/// a per-process template would run all migrations once per test. Unset, each
+/// process keeps its own template as before. The template is never dropped:
+/// set it only for a throwaway server (CI) or to a name that changes with the
+/// migrations.
+fn shared_template_name() -> Result<Option<String>, String> {
+    let Ok(name) = std::env::var("TEST_DATABASE_SHARED_TEMPLATE") else {
+        return Ok(None);
+    };
+    let valid = !name.is_empty()
+        && name.len() <= 40
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+    if !valid {
+        return Err(format!(
+            "TEST_DATABASE_SHARED_TEMPLATE must be 1-40 characters of a-z, 0-9 and _: {name:?}"
+        ));
+    }
+    Ok(Some(name))
+}
+
+/// The shared migrated template, built by the first process that needs it.
+/// The others wait on the advisory lock; the template only gets its name once
+/// every migration has run, so a crashed build is never copied.
+async fn shared_migrated_template(
+    admin_database_url: &str,
+    name: String,
+) -> Result<String, String> {
+    const EXISTS: &str = "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)";
+    let admin_pool = connect_pool(admin_database_url, "postgres", 1)
+        .await
+        .map_err(|error| format!("connect admin database: {error}"))?;
+    let ready: bool = sqlx::query_scalar(EXISTS)
+        .bind(&name)
+        .fetch_one(&admin_pool)
+        .await
+        .map_err(|error| format!("look up shared template {name}: {error}"))?;
+    if ready {
+        admin_pool.close().await;
+        return Ok(name);
+    }
+
+    let mut lock = admin_pool
+        .acquire()
+        .await
+        .map_err(|error| format!("connect admin database: {error}"))?;
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(SHARED_TEMPLATE_LOCK)
+        .execute(&mut *lock)
+        .await
+        .map_err(|error| format!("lock shared template {name}: {error}"))?;
+    let built = async {
+        let ready: bool = sqlx::query_scalar(EXISTS)
+            .bind(&name)
+            .fetch_one(&mut *lock)
+            .await
+            .map_err(|error| format!("look up shared template {name}: {error}"))?;
+        if ready {
+            return Ok(());
+        }
+        let building = format!("{name}_build_{}", std::process::id());
+        let drop_building = format!(r#"DROP DATABASE IF EXISTS "{building}""#);
+        sqlx::query(sqlx::AssertSqlSafe::<&str>(&drop_building))
+            .execute(&mut *lock)
+            .await
+            .map_err(|error| format!("drop stale template build {building}: {error}"))?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            r#"CREATE DATABASE "{building}""#
+        )))
+        .execute(&mut *lock)
+        .await
+        .map_err(|error| format!("create template database {building}: {error}"))?;
+        let pool = connect_pool(admin_database_url, &building, 4)
+            .await
+            .map_err(|error| format!("connect template database {building}: {error}"))?;
+        let migrated = gmed_db::run_migrations(&pool).await;
+        // A template must have no open connections to be renamed or copied.
+        pool.close().await;
+        if let Err(error) = migrated {
+            let _ = sqlx::query(sqlx::AssertSqlSafe::<&str>(&drop_building))
+                .execute(&mut *lock)
+                .await;
+            return Err(format!("run migrations for template {building}: {error}"));
+        }
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            r#"ALTER DATABASE "{building}" RENAME TO "{name}""#
+        )))
+        .execute(&mut *lock)
+        .await
+        .map_err(|error| format!("rename template {building} to {name}: {error}"))?;
+        Ok(())
+    }
+    .await;
+    let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+        .bind(SHARED_TEMPLATE_LOCK)
+        .execute(&mut *lock)
+        .await;
+    drop(lock);
+    admin_pool.close().await;
+    built.map(|()| name)
 }
 
 async fn connect_pool(
@@ -718,6 +828,10 @@ impl Drop for TestDatabaseBackend {
         let Some(template) = self.template_database.get().cloned() else {
             return;
         };
+        // The shared template serves the other test processes too.
+        if shared_template_name().ok().flatten().as_deref() == Some(template.as_str()) {
+            return;
+        }
         let admin_database_url = self.admin_database_url.clone();
         let _ = thread::spawn(move || {
             let Ok(runtime) = tokio::runtime::Builder::new_current_thread()

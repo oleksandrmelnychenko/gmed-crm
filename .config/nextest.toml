@@ -1,0 +1,18 @@
+# cargo-nextest runs each test in its own process, in parallel across all
+# test binaries. The DB suites then need one shared PostgreSQL
+# (TEST_DATABASE_ADMIN_URL) and one shared migrated template
+# (TEST_DATABASE_SHARED_TEMPLATE, see crates/server/tests/support/mod.rs);
+# without them every test process would start its own container and run all
+# migrations.
+
+[profile.ci]
+# Same strictness as `cargo test --no-fail-fast`: run everything, no retries,
+# no time limit (slow tests are only reported).
+fail-fast = false
+retries = 0
+slow-timeout = { period = "120s" }
+failure-output = "immediate-final"
+final-status-level = "slow"
+
+[profile.ci.junit]
+path = "junit.xml"

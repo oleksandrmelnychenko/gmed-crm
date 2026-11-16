@@ -49,13 +49,12 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # The full workspace gate: fmt and clippy here, every test in the three
+  # application-test-gate shards beside it. All gates and the image builds
+  # run at the same time; nothing is tagged or signed before all gates pass.
   application-quality-gate:
     runs-on: ubuntu-latest
-    # Keep the full workspace gate; browser checks run alongside it so UI
-    # failures are reported without waiting for the longer Rust suite.
-    # Some suites stall ~60 s on the hosted runner (intermittent, under
-    # investigation); 180 keeps a slow but green run from being cancelled.
-    timeout-minutes: 180
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
@@ -69,8 +68,13 @@ jobs:
         with:
           toolchain: "1.100"
 
+      # Restores the cache ci.yml saves on main (same key). A tag run cannot
+      # see caches of earlier tags, so it saves none.
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: rust-lint
+          save-if: false
 
       - name: Rust format
         run: cargo fmt --all -- --check
@@ -78,58 +82,53 @@ jobs:
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      - name: Pull disposable test database image
-        shell: bash
-        run: |
-          for test_db_attempt in 1 2 3; do
-            if docker pull postgres:16-alpine; then
-              exit 0
-            fi
-            if [ "$test_db_attempt" -lt 3 ]; then
-              sleep "$((test_db_attempt * 5))"
-            fi
-          done
-          exit 1
-
-      - name: Rust tests
-        shell: bash
-        run: |
-          set -o pipefail
-          test_log="$(mktemp)"
-          set +e
-          cargo test --workspace --locked --no-fail-fast 2>&1 | tee "$test_log"
-          test_status="${PIPESTATUS[0]}"
-          set -e
-          if [ "$test_status" -ne 0 ]; then
-            details="$(grep -E '^---- .* stdout ----$|panicked at|assertion|^  left:|^ right:|^failures:$|^    [[:alnum:]_].*::|^test result: FAILED|^error: test failed' "$test_log" | tail -n 80)"
-            if [ -z "$details" ]; then
-              details="$(tail -c 8000 "$test_log")"
-            fi
-            details="${details//'%'/'%25'}"
-            details="${details//$'\r'/'%0D'}"
-            details="${details//$'\n'/'%0A'}"
-            echo "::error file=.github/workflows/release.yml,title=Rust tests failed::$details"
-          fi
-          exit "$test_status"
-
-  frontend-quality-gate:
+  # `cargo test --workspace --locked --no-fail-fast` split over three runners,
+  # each with its own throwaway PostgreSQL (scripts/ci-rust-tests.sh).
+  application-test-gate:
+    name: application-test-gate (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 60
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       SQLX_OFFLINE: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust for the live backend
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
         with:
           toolchain: "1.100"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: rust-tests
+          save-if: false
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-nextest@0.9.150
+
+      - name: Rust tests
+        run: bash scripts/ci-rust-tests.sh "${{ matrix.shard }}" 3 .github/workflows/release.yml
+
+  # Static frontend checks and the repository checks. The browser gates run
+  # beside it: mocked specs in four shards, the live backend gate on its own.
+  frontend-quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -147,27 +146,6 @@ jobs:
       - name: Frontend release check
         run: npm --prefix frontend run release:check:full
 
-      - name: Install Playwright Chromium
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-
-      - name: Secure chat mocked browser gate
-        working-directory: frontend
-        run: npx playwright test tests/e2e/chat-secure.spec.ts
-
-      - name: Lead cabinet and payer browser gate
-        working-directory: frontend
-        run: npx playwright test 'lead-.*\.spec\.ts' 'payer-link\.spec\.ts'
-
-      - name: Secure chat, realtime and cabinet live gate
-        working-directory: frontend
-        run: >-
-          npx playwright test
-          -c playwright.live.config.ts
-          tests/e2e-live/chat-secure.live.spec.ts
-          tests/e2e-live/realtime.live.spec.ts
-          tests/e2e-live/cabinet-roundtrip.spec.ts
-
       - name: Setup Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
@@ -182,11 +160,103 @@ jobs:
       - name: Repository hygiene
         run: python scripts/check_repo_hygiene.py
 
+  frontend-browser-gate:
+    name: frontend-browser-gate (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Secure chat mocked, lead cabinet and payer browser gate
+        working-directory: frontend
+        run: >-
+          npx playwright test
+          'tests/e2e/chat-secure\.spec\.ts'
+          'lead-.*\.spec\.ts'
+          'payer-link\.spec\.ts'
+          --shard=${{ matrix.shard }}/4
+
       - name: Upload browser failure diagnostics
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: release-browser-diagnostics
+          name: release-browser-diagnostics-${{ matrix.shard }}
+          path: frontend/test-results
+          retention-days: 7
+
+  frontend-live-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust for the live backend
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: "1.100"
+
+      # The key of ci.yml's operations-live-e2e job, which builds the same
+      # debug backend on main.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: live-backend
+          save-if: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Secure chat, realtime and cabinet live gate
+        working-directory: frontend
+        run: >-
+          npx playwright test
+          -c playwright.live.config.ts
+          tests/e2e-live/chat-secure.live.spec.ts
+          tests/e2e-live/realtime.live.spec.ts
+          tests/e2e-live/cabinet-roundtrip.spec.ts
+
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-browser-diagnostics-live
           path: frontend/test-results
           retention-days: 7
 
@@ -261,8 +331,11 @@ jobs:
           INVOICE_PARSER_API_KEY: synthetic-compose-validation-key-000000000
         run: docker compose -f services/invoice-parser/compose.yml config --quiet
 
-  build-and-sign:
-    needs: [application-quality-gate, frontend-quality-gate, parser-quality-gate, invoice-parser-quality-gate]
+  # Builds, verifies and scans the images while the gates run. The images are
+  # pushed by digest only: no tag points at them and nothing signs them until
+  # the sign job, which waits for every gate and every build. An image of a
+  # failed run stays untagged and unsigned, and PROD refuses unsigned digests.
+  build-and-scan:
     # DEV and PROD Hetzner hosts use x86_64 CPX instances, so release
     # images are built for linux/amd64. Add linux/arm64 only if the
     # fleet moves back to CAX/ARM or you intentionally run mixed hosts.
@@ -339,15 +412,16 @@ jobs:
             https://argos-net.com/v1/translate-en_de-1_3.argosmodel --output "$archive"
           echo "6cd847f0c06c9c66013e6b0932e07fd54a6d90894659c02bf6c5247b72fb25b1  $archive" | sha256sum --check
 
-      - name: Build and push
+      - name: Build and push by digest
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          # The tags from the metadata step are applied by the sign job,
+          # after all gates passed.
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_RELEASE_CHANNEL=production
@@ -360,9 +434,13 @@ jobs:
           # so `cosign tree` shows full lineage.
           provenance: mode=max
           sbom: true
-          # Re-use the GitHub Actions cache across runs.
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+          # A tag run can only read caches saved on main: the DEV build
+          # (dev.yml, same Dockerfiles) keeps those warm. A cache written
+          # here would be visible to this tag only and would push the main
+          # caches out of the repository's cache quota, so none is written.
+          cache-from: |
+            type=gha,scope=dev-${{ matrix.name }}
+            type=gha,scope=${{ matrix.name }}
 
       - name: Verify parser runtime before signing
         if: matrix.name == 'clinical-document-parser'
@@ -419,6 +497,83 @@ jobs:
           sarif_file: trivy-${{ matrix.name }}.sarif
           category: trivy-${{ matrix.name }}
 
+      - name: Hand the digest and tags to the sign job
+        env:
+          IMAGE_NAME: ${{ matrix.name }}
+          ENV_NAME: ${{ matrix.env_name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-image
+          printf '%s\n' "$IMAGE_NAME" > release-image/name
+          printf '%s\n' "$ENV_NAME" > release-image/env_name
+          printf '%s\n' "$DIGEST" > release-image/digest
+          printf '%s\n' $TAGS > release-image/tags
+
+      - name: Upload digest and tags
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-image-${{ matrix.name }}
+          path: release-image
+          if-no-files-found: error
+          retention-days: 7
+
+  # Runs only when every gate and every image build/scan passed: tags the
+  # images, signs each digest once and verifies the signature as PROD does.
+  sign:
+    needs:
+      - application-quality-gate
+      - application-test-gate
+      - frontend-quality-gate
+      - frontend-browser-gate
+      - frontend-live-gate
+      - parser-quality-gate
+      - invoice-parser-quality-gate
+      - build-and-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download digests and tags
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-image-*
+          path: release-images
+
+      - name: Login to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag images
+        # `imagetools create` from a single source is a carbon copy; the
+        # check below fails the release if a tag ever pointed elsewhere.
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          count=0
+          for dir in release-images/release-image-*; do
+            name="$(cat "$dir/name")"
+            digest="$(cat "$dir/digest")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            repo="${REGISTRY}/${REPOSITORY}-${name}"
+            while read -r tag; do
+              [ -n "$tag" ] || continue
+              case "$tag" in
+                "$repo:"*) ;;
+                *) echo "::error::unexpected tag $tag for $repo"; exit 1 ;;
+              esac
+              docker buildx imagetools create --tag "$tag" "$repo@$digest"
+              tagged="$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)"
+              test "$tagged" = "$digest"
+            done < "$dir/tags"
+            count=$((count + 1))
+          done
+          test "$count" -eq 4
+
       # cosign 3 writes the signature as a Sigstore bundle attached to the
       # image as an OCI 1.1 referrer (new bundle format, service URLs from
       # the Sigstore TUF signing config). Images signed before this change
@@ -431,12 +586,11 @@ jobs:
         with:
           cosign-release: v3.1.4
 
-      - name: Sign image (keyless)
-        # Sign EACH digest produced by docker/metadata-action. We build
-        # amd64 only today; the loop stays ready for a multi-arch follow-up.
+      - name: Sign images (keyless)
+        # The signature covers the digest; every tag of an image names the
+        # same repository@digest, so each image is signed once.
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          TAGS: ${{ steps.meta.outputs.tags }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           sign_with_retry() {
@@ -452,8 +606,8 @@ jobs:
               sleep $((attempt * 5))
             done
           }
-          for tag in $TAGS; do
-            ref="${tag%%:*}@${DIGEST}"
+          for dir in release-images/release-image-*; do
+            ref="${REGISTRY}/${REPOSITORY}-$(cat "$dir/name")@$(cat "$dir/digest")"
             echo "::group::cosign sign $ref"
             sign_with_retry "$ref"
             echo "::endgroup::"
@@ -464,16 +618,17 @@ jobs:
         # signature PROD would refuse fails the release here instead of at
         # deploy time. Keep the two in sync.
         env:
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           verify_with_retry() {
+            local image_ref="$1"
             local attempt
             for attempt in 1 2 3; do
               if cosign verify \
                 --certificate-identity-regexp '^https://github\.com/oleksandrmelnychenko/gmed-crm/\.github/workflows/release\.yml@refs/(tags/v[0-9A-Za-z._-]+|heads/main)$' \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-                "$IMAGE_REF" >/dev/null; then
+                "$image_ref" >/dev/null; then
                 return 0
               fi
               if [ "$attempt" -eq 3 ]; then
@@ -482,16 +637,25 @@ jobs:
               sleep $((attempt * 5))
             done
           }
-          verify_with_retry
+          for dir in release-images/release-image-*; do
+            verify_with_retry "${REGISTRY}/${REPOSITORY}-$(cat "$dir/name")@$(cat "$dir/digest")"
+          done
 
-      - name: Output digest
+      - name: Output digests
+        env:
+          REPOSITORY: ${{ github.repository }}
         run: |
-          {
-            echo "## ${{ matrix.name }}"
-            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
-            echo ""
-            echo "Pin in PROD release-images.pins:"
-            echo '```'
-            echo "GMED_${{ matrix.env_name }}_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          for dir in release-images/release-image-*; do
+            name="$(cat "$dir/name")"
+            digest="$(cat "$dir/digest")"
+            {
+              echo "## ${name}"
+              echo "Digest: \`${digest}\`"
+              echo ""
+              echo "Pin in PROD release-images.pins:"
+              echo '```'
+              echo "GMED_$(cat "$dir/env_name")_IMAGE=${REGISTRY}/${REPOSITORY}-${name}@${digest}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done

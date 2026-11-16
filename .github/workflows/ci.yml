@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch or pull request supersedes the running CI.
+# Release builds (release.yml) are never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   dev-deployment-script:
     runs-on: ubuntu-latest
@@ -25,8 +31,44 @@ jobs:
           python3 -m unittest discover -s scripts -p test_deploy_dev_current.py -v
           python3 -m unittest discover -s scripts -p test_release_image_coverage.py -v
 
-  rust:
+  # fmt and clippy run beside the test shards: clippy only type-checks, so it
+  # shares no build output with the tests and would only lengthen a shard.
+  rust-lint:
     runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: "1.100"
+
+      # The same key in release.yml: a tag run can restore caches saved on
+      # main, never those of an earlier tag (each tag run used to start cold).
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: rust-lint
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # The whole workspace test suite in three shards on three runners, each with
+  # its own throwaway PostgreSQL (scripts/ci-rust-tests.sh).
+  rust-tests:
+    name: rust-tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       SQLX_OFFLINE: "true"
     steps:
@@ -40,46 +82,31 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: rust-tests
+          # The shards build the same thing; one upload is enough.
+          save-if: ${{ matrix.shard == 1 }}
 
-      - name: Format
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Pull disposable test database image
-        shell: bash
-        run: |
-          for test_db_attempt in 1 2 3; do
-            if docker pull postgres:16-alpine; then
-              exit 0
-            fi
-            if [ "$test_db_attempt" -lt 3 ]; then
-              sleep "$((test_db_attempt * 5))"
-            fi
-          done
-          exit 1
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-nextest@0.9.150
 
       - name: Test
-        shell: bash
-        run: |
-          set -o pipefail
-          test_log="$(mktemp)"
-          set +e
-          cargo test --workspace --locked --no-fail-fast 2>&1 | tee "$test_log"
-          test_status="${PIPESTATUS[0]}"
-          set -e
-          if [ "$test_status" -ne 0 ]; then
-            details="$(grep -E '^---- .* stdout ----$|panicked at|assertion|^  left:|^ right:|^failures:$|^    [[:alnum:]_].*::|^test result: FAILED|^error: test failed' "$test_log" | tail -n 80)"
-            if [ -z "$details" ]; then
-              details="$(tail -c 8000 "$test_log")"
-            fi
-            details="${details//'%'/'%25'}"
-            details="${details//$'\r'/'%0D'}"
-            details="${details//$'\n'/'%0A'}"
-            echo "::error file=.github/workflows/ci.yml,title=Rust tests failed::$details"
-          fi
-          exit "$test_status"
+        run: bash scripts/ci-rust-tests.sh "${{ matrix.shard }}" 3 .github/workflows/ci.yml
+
+  # The required status check: green only when fmt, clippy and every test
+  # shard passed.
+  rust:
+    if: always()
+    needs: [rust-lint, rust-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All Rust checks passed
+        env:
+          LINT: ${{ needs.rust-lint.result }}
+          TESTS: ${{ needs.rust-tests.result }}
+        run: test "$LINT" = success && test "$TESTS" = success
 
   rust-security:
     runs-on: ubuntu-latest
@@ -92,7 +119,7 @@ jobs:
         with:
           command: check
 
-  frontend:
+  frontend-checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -117,29 +144,63 @@ jobs:
       - name: Test
         run: npm --prefix frontend run test
 
-      - name: Install Playwright Chromium
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-
-      - name: Secure chat browser gate
-        working-directory: frontend
-        run: npx playwright test tests/e2e/chat-secure.spec.ts
-
-      # Mocked API; it went unnoticed broken for weeks while it ran nowhere.
-      - name: Clinical document import browser gate
-        working-directory: frontend
-        run: npx playwright test tests/e2e/clinical-document-import.spec.ts
-
       # The specs import app models. When one of those stops loading in Node,
       # Playwright collects no test at all; that stayed unnoticed on main.
       - name: Browser specs load
         working-directory: frontend
         run: npx playwright test --list
 
-      # Mocked API; the patient-facing lead cabinet in four languages.
-      - name: Lead cabinet and payer browser gate
+  # Mocked-API browser gates in four shards (by spec file) on four runners:
+  # secure chat; clinical document import (it went unnoticed broken for weeks
+  # while it ran nowhere); the patient-facing lead cabinet in four languages
+  # and the payer link.
+  frontend-browser:
+    name: frontend-browser (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Playwright Chromium
         working-directory: frontend
-        run: npx playwright test 'lead-.*\.spec\.ts' 'payer-link\.spec\.ts'
+        run: npx playwright install --with-deps chromium
+
+      - name: Secure chat, clinical import, lead cabinet and payer browser gate
+        working-directory: frontend
+        run: >-
+          npx playwright test
+          'tests/e2e/chat-secure\.spec\.ts'
+          'tests/e2e/clinical-document-import\.spec\.ts'
+          'lead-.*\.spec\.ts'
+          'payer-link\.spec\.ts'
+          --shard=${{ matrix.shard }}/4
+
+  # The required status check: green only when the checks and every browser
+  # shard passed.
+  frontend:
+    if: always()
+    needs: [frontend-checks, frontend-browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All frontend checks passed
+        env:
+          CHECKS: ${{ needs.frontend-checks.result }}
+          BROWSER: ${{ needs.frontend-browser.result }}
+        run: test "$CHECKS" = success && test "$BROWSER" = success
 
   android:
     runs-on: ubuntu-latest
@@ -191,8 +252,11 @@ jobs:
         with:
           toolchain: "1.100"
 
+      # Shared with release.yml's frontend-live-gate (same debug backend).
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: live-backend
 
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -302,8 +366,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # BuildKit with the Actions cache: unchanged layers (system packages,
+      # npm and pip installs) are reused instead of rebuilt on every push.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
       - name: Build backend image
-        run: docker build --file Dockerfile.backend --tag gmed-backend:ci .
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: Dockerfile.backend
+          tags: gmed-backend:ci
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=ci-backend
+          cache-to: type=gha,scope=ci-backend,mode=max
 
       - name: Smoke test backend OCR languages
         run: >-
@@ -318,16 +395,34 @@ jobs:
           -c 'soffice --headless --version | grep -q LibreOffice'
 
       - name: Build frontend image
-        run: docker build --file frontend/Dockerfile --tag gmed-frontend:ci frontend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          tags: gmed-frontend:ci
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=ci-frontend
+          cache-to: type=gha,scope=ci-frontend,mode=max
 
-      - name: Build clinical document parser image
+      - name: Download and verify the pinned translation model
         run: |
           set -euo pipefail
           archive=services/clinical-document-parser/translation-model.argosmodel
           curl --fail --show-error --location --retry 3 --max-time 300 \
             https://argos-net.com/v1/translate-en_de-1_3.argosmodel --output "$archive"
           echo "6cd847f0c06c9c66013e6b0932e07fd54a6d90894659c02bf6c5247b72fb25b1  $archive" | sha256sum --check
-          docker build --file services/clinical-document-parser/Dockerfile --tag gmed-clinical-document-parser:ci services/clinical-document-parser
+
+      - name: Build clinical document parser image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: services/clinical-document-parser
+          file: services/clinical-document-parser/Dockerfile
+          tags: gmed-clinical-document-parser:ci
+          load: true
+          provenance: false
+          cache-from: type=gha,scope=ci-clinical-document-parser
+          cache-to: type=gha,scope=ci-clinical-document-parser,mode=max
 
       - name: Verify parser image is non-root
         run: test "$(docker run --rm --entrypoint id gmed-clinical-document-parser:ci -u)" -ne 0
