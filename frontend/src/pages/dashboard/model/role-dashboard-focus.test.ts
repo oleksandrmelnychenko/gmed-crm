@@ -69,6 +69,17 @@ describe("role dashboard focus", () => {
     expect(result.map((item) => item.id)).toEqual(["overdue", "today", "undated"]);
   });
 
+  it("leaves a task due after Berlin midnight for tomorrow, even one hour away", () => {
+    // 16 Nov 23:16 in Berlin: «in one hour» is already 17 Nov (fix-101).
+    const lateEvening = new Date("2026-11-16T22:16:00.000Z");
+    const result = roleDashboardFocusTasks([
+      task({ id: "after-midnight", priority: "urgent", due_at: "2026-11-16T23:16:00.000Z" }),
+      task({ id: "due-now", priority: "urgent", due_at: "2026-11-16T22:16:00.000Z" }),
+    ], new Date(lateEvening.getTime() + 1_000));
+
+    expect(result.map((item) => item.id)).toEqual(["due-now"]);
+  });
+
   it("lists the open portal requests, soonest wish first", () => {
     const result = openPatientServiceRequests([
       { id: "later", title: "Opera", status: "planned", request_source: "patient_portal", starts_at: "2026-08-30T17:00:00Z" },

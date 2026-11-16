@@ -28,6 +28,27 @@ function futureDate(daysFromNow: number) {
   return shifted.toISOString().slice(0, 10);
 }
 
+function berlinDateKey(value: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+/**
+ * A deadline the dashboard's «Fokus heute» lists. The focus keeps tasks of
+ * a later Berlin day for their day (concierge QA 2026-11-12 D-9), so «in one
+ * hour» after 23:00 Berlin would hide the task. Then the task falls due now:
+ * an overdue task is always in focus.
+ */
+function dueTodayInBerlin(now = new Date()) {
+  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
+  return (berlinDateKey(inOneHour) === berlinDateKey(now) ? inOneHour : now)
+    .toISOString();
+}
+
 async function waitForRealtime(page: Page) {
   await expect(
     page.locator('[aria-label="Realtime verbunden"]'),
@@ -273,7 +294,7 @@ test.describe("realtime live propagation", () => {
         location: null,
         patient_id: scenario.patient.id,
         provider_id: null,
-        due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        due_at: dueTodayInBerlin(),
         priority: "urgent",
         reminder_at: null,
         task_audience: "internal",
