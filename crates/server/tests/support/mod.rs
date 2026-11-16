@@ -705,6 +705,11 @@ async fn start_docker_postgres() -> Result<TestDatabaseBackend, String> {
         "synchronous_commit=off",
         "-c",
         "full_page_writes=off",
+        // A connection left half-opened by a finished test sits in the login
+        // handshake; DROP DATABASE waits for it until this timeout (default
+        // 60 s, which made every test take a minute).
+        "-c",
+        "authentication_timeout=2s",
     ])?;
 
     let port_output = docker_stdout(&["port", &container_id, "5432/tcp"]).inspect_err(|_| {

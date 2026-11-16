@@ -33,12 +33,15 @@ done
 
 # A throwaway test server: durability buys nothing (same flags the harness
 # uses for its own container). Room for every parallel test process.
+# authentication_timeout: a connection a finished test left half-opened sits
+# in the login handshake, and DROP DATABASE waits for it (ProcSignalBarrier)
+# until this timeout; the default 60 s made every test take 60 s.
 docker run -d --rm --name "$container" --shm-size=1g \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=postgres \
   -p 127.0.0.1:5432:5432 \
   "$postgres_image" \
   -c fsync=off -c synchronous_commit=off -c full_page_writes=off \
-  -c max_connections=500 >/dev/null
+  -c max_connections=500 -c authentication_timeout=2s >/dev/null
 for _ in $(seq 1 60); do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then
     break
