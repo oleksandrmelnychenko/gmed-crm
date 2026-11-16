@@ -1,8 +1,9 @@
 import { ClipboardList } from "lucide-react";
-import { SectionHeading } from "@/components/ui/section-heading";
 import { memo } from "react";
 
+import { Section } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import { visibleInterpreterResponse } from "@/pages/appointments/model/completion-rules";
 import {
   useAppointmentLabels,
@@ -86,60 +87,28 @@ function AppointmentSnapshotSection({
   }
 
   return (
-    <section className="space-y-2.5 rounded-xl p-3.5 border border-border/50 bg-card/40">
-      <div className="flex items-center gap-2">
-        <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={ClipboardList}>{summaryTitle}</SectionHeading></h3>
-      </div>
-      <div className="mt-5 grid gap-x-14 gap-y-3 lg:grid-cols-2">
-        {snapshotCards.map((card, index) => (
-          <SnapshotSummaryRow
-            key={`${card.label}:${card.value}`}
-            label={card.label}
-            subLabel={card.meta}
-            value={card.value}
-            fullWidth={
-              snapshotCards.length % 2 === 1 &&
-              index === snapshotCards.length - 1
-            }
-          />
+    <Section icon={ClipboardList} title={summaryTitle} className="rounded-xl border border-border/70 bg-card px-3.5 py-3">
+      <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+        {snapshotCards.map((card) => (
+          <div key={`${card.label}:${card.value}`} className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{card.label}</dt>
+            <dd
+              className={cn(
+                "mt-0.5 min-w-0 break-words text-sm leading-snug",
+                card.value === tr.common_not_set ? "text-muted-foreground" : "font-medium text-foreground",
+              )}
+            >
+              {card.value}
+            </dd>
+            {card.meta ? (
+              <dd className="min-w-0 break-words text-xs leading-snug text-muted-foreground">
+                {card.meta}
+              </dd>
+            ) : null}
+          </div>
         ))}
-      </div>
-    </section>
-  );
-}
-
-function SnapshotSummaryRow({
-  label,
-  subLabel,
-  value,
-  fullWidth = false,
-}: {
-  label: string;
-  subLabel: string;
-  value: string;
-  fullWidth?: boolean;
-}) {
-  return (
-    <div
-      className={
-        fullWidth
-          ? "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_minmax(0,auto)] items-start gap-2.5 lg:col-span-2"
-          : "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_auto] items-start gap-2.5"
-      }
-    >
-      <div className="min-w-0 pt-0.5">
-        <p className="break-words text-[12px] font-medium leading-tight text-muted-foreground">
-          {label}
-        </p>
-        <p className="mt-0.5 break-words text-[11px] leading-tight text-muted-foreground/75">
-          {subLabel}
-        </p>
-      </div>
-      <span className="mt-3 h-px min-w-6 bg-border/70" />
-      <p className="min-w-0 max-w-[420px] break-words text-right font-mono text-xs leading-tight text-foreground">
-        {value}
-      </p>
-    </div>
+      </dl>
+    </Section>
   );
 }
 

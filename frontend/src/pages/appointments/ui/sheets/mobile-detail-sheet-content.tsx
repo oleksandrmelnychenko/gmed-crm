@@ -230,7 +230,7 @@ function useAppointmentMobileDetailSheetContentContent({
               <Banner tone="error" withIcon>{detailError}</Banner>
             </div>
           ) : detail ? (
-            <div className="space-y-6 pt-5">
+            <div className="space-y-4 pt-4">
               {detailError ? (
                 <Banner tone="error" withIcon>{detailError}</Banner>
               ) : null}

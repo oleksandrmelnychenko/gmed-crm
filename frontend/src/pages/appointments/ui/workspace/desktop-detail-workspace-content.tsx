@@ -301,7 +301,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
     showWorkflowTasksSection;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {detailError ? (
         <Banner tone="error" withIcon>{detailError}</Banner>
       ) : null}

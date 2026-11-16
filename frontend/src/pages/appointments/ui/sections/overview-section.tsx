@@ -1,19 +1,24 @@
-import { memo, useState } from "react";
+import { memo, useState, type ReactNode } from "react";
 import {
   CalendarX2,
   ChevronDown,
+  ClipboardList,
   Clock3,
   LoaderCircle,
   MapPin,
   Pencil,
   Stethoscope,
   Trash2,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
+import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
+import { OverflowMenu, type OverflowMenuItem } from "@/components/ui/overflow-menu";
+import { StatusChip } from "@/components/ui/status-chip";
 import { toast } from "@/components/ui/toast";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
@@ -77,11 +82,12 @@ function AppointmentOverviewSection({
     responseLabel,
     statusLabel,
   } = useAppointmentLabels();
-  const { formatAppointmentSlotLabel } = useAppointmentFormatters();
+  const { formatAppointmentDateLabel } = useAppointmentFormatters();
   const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t } = useLang();
   const { user } = useAuth();
   const canSeeOrder = hasCapability(user, "orders.view");
+  const canSeePatients = hasCapability(user, "patients.view");
   const tr = t as unknown as Record<string, string>;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -130,161 +136,154 @@ function AppointmentOverviewSection({
     detail.status,
     detail.interpreter_response,
   );
-  const patientInitials = detail.patient_name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
+  const canEditNow = Boolean(canEdit && onEdit && !isClosedAppointmentStatus(detail.status));
+  const canCancelNow = canCancel && !detail.is_blocked && !isClosedAppointmentStatus(detail.status);
+  const menuItems: OverflowMenuItem[] = [];
+  if (canCancelNow) {
+    menuItems.push({
+      key: "cancel",
+      testId: "appointment-cancel-action",
+      icon: cancelBusy ? <LoaderCircle className="animate-spin" /> : <CalendarX2 />,
+      label: cancelLabel,
+      disabled: cancelBusy,
+      onSelect: () => setCancelConfirmOpen(true),
+    });
+  }
+  if (canDelete && onDelete) {
+    menuItems.push({
+      key: "delete",
+      icon: <Trash2 className="!text-destructive" />,
+      label: appointmentText("appointments_delete_action"),
+      note: deletionLocked ? deleteTitle : undefined,
+      title: deleteTitle,
+      disabled: deletionLocked || deleteBusy,
+      className: "text-destructive",
+      onSelect: () => setDeleteConfirmOpen(true),
+    });
+  }
+  // A place equal to the clinic's name says nothing new.
+  const location = detail.location?.trim() ?? "";
+  const showLocation =
+    !location ||
+    location.toLocaleLowerCase() !== (detail.provider_name ?? "").trim().toLocaleLowerCase();
+  const canOpenPatientCard = detail.can_open_patient !== false && canSeePatients;
+  const patientText = [detail.patient_pid, detail.patient_name].filter(Boolean).join(" · ");
+  const chipClassName = "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium leading-5";
 
   return (
-    <section className="space-y-2.5 rounded-xl border border-border/50 bg-card/40 p-3.5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[12px] font-semibold text-primary-foreground">
-          {patientInitials || "AP"}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="min-w-0 max-w-full break-words text-xl font-semibold tracking-tight text-foreground">
-              {detail.title}
-            </h2>
-            <span
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold",
-                appointmentStatusBadgeClassName(detail.status),
-              )}
-            >
-              {statusLabel(detail.status)}
-            </span>
+    <section className="rounded-xl border border-border/70 bg-card" data-testid="appointment-overview">
+      <div className="space-y-3 px-3.5 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <div className="min-w-0 flex-1 basis-64">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h2 className="min-w-0 max-w-full break-words text-lg font-semibold leading-tight tracking-tight text-foreground">
+                {detail.title}
+              </h2>
+              <span className={cn(chipClassName, appointmentStatusBadgeClassName(detail.status))}>
+                {statusLabel(detail.status)}
+              </span>
+              <span className={cn(chipClassName, appointmentTypeBadgeClassName(detail.type))}>
+                {appointmentTypeLabel(detail.type, tr)}
+              </span>
+              {detail.care_path_kind ? (
+                <StatusChip>{carePathKindLabel(detail.care_path_kind)}</StatusChip>
+              ) : null}
+              {detail.recurrence_frequency ? (
+                <StatusChip tone="info">
+                  {recurrenceFrequencyLabel(detail.recurrence_frequency)}{" "}
+                  {t.appointments_recurring_series}
+                </StatusChip>
+              ) : null}
+              {detailLineageBadge ? (
+                <StatusChip tone="warning">{detailLineageBadge}</StatusChip>
+              ) : null}
+              {interpreterResponse ? (
+                <StatusChip>
+                  {appointmentText("appointments_interpreter")}{" "}
+                  {responseLabel(interpreterResponse)}
+                </StatusChip>
+              ) : null}
+            </div>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+                <UserRound aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+                {canOpenPatientCard ? (
+                  <StaffLink
+                    to={`/patients/${detail.patient_id}`}
+                    className="min-w-0 break-words font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    {patientText}
+                  </StaffLink>
+                ) : (
+                  <span className="min-w-0 break-words font-medium text-foreground">{patientText}</span>
+                )}
+              </span>
+              {/* The order number instead of the appointment's technical id. */}
+              {detail.order_number && canSeeOrder ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                  <ClipboardList aria-hidden="true" className="size-3.5 shrink-0" />
+                  {appointmentText("appointments_order")}
+                  {detail.order_id ? (
+                    <StaffLink
+                      to={`/orders/${detail.order_id}`}
+                      className="font-medium text-foreground underline-offset-2 hover:underline"
+                    >
+                      {detail.order_number}
+                    </StaffLink>
+                  ) : (
+                    <span className="font-medium text-foreground">{detail.order_number}</span>
+                  )}
+                </span>
+              ) : null}
+            </div>
           </div>
-          <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">
-            {detail.patient_pid} · {detail.patient_name}
-          </p>
-          {/* The order number instead of the appointment's technical id. */}
-          {detail.order_number && canSeeOrder ? (
-            <p className="text-[11px] text-muted-foreground/80">
-              {appointmentText("appointments_order")}{" "}
-              {detail.order_id ? (
-                <StaffLink to={`/orders/${detail.order_id}`} className="hover:underline">
-                  {detail.order_number}
-                </StaffLink>
-              ) : (
-                detail.order_number
-              )}
-            </p>
+          {canEditNow || menuItems.length > 0 ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {/* A completed or cancelled appointment cannot be changed (the server refuses it). */}
+              {canEditNow ? (
+                <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={onEdit}>
+                  <Pencil className="size-3.5" />
+                  {t.common_edit}
+                </Button>
+              ) : null}
+              {menuItems.length > 0 ? (
+                <OverflowMenu label={t.common_actions} items={menuItems} />
+              ) : null}
+            </div>
           ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:max-w-[40%] sm:justify-end">
-          <span
-            className={cn(
-              "rounded-full border px-2.5 py-1 text-[10.5px] font-semibold",
-              appointmentTypeBadgeClassName(detail.type),
-            )}
-          >
-            {appointmentTypeLabel(detail.type, tr)}
-          </span>
-          {detail.care_path_kind ? (
-            <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10.5px] font-semibold text-violet-700">
-              {carePathKindLabel(detail.care_path_kind)}
+        <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-x-6 gap-y-3 border-t border-border/60 pt-3">
+          <OverviewFact icon={Clock3} label={t.appointments_date}>
+            <span className="block text-[15px] font-semibold leading-snug tabular-nums text-foreground">
+              {formatAppointmentDateLabel(detail.date)}
             </span>
+            {detail.time_start ? (
+              <span className="block text-sm tabular-nums text-foreground">
+                {detail.time_start}
+                {detail.time_end ? ` - ${detail.time_end}` : ""}
+              </span>
+            ) : null}
+          </OverviewFact>
+          <OverviewFact icon={Stethoscope} label={t.common_provider}>
+            <span className={cn("text-sm", detail.provider_name ? "font-medium text-foreground" : "text-muted-foreground")}>
+              {detail.provider_name || tr.common_not_set}
+            </span>
+          </OverviewFact>
+          {showLocation ? (
+            <OverviewFact icon={MapPin} label={t.appointments_location}>
+              <span className={cn("text-sm", location ? "font-medium text-foreground" : "text-muted-foreground")}>
+                {location || tr.common_not_set}
+              </span>
+            </OverviewFact>
           ) : null}
-          {/* A completed or cancelled appointment cannot be changed (the server refuses it). */}
-          {canEdit && onEdit && !isClosedAppointmentStatus(detail.status) ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="size-8 rounded-lg"
-              onClick={onEdit}
-              aria-label={t.common_edit}
-              title={t.common_edit}
-            >
-              <Pencil className="size-3.5" />
-            </Button>
-          ) : null}
-          {canCancel && !detail.is_blocked && !isClosedAppointmentStatus(detail.status) ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-700"
-              disabled={cancelBusy}
-              onClick={() => setCancelConfirmOpen(true)}
-              data-testid="appointment-cancel-action"
-            >
-              {cancelBusy ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <CalendarX2 className="size-3.5" />
-              )}
-              {cancelLabel}
-            </Button>
-          ) : null}
-          {canDelete && onDelete ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="size-8 rounded-lg text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
-              disabled={deletionLocked || deleteBusy}
-              onClick={() => setDeleteConfirmOpen(true)}
-              aria-label={deleteTitle}
-              title={deleteTitle}
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {detail.recurrence_frequency ? (
-          <span className="rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-[10.5px] font-semibold text-orange-700">
-            {recurrenceFrequencyLabel(detail.recurrence_frequency)}{" "}
-            {t.appointments_recurring_series}
-          </span>
+        </dl>
+        {detail.is_blocked ? (
+          <Banner tone="warning">{t.appointments_overview_concierge_limited_warning}</Banner>
         ) : null}
-        {detailLineageBadge ? (
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-semibold text-amber-700">
-            {detailLineageBadge}
-          </span>
-        ) : null}
-        {interpreterResponse ? (
-          <span className="rounded-full border border-border/60 bg-muted/25 px-2.5 py-1 text-[10.5px] font-semibold text-muted-foreground">
-            {appointmentText("appointments_interpreter")}{" "}
-            {responseLabel(interpreterResponse)}
-          </span>
+        {!detail.is_blocked && detail.recurrence_frequency ? (
+          <RecurringSeriesDetails detail={detail} onOpenDetail={onOpenDetail} />
         ) : null}
       </div>
-      <div className="mt-4 rounded-lg border border-border/70 bg-card px-2 py-1.5">
-        <div className="grid gap-x-6 gap-y-1 lg:grid-cols-[1.6fr_1fr_1fr]">
-          <OverviewInfoTile
-            icon={Clock3}
-            label={t.appointments_date}
-            value={formatAppointmentSlotLabel(detail)}
-            mono
-          />
-          <OverviewInfoTile
-            icon={Stethoscope}
-            label={t.common_provider}
-            value={detail.provider_name || tr.common_not_set}
-            muted={!detail.provider_name}
-          />
-          <OverviewInfoTile
-            icon={MapPin}
-            label={t.appointments_location}
-            value={detail.location || tr.common_not_set}
-            muted={!detail.location}
-          />
-        </div>
-      </div>
-      {detail.is_blocked ? (
-        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
-          {t.appointments_overview_concierge_limited_warning}
-        </div>
-      ) : null}
-      {!detail.is_blocked && detail.recurrence_frequency ? (
-        <RecurringSeriesDetails detail={detail} onOpenDetail={onOpenDetail} />
-      ) : null}
       <DirtyDismissConfirmDialog
         open={cancelConfirmOpen}
         title={appointmentText("appointments_cancel_confirmation_title")}
@@ -364,7 +363,7 @@ function RecurringSeriesDetails({
   if (!recurrenceFrequency) return null;
 
   return (
-    <details className="group mt-4 overflow-hidden rounded-lg border border-border/70 bg-card">
+    <details className="group overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="grid cursor-pointer list-none gap-2 px-3 py-2.5 transition hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
@@ -534,36 +533,22 @@ function RecurringSeriesDetails({
   );
 }
 
-function OverviewInfoTile({
+function OverviewFact({
   icon: Icon,
   label,
-  value,
-  mono = false,
-  muted = false,
+  children,
 }: {
   icon: LucideIcon;
   label: string;
-  value: string;
-  mono?: boolean;
-  muted?: boolean;
+  children: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1" title={value}>
-      <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <Icon className="size-3.5 shrink-0 text-muted-foreground/70" />
+    <div className="min-w-0">
+      <dt className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon aria-hidden="true" className="size-3.5 shrink-0" />
         {label}
-      </span>
-      <span className="h-px min-w-5 flex-1 self-center bg-border/70" />
-      <span
-        className={cn(
-          // Wraps instead of cutting "вс, 11.10.2026 · 08:00 - 09:00" on a phone.
-          "min-w-0 max-w-[70%] break-words text-right text-sm font-semibold leading-snug",
-          mono && "font-mono text-xs tabular-nums",
-          muted ? "font-normal text-muted-foreground" : "text-foreground",
-        )}
-      >
-        {value}
-      </span>
+      </dt>
+      <dd className="mt-0.5 min-w-0 break-words leading-snug">{children}</dd>
     </div>
   );
 }
