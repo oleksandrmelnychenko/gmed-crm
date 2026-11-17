@@ -1729,7 +1729,13 @@ async fn the_paid_advance_rest_no_category_takes_is_set_off_and_the_storno_gives
         Decimal::ZERO
     );
 
-    // A new final sets off the same.
+    // A new final sets off the same; «Оплата уже поступила» without an
+    // amount takes what is left after the deduction AND the rest (fix-102
+    // B-2 with fix-103).
+    body["payment_received"] = json!({
+        "received_on": gmed_server::app_time::today().to_string(),
+        "payment_method": "bank_transfer",
+    });
     let (status, again) = call(
         &ctx.app,
         "POST",
@@ -1739,9 +1745,22 @@ async fn the_paid_advance_rest_no_category_takes_is_set_off_and_the_storno_gives
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{again:?}");
-    let released = release_invoice(&ctx, &ceo, again["id"].as_str().unwrap()).await;
+    let again_id = again["id"].as_str().unwrap().to_string();
+    let released = release_invoice(&ctx, &ceo, &again_id).await;
     assert_eq!(money(&released["prepayment_applied_amount"]), one);
-    assert_eq!(money(&released["balance_due"]), due);
+    assert_eq!(
+        money(&released["balance_due"]),
+        Decimal::ZERO,
+        "{released:?}"
+    );
+    assert_eq!(released["status"], "paid");
+    let noted: Option<Decimal> =
+        sqlx::query_scalar("SELECT payment_received_amount FROM invoices WHERE id = $1")
+            .bind(Uuid::parse_str(&again_id).unwrap())
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(noted, Some(due));
 }
 
 /// verify2-A S2-3 (V2A-2/V2A-4-like): the release closes the unpaid part of
