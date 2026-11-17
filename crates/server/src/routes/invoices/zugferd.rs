@@ -110,6 +110,9 @@ pub(super) struct EInvoice {
     /// UStG) as text: EN 16931 has no structured field for the VAT of a
     /// prepayment, only its gross (BT-113).
     pub prepayment_note: Option<String>,
+    /// Money received before the invoice (part of BT-113): its day, the part
+    /// the invoice takes and an excess kept as credit, as printed.
+    pub received_note: Option<String>,
     pub bank_iban: Option<String>,
     pub bank_bic: Option<String>,
     pub bank_holder: Option<String>,
@@ -418,6 +421,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
         &invoice.note,
         &invoice.service_note,
         &invoice.prepayment_note,
+        &invoice.received_note,
     ] {
         if let Some(note) = text(note) {
             xml.push_str(&format!(
@@ -883,6 +887,7 @@ mod tests {
             prepayment_note: Some(
                 "Abzüglich geleisteter Anzahlungen: Anzahlungsrechnung INV-2026-0000 vom 01.09.2026: Durchlaufende Posten (0 %): Netto 50,00 €, MwSt. 0,00 €, Brutto 50,00 €".to_string(),
             ),
+            received_note: None,
             bank_iban: Some("DE02 1203 0000 0000 2020 51".to_string()),
             bank_bic: Some("BYLADEM1001".to_string()),
             bank_holder: Some("GMed".to_string()),

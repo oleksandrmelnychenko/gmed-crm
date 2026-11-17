@@ -80,6 +80,9 @@ pub(crate) struct SignedLine {
     /// The order line it names; `None` for a legacy quote line without one.
     pub order_line_id: Option<Uuid>,
     pub amounts: Amounts,
+    /// Wording and unit price, to find the line a legacy quote line without
+    /// an order line prices (`None` when unreadable).
+    pub match_key: Option<String>,
 }
 
 /// What the client signed, in the order it was signed.
@@ -155,6 +158,9 @@ pub(crate) fn contract_sum(
         )
     });
     let mut lines: BTreeMap<String, Amounts> = BTreeMap::new();
+    // Match key of every counted line, for legacy quote lines without an
+    // order line (QA verify2 D-F1).
+    let mut match_keys: BTreeMap<String, String> = BTreeMap::new();
     let mut source = "order_signature";
     let mut signed_at = None;
     let mut document_id = None;
@@ -172,11 +178,15 @@ pub(crate) fn contract_sum(
                 lines: signed,
             } => {
                 lines.clear();
+                match_keys.clear();
                 quotes = 0;
                 for (index, line) in signed.into_iter().enumerate() {
                     let key = line
                         .order_line_id
                         .map_or_else(|| format!("order:{index}"), |id| id.to_string());
+                    if let Some(match_key) = line.match_key {
+                        match_keys.insert(key.clone(), match_key);
+                    }
                     lines.insert(key, line.amounts);
                 }
                 source = "order_signature";
@@ -190,10 +200,38 @@ pub(crate) fn contract_sum(
                 signed_at: at,
                 lines: signed,
             } => {
+                // A quote line without an order line (legacy/seed quotes)
+                // prices the counted line of the same wording and unit price,
+                // each at most once. When one of them matches none, the
+                // quote replaces what was signed before instead of adding to
+                // it: the contract is never counted twice (QA verify2 D-F1).
+                let mut taken: Vec<String> = Vec::new();
+                let mut unlinked: Vec<Option<String>> = Vec::new();
+                for line in signed.iter().filter(|line| line.order_line_id.is_none()) {
+                    let found = line.match_key.as_ref().and_then(|wanted| {
+                        match_keys
+                            .iter()
+                            .find(|(key, candidate)| *candidate == wanted && !taken.contains(*key))
+                            .map(|(key, _)| key.clone())
+                    });
+                    if let Some(key) = &found {
+                        taken.push(key.clone());
+                    }
+                    unlinked.push(found);
+                }
+                if unlinked.iter().any(Option::is_none) && !lines.is_empty() {
+                    lines.clear();
+                    match_keys.clear();
+                    unlinked.iter_mut().for_each(|found| *found = None);
+                }
+                let mut unlinked = unlinked.into_iter();
                 for (index, line) in signed.into_iter().enumerate() {
                     match line.order_line_id {
                         Some(id) => {
                             let key = id.to_string();
+                            if let Some(match_key) = line.match_key {
+                                match_keys.insert(key.clone(), match_key);
+                            }
                             let amounts = match lines.get(&key) {
                                 Some(previous)
                                     if partly_billed(id) && previous.gross > line.amounts.gross =>
@@ -205,7 +243,14 @@ pub(crate) fn contract_sum(
                             lines.insert(key, amounts);
                         }
                         None => {
-                            lines.insert(format!("quote:{quote_id}:{index}"), line.amounts);
+                            let key = unlinked
+                                .next()
+                                .flatten()
+                                .unwrap_or_else(|| format!("quote:{quote_id}:{index}"));
+                            if let Some(match_key) = line.match_key {
+                                match_keys.insert(key.clone(), match_key);
+                            }
+                            lines.insert(key, line.amounts);
                         }
                     }
                 }
@@ -311,6 +356,26 @@ fn line_id(item: &Value, key: &str) -> Option<Uuid> {
         .and_then(|value| value.parse::<Uuid>().ok())
 }
 
+/// Wording (case and spacing ignored) and unit price of a stored line.
+fn line_match_key(item: &Value) -> Option<String> {
+    let description = item
+        .get("description")
+        .and_then(Value::as_str)?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    if description.is_empty() {
+        return None;
+    }
+    let unit_price = match item.get("unit_price")? {
+        Value::String(value) => value.trim().parse::<Decimal>().ok(),
+        Value::Number(value) => value.to_string().parse::<Decimal>().ok(),
+        _ => None,
+    }?;
+    Some(format!("{description}|{}", unit_price.normalize()))
+}
+
 fn own_lines(items: &Value, id_key: &str) -> Vec<SignedLine> {
     items
         .as_array()
@@ -321,6 +386,7 @@ fn own_lines(items: &Value, id_key: &str) -> Vec<SignedLine> {
                     Some(SignedLine {
                         order_line_id: line_id(item, id_key),
                         amounts: own_line_amounts(item)?,
+                        match_key: line_match_key(item),
                     })
                 })
                 .collect()
@@ -912,7 +978,116 @@ mod tests {
         SignedLine {
             order_line_id: Some(id),
             amounts: amounts(net, gross),
+            match_key: None,
         }
+    }
+
+    fn legacy(id: Option<Uuid>, key: &str, net: i64, gross: i64) -> SignedLine {
+        SignedLine {
+            order_line_id: id,
+            amounts: amounts(net, gross),
+            match_key: Some(key.to_string()),
+        }
+    }
+
+    /// QA verify2 D-F1: a client-signature snapshot older than an accepted
+    /// legacy quote whose lines name no order line counts the contract once.
+    #[test]
+    fn legacy_quote_lines_price_the_signed_line_of_the_same_wording() {
+        let a = Uuid::new_v4();
+        let contract = contract_sum(
+            vec![
+                SignedVersion::Order {
+                    signed_at: at(0),
+                    document_id: None,
+                    lines: vec![legacy(Some(a), "treatment package|1000", 1000, 1000)],
+                },
+                SignedVersion::Quote {
+                    quote_id: Uuid::new_v4(),
+                    quote_number: "QU-1".into(),
+                    signed_at: at(1),
+                    lines: vec![legacy(None, "treatment package|1000", 1000, 1000)],
+                },
+            ],
+            &[],
+            &|_| false,
+        )
+        .unwrap();
+        assert_eq!(contract.amounts, amounts(1000, 1000));
+
+        // A line it cannot match: the quote replaces, never adds.
+        let contract = contract_sum(
+            vec![
+                SignedVersion::Order {
+                    signed_at: at(0),
+                    document_id: None,
+                    lines: vec![
+                        legacy(Some(a), "treatment package|1000", 1000, 1000),
+                        legacy(Some(Uuid::new_v4()), "transfer|50", 50, 50),
+                    ],
+                },
+                SignedVersion::Quote {
+                    quote_id: Uuid::new_v4(),
+                    quote_number: "QU-1".into(),
+                    signed_at: at(1),
+                    lines: vec![
+                        legacy(None, "treatment package|1000", 1000, 1000),
+                        legacy(None, "behandlungspaket|1200", 1200, 1200),
+                    ],
+                },
+            ],
+            &[],
+            &|_| false,
+        )
+        .unwrap();
+        assert_eq!(contract.amounts, amounts(2200, 2200));
+
+        // Two equal lines are matched one to one.
+        let contract = contract_sum(
+            vec![
+                SignedVersion::Order {
+                    signed_at: at(0),
+                    document_id: None,
+                    lines: vec![
+                        legacy(Some(a), "visit|100", 100, 100),
+                        legacy(Some(Uuid::new_v4()), "visit|100", 100, 100),
+                    ],
+                },
+                SignedVersion::Quote {
+                    quote_id: Uuid::new_v4(),
+                    quote_number: "QU-1".into(),
+                    signed_at: at(1),
+                    lines: vec![
+                        legacy(None, "visit|100", 100, 100),
+                        legacy(None, "visit|100", 100, 100),
+                    ],
+                },
+            ],
+            &[],
+            &|_| false,
+        )
+        .unwrap();
+        assert_eq!(contract.amounts, amounts(200, 200));
+
+        // An unlinked quote with nothing signed before still counts.
+        let contract = contract_sum(
+            vec![SignedVersion::Quote {
+                quote_id: Uuid::new_v4(),
+                quote_number: "QU-1".into(),
+                signed_at: at(1),
+                lines: vec![legacy(None, "visit|100", 100, 100)],
+            }],
+            &[],
+            &|_| false,
+        )
+        .unwrap();
+        assert_eq!(contract.amounts, amounts(100, 100));
+        assert_eq!(
+            line_match_key(
+                &json!({"description": " Treatment   Package ", "unit_price": "1000.00"})
+            ),
+            Some("treatment package|1000".to_string())
+        );
     }
 
     #[test]

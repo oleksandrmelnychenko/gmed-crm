@@ -259,7 +259,7 @@ import {
 } from "./model/invoice-errors";
 import { GuardedDateInput } from "./ui/guarded-date-input";
 import { ReleaseDueDateField } from "./ui/release-due-date-field";
-import { createDocumentTermsPayload, quotePeriodDefaults } from "./model/document-terms";
+import { createDocumentTermsPayload, paymentMethodLabel, quotePeriodDefaults } from "./model/document-terms";
 import { DunningBlockPanel, StornoDocumentCard } from "./ui/invoice-corrections-panel";
 import type {
   AccountingEntry,
@@ -3488,6 +3488,31 @@ function useStaffInvoicesPageContent() {
                           <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due, detail?.currency)} />
                         </>
                       )}
+                      {/* What the draft notes for its release (QA verify2 B-5). */}
+                      {detail.status === "draft" && detail.payment_received ? (
+                        <SummaryLine
+                          label={lang === "de" ? "Zahlung bereits eingegangen" : "Оплата уже поступила"}
+                          value={[
+                            formatDate(detail.payment_received.received_on, locale, t.common_not_set),
+                            formatMoney(
+                              detail.payment_received.amount_gross ??
+                                Math.max(0, roundCents(Number(detail.balance_due ?? 0) - Number(detail.expected_prepayment_gross ?? 0))),
+                              detail?.currency,
+                            ),
+                            detail.payment_received.payment_method ? paymentMethodLabel(detail.payment_received.payment_method, lang === "de") : null,
+                          ].filter(Boolean).join(" · ")}
+                        />
+                      ) : null}
+                      {detail.status === "draft" && detail.service_period ? (
+                        <SummaryLine
+                          label={detail.invoice_type === "advance"
+                            ? (lang === "de" ? "Voraussichtlicher Leistungszeitraum" : "Предполагаемый период оказания услуг")
+                            : (lang === "de" ? "Leistungszeitraum" : "Период оказания услуг")}
+                          value={detail.service_period.from
+                            ? `${formatDate(detail.service_period.from, locale, "")} – ${formatDate(detail.service_period.to, locale, "")}`
+                            : `${lang === "de" ? "bis" : "до"} ${detail.service_period.to.slice(5, 7)}.${detail.service_period.to.slice(0, 4)}`}
+                        />
+                      ) : null}
                       {Number(detail.advance_credit_available ?? 0) > 0 ? (
                         <>
                           <SummaryLine
@@ -4831,7 +4856,8 @@ function useStaffInvoicesPageContent() {
                       </span>
                       {/* Never on a draft: only the reason is said next to it, no
                           disabled button beside it (F-C9, QA 2026-11-16 B-3). */}
-                      {detail.status === "draft" ? null : (
+                      {/* Nor on a cancelled one (QA verify2 B-5). */}
+                      {detail.status === "draft" || detail.status === "cancelled" ? null : (
                       <Button
                         type="button"
                         size="sm"
@@ -5289,6 +5315,7 @@ function useStaffInvoicesPageContent() {
           invoiceId={detail.id}
           currency={detail.currency ?? "EUR"}
           lang={lang}
+          receivedDefaultGross={Math.max(0, roundCents(Number(detail.balance_due ?? 0) - Number(detail.expected_prepayment_gross ?? 0)))}
           orderId={detail.order_id}
           canEditRecipient={access.canEditPayer}
           onEditRecipient={() => setPayerDialogOpen(true)}

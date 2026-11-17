@@ -308,7 +308,7 @@ export function draftUpdatePayload(payload: DraftEditorPayload, form: DraftForm)
 }
 
 export function draftReceivedPaymentChanged(payload: DraftEditorPayload, form: DraftForm): boolean {
-  return !sameReceivedPayment(form.receivedPayment, receivedPaymentFormFrom(payload.payment_received), 0);
+  return !sameReceivedPayment(form.receivedPayment, receivedPaymentFormFrom(payload.payment_received));
 }
 
 export function draftPeriodChanged(payload: DraftEditorPayload, form: DraftForm): boolean {

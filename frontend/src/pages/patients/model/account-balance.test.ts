@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  patientListBalance,
   portalCreditSideLabel,
   resolvePatientBalancePresentation,
   staffBalanceWithoutUnappliedAdvance,
@@ -134,5 +135,18 @@ describe("staffBalanceWithoutUnappliedAdvance (QA 2026-11-15, A-3)", () => {
     expect(staffBalanceWithoutUnappliedAdvance(resolvePatientBalancePresentation(advanceOnly), advanceOnly)).toMatchObject({ amount: 1000 });
     const debt = { closing_balance: "50.00", balance_side: "debit" as const, available_prepayment: "1000.00" };
     expect(staffBalanceWithoutUnappliedAdvance(resolvePatientBalancePresentation(debt), debt)).toMatchObject({ amount: 50, side: "debit" });
+  });
+});
+
+describe("patientListBalance", () => {
+  it("shows the card header's figure and word in the list (QA verify2 B-3)", () => {
+    // Open dues 305,76 and an overpayment credit of 510,18: the statement nets them.
+    const summary = { closing_balance: "-204.42", balance_side: "credit" as const, available_prepayment: "1000.00" };
+    expect(patientListBalance(summary, "ru")).toEqual({ amount: -204.42, side: "credit", creditLabel: "Предоплата" });
+    const overpaid = { closing_balance: "-355.09", balance_side: "credit" as const, available_prepayment: "0" };
+    expect(patientListBalance(overpaid, "ru")).toEqual({ amount: -355.09, side: "credit", creditLabel: "Переплата" });
+    const thirdParty = { closing_balance: "500.00", balance_side: "debit" as const, third_party_open_due: "200.00" };
+    expect(patientListBalance(thirdParty, "ru")).toMatchObject({ amount: 300, side: "debit" });
+    expect(patientListBalance(null, "ru")).toBeNull();
   });
 });

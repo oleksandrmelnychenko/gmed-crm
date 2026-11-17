@@ -49,7 +49,35 @@ pub fn router() -> Router<AppState> {
         .route("/me/account-statement", get(get_my_account_statement))
 }
 
-#[derive(Deserialize)]
+/// The balance figures of the staff card header, from the patient's account
+/// statement as `GET /patients/{id}/account-statement` returns it: the
+/// patient list shows the same figure (QA verify2 B-3) — the settlement
+/// ledger nets overpayment credit and credit notes, the open dues alone
+/// do not.
+pub(crate) async fn staff_balance_summary(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<Value, sqlx::Error> {
+    let statement = load_patient_account_statement(
+        state,
+        patient_id,
+        &PatientFinancialQuery::default(),
+        false,
+        None,
+    )
+    .await?;
+    let summary = &statement["summary"];
+    Ok(serde_json::json!({
+        "currency": statement["currency"],
+        "closing_balance": summary["closing_balance"],
+        "provisional_balance": summary["provisional_balance"],
+        "balance_side": summary["balance_side"],
+        "third_party_open_due": summary["third_party_open_due"],
+        "available_prepayment": summary["available_prepayment"],
+    }))
+}
+
+#[derive(Deserialize, Default)]
 struct PatientFinancialQuery {
     from: Option<String>,
     to: Option<String>,

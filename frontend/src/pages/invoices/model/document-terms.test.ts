@@ -4,6 +4,8 @@ import {
   blankReceivedPayment,
   createDocumentTermsPayload,
   quotePeriodDefaults,
+  receivedPaymentExcess,
+  receivedPaymentExcessText,
   receivedPaymentIsPartial,
   receivedPaymentPayload,
   receivedPaymentProblem,
@@ -114,9 +116,29 @@ describe("draft editor", () => {
   it("unticking removes the noted payment", () => {
     const stored = { ...payload, payment_received: { received_on: "2026-11-15", amount_gross: "2000.00", payment_method: "bank_transfer" } };
     const form = draftFormFrom(stored);
-    expect(form.receivedPayment.amount).toBe("2000,00");
+    // German money format in the editor (QA verify2 B-5).
+    expect(form.receivedPayment.amount).toBe("2.000,00");
+    expect(draftFormDirty(stored, form)).toBe(false);
     form.receivedPayment = { ...form.receivedPayment, enabled: false };
     expect(draftUpdatePayload(stored, form).payment_received).toBeNull();
+  });
+
+  it("an amount left open stays open: the release takes what is due (QA verify2 B-2)", () => {
+    const stored = { ...payload, payment_received: { received_on: "2026-11-15", amount_gross: null, payment_method: "cash" } };
+    const form = draftFormFrom(stored);
+    expect(form.receivedPayment.amount).toBe("");
+    expect(draftFormDirty(stored, form)).toBe(false);
+    const ticked = { ...blankReceivedPayment(), enabled: true, receivedOn: "2026-11-15" };
+    expect(receivedPaymentProblem(ticked, 0, today)).toBeNull();
+    expect(receivedPaymentExcess(ticked, 1144.91)).toBe(0);
+  });
+
+  it("names the excess of a typed amount above what is due (QA verify2 B-5)", () => {
+    const typed = { ...blankReceivedPayment(), enabled: true, receivedOn: "2026-11-15", amount: "2.500,00" };
+    expect(receivedPaymentExcess(typed, 2144.91)).toBe(355.09);
+    expect(receivedPaymentExcess({ ...typed, amount: "2144,91" }, 2144.91)).toBe(0);
+    expect(receivedPaymentExcess(typed, null)).toBe(0);
+    expect(receivedPaymentExcessText("2.144,91 €", "355,09 €", false)).toContain("355,09 €");
   });
 });
 

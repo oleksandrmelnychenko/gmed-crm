@@ -903,20 +903,17 @@ pub(super) async fn update_invoice_draft(
         ));
     }
 
-    // Without an amount the money received is the (rebuilt) invoice total.
+    // Without an amount the money received is what is left to pay at the
+    // release (QA verify2 B-2).
     let requested_payment = match body.payment_received.as_ref() {
         None => None,
         Some(None) => Some(None),
-        Some(Some(input)) => match document_terms::parse_received_payment(
-            input,
-            crate::app_time::today(),
-            rebuilt
-                .as_ref()
-                .map_or(draft.total_gross, |(snapshot, _)| snapshot.total_gross),
-        ) {
-            Ok(value) => Some(Some(value)),
-            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
-        },
+        Some(Some(input)) => {
+            match document_terms::parse_received_payment(input, crate::app_time::today()) {
+                Ok(value) => Some(Some(value)),
+                Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+            }
+        }
     };
 
     let mut transaction = match state.db.begin().await {

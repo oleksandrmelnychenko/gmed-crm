@@ -34,6 +34,8 @@ import { formatFinalDifference, formatQuantity } from "../model/final-invoice";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import {
   paymentMethodLabel,
+  receivedPaymentExcess,
+  receivedPaymentExcessText,
   receivedPaymentProblem,
   receivedPaymentProblemText,
   servicePeriodProblem,
@@ -49,6 +51,8 @@ type Props = {
   invoiceId: string;
   currency: string;
   lang: string;
+  /** «К оплате» of the stored draft: what an empty received amount means at the release. */
+  receivedDefaultGross?: number | null;
   /** The invoice's order: its contract budget after this invoice is shown. */
   orderId?: string | null;
   /** The recipient is changed in its own dialog (`/invoices/{id}/payer`). */
@@ -166,6 +170,7 @@ export function DraftInvoiceEditorDialog({
   invoiceId,
   currency,
   lang,
+  receivedDefaultGross = null,
   orderId,
   canEditRecipient,
   onEditRecipient,
@@ -209,8 +214,9 @@ export function DraftInvoiceEditorDialog({
   const dueProblem = form?.dueDate && form.dueDate < today ? copy.due_past : null;
   const linesProblem = payload && form ? draftLinesProblem(payload, form) : null;
   const splitProblem = payload && form ? advanceSplitProblem(payload, form.split) : null;
-  // An empty amount is the invoice total (set by the server).
+  // An empty amount is what is left to pay at the release (set by the server).
   const receivedProblem = form ? receivedPaymentProblem(form.receivedPayment, 1, today) : null;
+  const receivedExcess = form ? receivedPaymentExcess(form.receivedPayment, receivedDefaultGross) : 0;
   const periodProblem = form ? servicePeriodProblem(form.servicePeriod) : null;
   const problem =
     dueProblem ??
@@ -338,8 +344,9 @@ export function DraftInvoiceEditorDialog({
                       </label>
                       <label className="space-y-1.5 text-sm">
                         <span className="text-muted-foreground">{copy.receivedAmount}</span>
-                        <MoneyInput className={`${inputClass} text-right`} aria-label={copy.receivedAmount}
+                        <MoneyInput className={`${inputClass} text-right${receivedExcess > 0 ? " border-amber-400" : ""}`} aria-label={copy.receivedAmount}
                           disabled={!canRecordPayment} value={form.receivedPayment.amount}
+                          placeholder={receivedDefaultGross != null ? money(receivedDefaultGross) : undefined}
                           onChange={(event) => setForm({ ...form, receivedPayment: { ...form.receivedPayment, amount: event.target.value } })} />
                       </label>
                       <label className="space-y-1.5 text-sm">
@@ -353,6 +360,11 @@ export function DraftInvoiceEditorDialog({
                         </NativeComboboxSelect>
                       </label>
                     </div>
+                  ) : null}
+                  {form.receivedPayment.enabled && receivedExcess > 0 && receivedDefaultGross != null ? (
+                    <p role="status" data-testid="invoice-draft-received-excess" className="text-xs leading-5 text-amber-700 dark:text-amber-300">
+                      {receivedPaymentExcessText(money(receivedDefaultGross), money(receivedExcess), lang === "de")}
+                    </p>
                   ) : null}
                 </section>
               ) : null}

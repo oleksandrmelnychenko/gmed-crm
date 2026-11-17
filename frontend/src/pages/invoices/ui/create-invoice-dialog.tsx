@@ -48,6 +48,8 @@ import { INVOICE_PAYMENT_METHODS } from "../model/payment-correction";
 import {
   paymentMethodLabel,
   quotePeriodDefaults,
+  receivedPaymentExcess,
+  receivedPaymentExcessText,
   receivedPaymentProblem,
   receivedPaymentProblemText,
   servicePeriodProblem,
@@ -171,7 +173,12 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const period = form.servicePeriod ?? periodDefaults;
   const periodProblem = servicePeriodProblem(period);
   const received = form.receivedPayment;
-  const receivedProblem = receivedPaymentProblem(received, totals.gross, appDateKey());
+  // Left empty, the amount is what the invoice leaves to pay at its release:
+  // «К оплате» after the advance set-off on a final (QA verify2 B-2).
+  const [finalDue, setFinalDue] = useState<number | null>(null);
+  const receivedDefault = final ? finalDue : totals.gross;
+  const receivedProblem = receivedPaymentProblem(received, receivedDefault ?? totals.gross, appDateKey());
+  const receivedExcess = receivedPaymentExcess(received, receivedDefault);
   const termsProblem = periodProblem
     ? servicePeriodProblemText(periodProblem, de)
     : receivedProblem && (received.receivedOn || receivedProblem !== "missing_date")
@@ -216,8 +223,9 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   // Quotes this type hides, with why: staff looked for them under the default
   // type without a word (QA 2026-11-01, X3 NEW-3).
   const hiddenQuotes = quotes.filter((quote) => !selectableQuotes.includes(quote) && !isQuoteClosedForInvoicing(quote.status));
-  const interimOnlyQuotes = form.invoiceType === "interim" ? [] : hiddenQuotes.filter((quote) => isQuoteAvailableForInvoice(quote, "interim"));
-  const partlyCreditedQuotes = hiddenQuotes.filter((quote) => quote.final_invoice_credited && !interimOnlyQuotes.includes(quote));
+  // Interim invoices are no longer offered (fix-100): no hint points to them
+  // (QA verify2 B-4).
+  const partlyCreditedQuotes = hiddenQuotes.filter((quote) => quote.final_invoice_credited);
 
   return (
     <Dialog dirty={dirty} open={open} onOpenChange={(nextOpen) => { if (!formBusy) onOpenChange(nextOpen); }}>
@@ -262,11 +270,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {!optionsError && !optionsBusy && !selectableQuotes.length ? (
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl." : "Для текущего выбора нет доступных предложений."}
-                  </p>
-                ) : null}
-                {interimOnlyQuotes.length ? (
-                  <p role="status" data-testid="invoice-interim-only-quotes" className="text-xs leading-5 text-muted-foreground">
-                    {de ? "Nur als Zwischenrechnung verfügbar" : "Доступны только промежуточным счётом"}: {interimOnlyQuotes.map((quote) => quote.quote_number).join(", ")}.
                   </p>
                 ) : null}
                 {partlyCreditedQuotes.length ? (
@@ -343,7 +346,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                         </FormField>
                         <FormField label={de ? "Betrag" : "Сумма"}>
                           <Input inputMode="decimal" aria-label={de ? "Betrag der Zahlung" : "Сумма оплаты"} disabled={formBusy}
-                            value={received.amount} placeholder={money(totals.gross)} className={cn(inputClass, "w-full min-w-0 text-right tabular-nums")}
+                            value={received.amount} placeholder={receivedDefault != null ? money(receivedDefault) : ""}
+                            className={cn(inputClass, "w-full min-w-0 text-right tabular-nums", receivedExcess > 0 && "border-amber-400 focus-visible:ring-amber-300")}
                             onChange={(event) => onFormChange((current) => ({ ...current, receivedPayment: { ...current.receivedPayment, amount: event.target.value } }))} />
                         </FormField>
                         <FormField label={de ? "Zahlungsart" : "Способ оплаты"}>
@@ -353,6 +357,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                           </NativeComboboxSelect>
                         </FormField>
                       </div>
+                    ) : null}
+                    {received.enabled && receivedExcess > 0 && receivedDefault != null ? (
+                      <p role="status" data-testid="invoice-received-excess" className="text-xs leading-5 text-amber-700 dark:text-amber-300">
+                        {receivedPaymentExcessText(money(receivedDefault), money(receivedExcess), de)}
+                      </p>
                     ) : null}
                   </section>
                 ) : null}
@@ -544,7 +553,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
                   {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross)} testId="invoice-create-budget" /> : null}
-                  {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} /> : null}
+                  {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} onDueChange={setFinalDue} /> : null}
                   {selectedQuote && !prepaymentMode && !final && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>

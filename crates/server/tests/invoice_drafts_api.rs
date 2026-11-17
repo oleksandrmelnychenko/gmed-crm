@@ -878,10 +878,10 @@ async fn money_received_before_the_invoice_is_recorded_with_its_day_on_issue() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{draft}");
     let invoice_id = draft["id"].as_str().unwrap().to_string();
-    // Without an amount: the invoice total.
-    assert_eq!(
-        dec(&draft["payment_received"]["amount_gross"]),
-        dec(&draft["total_gross"])
+    // Without an amount: left open, the release takes what is due then.
+    assert!(
+        draft["payment_received"]["amount_gross"].is_null(),
+        "{draft}"
     );
     assert_eq!(draft["status"], "draft");
     assert!(payments(&fixture, &invoice_id).await.is_empty());
@@ -1174,6 +1174,254 @@ async fn a_future_payment_day_is_refused_and_an_excess_needs_confirmation() {
     .await;
     assert_eq!(status, StatusCode::OK, "{issued}");
     assert_eq!(issued["status"], "paid", "{issued}");
+
+    // The issued document adds up (QA verify2 B-1): the invoice takes its
+    // amount, the excess is printed as credit; the XML states the same.
+    let total = dec(&issued["total_gross"]);
+    let excess = Decimal::new(1000, 0) - total;
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(text.contains("Überzahlung (Guthaben)"), "{text}");
+    assert!(text.contains(&german_money(excess)), "{text}");
+    assert!(text.contains("1.000,00 €"), "{text}");
+    assert!(text.contains("Bereits bezahlt"), "{text}");
+    let xml = zugferd_xml(&fixture, &invoice_id).await;
+    assert!(
+        xml.contains(&format!(
+            "<ram:TotalPrepaidAmount>{total:.2}</ram:TotalPrepaidAmount><ram:DuePayableAmount>0.00</ram:DuePayableAmount>"
+        )),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(&format!(
+            "Zahlung erhalten am {}: 1.000,00 €; auf die Rechnung angerechnet {}; Überzahlung (Guthaben) {}",
+            day_text(berlin_today()),
+            german_money(total),
+            german_money(excess)
+        )),
+        "{xml}"
+    );
+
+    // QA verify2 B-3: the patient list shows the balance of the card header
+    // (the account statement nets the overpayment credit).
+    let (patient_id, pid): (Uuid, String) = sqlx::query_as(
+        r#"SELECT p.id, p.patient_id FROM orders o JOIN patients p ON p.id = o.patient_id
+           WHERE o.id = $1"#,
+    )
+    .bind(fixture.order_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .unwrap();
+    let (status, statement) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement}");
+    let closing = dec(&statement["summary"]["closing_balance"]);
+    assert_eq!(closing, -excess, "{statement}");
+    let (status, list) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/patients?search={pid}&active_only=false"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == patient_id.to_string())
+        .unwrap_or_else(|| panic!("patient not listed: {list}"));
+    assert_eq!(dec(&row["account_balance"]), closing, "{row}");
+    assert_eq!(row["account_balance_side"], "credit", "{row}");
+    assert_eq!(
+        row["account_balance_summary"]["closing_balance"],
+        statement["summary"]["closing_balance"]
+    );
+}
+
+/// «1.234,50 €»
+fn german_money(value: Decimal) -> String {
+    let text = format!("{:.2}", gmed_server::money::round_cents(value));
+    let (whole, cents) = text.split_once('.').unwrap();
+    let mut grouped = String::new();
+    for (index, digit) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
+            grouped.push('.');
+        }
+        grouped.push(digit);
+    }
+    format!("{grouped},{cents} €")
+}
+
+async fn zugferd_xml(fixture: &Fixture, invoice_id: &str) -> String {
+    let (status, bytes) = raw_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/zugferd.xml"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+/// QA verify2 B-2: «Оплата уже поступила» without an amount on a final that
+/// deducts an advance records what is left to pay after the advance, not the
+/// gross total — no overpayment question, no credit that was never paid.
+#[tokio::test]
+async fn an_open_received_amount_is_what_the_final_leaves_after_its_advance() {
+    let Some(fixture) = fixture("received-default", SERVICES).await else {
+        return;
+    };
+    let (status, advance) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "advance",
+            "advance_basis": "positions",
+            "line_items": [{ "line_index": 0, "quantity": 1 }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{advance}");
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+    let (status, body) = issue(&fixture, &fixture.billing, &advance_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let advance_gross = dec(&advance["total_gross"]);
+    let (status, body) = json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_id}/payments"),
+        &fixture.billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": advance_gross.to_string(),
+            "payment_method": "bank_transfer",
+            "received_on": berlin_today().to_string()
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{body}");
+
+    let (status, draft) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "final",
+            "payment_received": {
+                "received_on": berlin_today().to_string(),
+                "payment_method": "cash"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    // Left open on the draft: resolved by the release.
+    assert!(
+        draft["payment_received"]["amount_gross"].is_null(),
+        "{draft}"
+    );
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let total = dec(&draft["total_gross"]);
+
+    // No confirmation needed: nothing is overpaid.
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["status"], "paid", "{issued}");
+    let recorded = payments(&fixture, &invoice_id).await;
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    assert_eq!(dec(&recorded[0]["amount_gross"]), total - advance_gross);
+    let stored: Option<Decimal> =
+        sqlx::query_scalar("SELECT payment_received_amount FROM invoices WHERE id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, Some(total - advance_gross));
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(!text.contains("Überzahlung"), "{text}");
+    assert!(
+        text.contains(&german_money(total - advance_gross)),
+        "{text}"
+    );
+    // The amount is fixed now (GoBD).
+    let changed = sqlx::query(
+        "UPDATE invoices SET payment_received_amount = payment_received_amount + 1 WHERE id = $1::uuid",
+    )
+    .bind(&invoice_id)
+    .execute(&fixture.pool)
+    .await;
+    assert!(changed.is_err());
+}
+
+/// An advance that covers the whole final: nothing is due, so the release of
+/// a final noting an open received amount records no payment and the
+/// invoice states none.
+#[tokio::test]
+async fn an_open_received_amount_with_nothing_due_records_no_payment() {
+    let Some(fixture) = fixture(
+        "received-nothing-due",
+        &[("Quartalsbetreuung", 1, 100.0, 19.0, false)],
+    )
+    .await
+    else {
+        return;
+    };
+    let (status, advance) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "advance",
+            "advance_basis": "positions",
+            "line_items": [{ "line_index": 0, "quantity": 1 }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{advance}");
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+    let (status, body) = issue(&fixture, &fixture.billing, &advance_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &fixture.app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_id}/payments"),
+        &fixture.billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": dec(&advance["total_gross"]).to_string(),
+            "payment_method": "bank_transfer",
+            "received_on": berlin_today().to_string()
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{body}");
+    let (status, draft) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "final",
+            "payment_received": {
+                "received_on": berlin_today().to_string(),
+                "payment_method": "cash"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, issued) = issue(&fixture, &fixture.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert!(payments(&fixture, &invoice_id).await.is_empty());
+    assert!(issued["payment_received"].is_null(), "{issued}");
+    let text = pdf_text(&fixture, &invoice_id).await;
+    assert!(!text.contains("Zahlung erhalten am"), "{text}");
 }
 
 #[tokio::test]

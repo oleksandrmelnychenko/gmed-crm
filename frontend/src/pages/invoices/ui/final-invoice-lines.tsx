@@ -140,6 +140,8 @@ type SettlementProps = {
   extras: DeliveredOrderService[];
   form: CreateForm;
   money: (value: unknown) => string;
+  /** «К оплате» after the advance set-off, for the default of «Оплата уже поступила». */
+  onDueChange?: (due: number | null) => void;
 };
 
 function categoryLabel(row: { kind: string; vat_rate: string }, de: boolean) {
@@ -151,7 +153,7 @@ function categoryLabel(row: { kind: string; vat_rate: string }, de: boolean) {
  * The final invoice against the estimate, and the set-off its release makes
  * (`POST /quotes/{id}/final-preview`, the server's own rules).
  */
-export function FinalInvoiceSettlement({ open, quote, extras, form, money }: SettlementProps) {
+export function FinalInvoiceSettlement({ open, quote, extras, form, money, onDueChange }: SettlementProps) {
   const { lang } = useLang();
   const de = lang === "de";
   const summary = finalInvoiceSummary(quote, form, extras);
@@ -176,6 +178,10 @@ export function FinalInvoiceSettlement({ open, quote, extras, form, money }: Set
   }, [open, quote.id, payload, lang, de]);
   const current = preview && preview.key === `${quote.id}:${payload}` ? preview : null;
   const data = current?.data;
+  const due = data ? Number(data.due_gross) : null;
+  useEffect(() => {
+    onDueChange?.(due != null && Number.isFinite(due) ? due : null);
+  }, [due, onDueChange]);
 
   return (
     <div className="space-y-3 border-t border-border pt-4 text-sm" data-testid="final-invoice-settlement">

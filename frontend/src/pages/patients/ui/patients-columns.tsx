@@ -19,6 +19,7 @@ import { formatUiText, getLang, useLanguageBound } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
+import { patientListBalance } from "../model/account-balance";
 import { computeAge, patientDisplayName, type PatientSummary } from "../model/list-model";
 import { nationalityNameForDisplay } from "../model/nationalities";
 
@@ -488,7 +489,8 @@ export function buildPatientColumns(
       id: "account_balance",
       label: translatedOrUiText(tr, "invoices_workspace_balance"),
       accessor: (patient) => {
-        const value = Number(patient.account_balance);
+        const shown = patientListBalance(patient.account_balance_summary, getLang());
+        const value = shown ? shown.amount : Number(patient.account_balance);
         return Number.isFinite(value) ? value : null;
       },
       filterType: "number",
@@ -497,8 +499,10 @@ export function buildPatientColumns(
       width: 190,
       group: "financial",
       render: (patient) => {
-        const side = patient.account_balance_side;
-        const rawValue = Number(patient.account_balance);
+        // The figure and word of the card header (QA verify2 B-3).
+        const shown = patientListBalance(patient.account_balance_summary, getLang());
+        const side = shown?.side ?? patient.account_balance_side;
+        const rawValue = shown ? shown.amount : Number(patient.account_balance);
         if (!side || !Number.isFinite(rawValue)) {
           return <span className="text-xs text-muted-foreground/60">—</span>;
         }
@@ -532,7 +536,7 @@ export function buildPatientColumns(
             ) : null}
             {isCredit ? (
               <span className="font-sans text-[10px] font-medium">
-                {patientColumnText(tr, "patients_balance_credit")}
+                {shown?.creditLabel ?? patientColumnText(tr, "patients_balance_credit")}
               </span>
             ) : null}
           </span>

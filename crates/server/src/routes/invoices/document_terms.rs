@@ -1,7 +1,8 @@
 //! What staff note on a draft for its issued document (owner 2026-11-17):
 //!
-//! - money that arrived before the invoice: the day, the amount (default the
-//!   invoice total, less = a part payment) and the payment method. Only roles
+//! - money that arrived before the invoice: the day, the amount (left open =
+//!   what the invoice leaves to pay at its release, after the advances it
+//!   credits; less = a part payment) and the payment method. Only roles
 //!   that record payments set it; the release records it as a payment with
 //!   that day (`record_received_payment_at_release`) and the invoice states it.
 //! - the service period: a range, or only its end («bis MM.YYYY»). Without it
@@ -31,7 +32,7 @@ where
 #[derive(Deserialize)]
 pub(super) struct ReceivedPaymentInput {
     received_on: String,
-    /// Absent = the invoice total.
+    /// Absent = what the invoice leaves to pay at its release.
     amount_gross: Option<MoneyInput>,
     payment_method: String,
 }
@@ -45,7 +46,8 @@ pub(super) struct ServicePeriodInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ReceivedPayment {
     pub received_on: NaiveDate,
-    pub amount_gross: Decimal,
+    /// `None`: what the invoice leaves to pay at its release.
+    pub amount_gross: Option<Decimal>,
     pub payment_method: String,
 }
 
@@ -53,7 +55,7 @@ impl ReceivedPayment {
     pub(super) fn to_json(&self) -> Value {
         json!({
             "received_on": self.received_on.to_string(),
-            "amount_gross": decimal_to_string(self.amount_gross),
+            "amount_gross": self.amount_gross.map(decimal_to_string),
             "payment_method": self.payment_method,
         })
     }
@@ -79,23 +81,25 @@ fn day(raw: &str) -> Option<NaiveDate> {
 }
 
 /// The received payment as typed: a day not after `today`, an amount above
-/// zero in whole cents (without one: the invoice total), a payment method of
-/// the payment journal.
+/// zero in whole cents (without one: what is left to pay at the release), a
+/// payment method of the payment journal.
 pub(super) fn parse_received_payment(
     input: &ReceivedPaymentInput,
     today: NaiveDate,
-    invoice_gross: Decimal,
 ) -> Result<ReceivedPayment, &'static str> {
     let received_on = day(&input.received_on).ok_or("Invalid payment date")?;
     if received_on > today {
         return Err("Invalid payment date");
     }
     let amount_gross = match &input.amount_gross {
-        Some(amount) => amount.parse_decimal(),
-        None => Some(invoice_gross.round_cents()),
-    }
-    .filter(|amount| *amount > Decimal::ZERO && *amount == amount.round_cents())
-    .ok_or("Invalid payment amount")?;
+        Some(amount) => Some(
+            amount
+                .parse_decimal()
+                .filter(|amount| *amount > Decimal::ZERO && *amount == amount.round_cents())
+                .ok_or("Invalid payment amount")?,
+        ),
+        None => None,
+    };
     let payment_method = input.payment_method.trim();
     if !is_valid_invoice_payment_method(payment_method) {
         return Err("Invalid payment method");
@@ -150,7 +154,7 @@ pub(super) async fn load(
         row.try_get::<Option<Decimal>, _>("payment_received_amount")?,
         row.try_get::<Option<String>, _>("payment_received_method")?,
     ) {
-        (Some(received_on), Some(amount_gross), Some(payment_method)) => Some(ReceivedPayment {
+        (Some(received_on), amount_gross, Some(payment_method)) => Some(ReceivedPayment {
             received_on,
             amount_gross,
             payment_method,
@@ -186,7 +190,7 @@ pub(super) async fn store(
     )
     .bind(invoice_id)
     .bind(received.map(|payment| payment.received_on))
-    .bind(received.map(|payment| payment.amount_gross))
+    .bind(received.and_then(|payment| payment.amount_gross))
     .bind(received.map(|payment| payment.payment_method.clone()))
     .bind(terms.service_period.and_then(|period| period.from))
     .bind(terms.service_period.map(|period| period.to))
@@ -230,7 +234,7 @@ mod tests {
     }
 
     fn parse(input: &ReceivedPaymentInput) -> Result<ReceivedPayment, &'static str> {
-        parse_received_payment(input, today(), Decimal::new(250_000, 2))
+        parse_received_payment(input, today())
     }
 
     #[test]
@@ -240,14 +244,14 @@ mod tests {
             payment.received_on,
             NaiveDate::from_ymd_opt(2026, 11, 15).unwrap()
         );
-        assert_eq!(payment.amount_gross, Decimal::new(2000, 0));
+        assert_eq!(payment.amount_gross, Some(Decimal::new(2000, 0)));
         assert!(parse(&received("2026-11-17", "1", "cash")).is_ok());
-        // Without an amount: the invoice total.
+        // Without an amount: left open, the release takes what is due then.
         assert_eq!(
             parse(&received("2026-11-15", "", "cash"))
                 .unwrap()
                 .amount_gross,
-            Decimal::new(2500, 0)
+            None
         );
 
         for (input, message) in [

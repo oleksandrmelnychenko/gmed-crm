@@ -12,7 +12,7 @@ import { INVOICE_PAYMENT_METHODS } from "./payment-correction";
 export type ReceivedPaymentForm = {
   enabled: boolean;
   receivedOn: string;
-  /** Empty = the invoice total. */
+  /** Empty = what is left to pay at the release («К оплате», after advances). */
   amount: string;
   method: string;
 };
@@ -43,34 +43,52 @@ export function receivedPaymentFormFrom(payload: ReceivedPaymentPayload | null |
   return {
     enabled: true,
     receivedOn: payload.received_on,
-    amount: Number.isFinite(amount) ? amount.toFixed(2).replace(".", ",") : "",
+    amount: Number.isFinite(amount) ? formatMoneyInput(amount) : "",
     method: payload.payment_method,
   };
 }
 
+/** «2.144,91»: the German money format the dialogs show. */
+export function formatMoneyInput(amount: number): string {
+  return amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export type ReceivedPaymentProblem = "missing_date" | "future_date" | "invalid_amount" | "invalid_method";
 
-/** The amount staff typed, else the invoice total. */
-export function receivedAmount(form: ReceivedPaymentForm, invoiceGross: number): number {
-  if (form.amount.trim() === "") return roundCents(invoiceGross);
+/** The amount staff typed, else what is due («К оплате»). */
+export function receivedAmount(form: ReceivedPaymentForm, dueGross: number): number {
+  if (form.amount.trim() === "") return roundCents(dueGross);
   return parseMoneyInput(form.amount);
 }
 
 export function receivedPaymentProblem(
   form: ReceivedPaymentForm,
-  invoiceGross: number,
+  dueGross: number,
   today: string,
 ): ReceivedPaymentProblem | null {
   if (!form.enabled) return null;
   if (!form.receivedOn) return "missing_date";
   if (form.receivedOn > today) return "future_date";
-  const amount = receivedAmount(form, invoiceGross);
+  // Left empty: the server takes what is due at the release.
+  if (form.amount.trim() === "") return (INVOICE_PAYMENT_METHODS as readonly string[]).includes(form.method) ? null : "invalid_method";
+  const amount = receivedAmount(form, dueGross);
   if (!Number.isFinite(amount) || amount <= 0 || !sameCents(amount, roundCents(amount))) return "invalid_amount";
   if (!(INVOICE_PAYMENT_METHODS as readonly string[]).includes(form.method)) return "invalid_method";
   return null;
 }
 
-/** The body part; an empty amount is sent as null = the invoice total (the server knows it). */
+/**
+ * A typed amount above what is due: the excess becomes the patient's credit
+ * (the release asks to confirm it). 0 when nothing is typed or nothing exceeds.
+ */
+export function receivedPaymentExcess(form: ReceivedPaymentForm, dueGross: number | null): number {
+  if (!form.enabled || form.amount.trim() === "" || dueGross == null || !Number.isFinite(dueGross)) return 0;
+  const amount = parseMoneyInput(form.amount);
+  if (!Number.isFinite(amount)) return 0;
+  return Math.max(0, roundCents(amount - roundCents(dueGross)));
+}
+
+/** The body part; an empty amount is sent as null = what is due at the release (the server knows it). */
 export function receivedPaymentPayload(form: ReceivedPaymentForm): ReceivedPaymentPayload | null {
   if (!form.enabled) return null;
   return {
@@ -81,10 +99,10 @@ export function receivedPaymentPayload(form: ReceivedPaymentForm): ReceivedPayme
 }
 
 /** Something is left to pay after the received money: a part payment. */
-export function receivedPaymentIsPartial(form: ReceivedPaymentForm, invoiceGross: number): boolean {
+export function receivedPaymentIsPartial(form: ReceivedPaymentForm, dueGross: number): boolean {
   if (!form.enabled) return false;
-  const amount = receivedAmount(form, invoiceGross);
-  return Number.isFinite(amount) && roundCents(amount) < roundCents(invoiceGross);
+  const amount = receivedAmount(form, dueGross);
+  return Number.isFinite(amount) && roundCents(amount) < roundCents(dueGross);
 }
 
 /** The service period is invalid when the end is missing or before the start. */
@@ -109,12 +127,15 @@ export function samePeriod(left: ServicePeriodForm, right: ServicePeriodForm): b
   return left.from === right.from && left.to === right.to;
 }
 
-export function sameReceivedPayment(left: ReceivedPaymentForm, right: ReceivedPaymentForm, invoiceGross: number): boolean {
+export function sameReceivedPayment(left: ReceivedPaymentForm, right: ReceivedPaymentForm): boolean {
   if (!left.enabled || !right.enabled) return left.enabled === right.enabled;
+  const leftOpen = left.amount.trim() === "";
+  const rightOpen = right.amount.trim() === "";
   return (
     left.receivedOn === right.receivedOn &&
     left.method === right.method &&
-    sameCents(receivedAmount(left, invoiceGross), receivedAmount(right, invoiceGross))
+    leftOpen === rightOpen &&
+    (leftOpen || sameCents(parseMoneyInput(left.amount), parseMoneyInput(right.amount)))
   );
 }
 
@@ -129,6 +150,13 @@ export function receivedPaymentProblemText(problem: ReceivedPaymentProblem, de: 
     case "invalid_method":
       return de ? "Zahlungsart wählen." : "Выберите способ оплаты.";
   }
+}
+
+/** Amber warning beside a typed amount above what is due (QA verify2 B-5). */
+export function receivedPaymentExcessText(due: string, excessText: string, de: boolean): string {
+  return de
+    ? `Mehr als der offene Betrag (${due}): ${excessText} werden Guthaben des Patienten.`
+    : `Больше суммы к оплате (${due}): ${excessText} станут переплатой пациента.`;
 }
 
 export function servicePeriodProblemText(problem: "missing_end" | "end_before_start", de: boolean): string {

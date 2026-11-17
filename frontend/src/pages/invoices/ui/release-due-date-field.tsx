@@ -42,7 +42,7 @@ export function ReleaseDueDateField({ value, onChange, termDays, ariaLabel, disa
         </span>
       ) : state.shorterThanTerm ? (
         <span className="block text-xs text-amber-700 dark:text-amber-300" data-testid="release-due-date-short">
-          {de ? `Weniger als ${state.termDays} Tage ab heute (${shown})` : `Меньше ${state.termDays} дней от сегодня (${shown})`}
+          {de ? `Kürzer als +${state.termDays} Tage ab Ausstellung (${shown})` : `Меньше +${state.termDays} дней от выставления (${shown})`}
         </span>
       ) : null}
     </>

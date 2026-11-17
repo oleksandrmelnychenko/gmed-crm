@@ -51,6 +51,29 @@ export function staffBalanceWithoutUnappliedAdvance(
   return { ...balance, amount: Math.round((balance.amount - advance) * 100) / 100 };
 }
 
+/**
+ * The patients list balance from the card header's statement summary (QA
+ * verify2 B-3): the same figure and the same credit word as the header.
+ * `null` when the row carries no summary (no invoices: the plain list value).
+ */
+export function patientListBalance(
+  summary: (CreditSummary & { balance_side?: string }) | null | undefined,
+  lang: string,
+): { amount: number; side: PatientBalanceSide; creditLabel: string | null } | null {
+  if (!summary) return null;
+  const balance = staffBalanceWithoutUnappliedAdvance(resolvePatientBalancePresentation(summary), summary);
+  if (!balance) return null;
+  if (balance.needsReconciliation) {
+    return { amount: balance.signedAmount ?? 0, side: "reconciliation_required", creditLabel: null };
+  }
+  const amount = balance.amount ?? 0;
+  return {
+    amount: balance.side === "credit" ? -amount : amount,
+    side: balance.side,
+    creditLabel: balance.side === "credit" ? staffCreditSideLabel(summary, lang) : null,
+  };
+}
+
 export type PatientBalancePresentation = {
   amount: number | null;
   /** With the reconciliation still open: the calculated balance with its sign. */

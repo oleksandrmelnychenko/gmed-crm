@@ -2444,6 +2444,47 @@ fn patient_pdf_brand(
     }
 }
 
+/// The list row's balance from the card header's statement summary: the
+/// patient's own signed balance (third parties' open invoices left out, as
+/// the header does), its side, and the summary for the same presentation.
+fn apply_staff_balance_summary(map: &mut Map<String, Value>, summary: Value) {
+    use rust_decimal::Decimal;
+    let amount = |key: &str| {
+        summary[key]
+            .as_str()
+            .and_then(|value| value.trim().parse::<Decimal>().ok())
+    };
+    let third_party = amount("third_party_open_due")
+        .unwrap_or(Decimal::ZERO)
+        .max(Decimal::ZERO);
+    let (balance, side) = match amount("closing_balance") {
+        Some(closing) if summary["balance_side"] != "reconciliation_required" => {
+            let own = closing - third_party;
+            let side = if own > Decimal::ZERO {
+                "debit"
+            } else if own < Decimal::ZERO {
+                "credit"
+            } else {
+                "settled"
+            };
+            (own, side)
+        }
+        _ => (
+            amount("provisional_balance").unwrap_or(Decimal::ZERO),
+            "reconciliation_required",
+        ),
+    };
+    if let Some(currency) = summary["currency"].as_str() {
+        map.insert("account_balance_currency".to_string(), json!(currency));
+    }
+    map.insert(
+        "account_balance".to_string(),
+        json!(crate::money::round_cents(balance).normalize().to_string()),
+    );
+    map.insert("account_balance_side".to_string(), json!(side));
+    map.insert("account_balance_summary".to_string(), summary);
+}
+
 async fn list_patients(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2642,6 +2683,7 @@ async fn list_patients(
                        WHEN COALESCE(financial.account_balance, 0) < 0 THEN 'credit'
                        ELSE 'settled'
                    END AS account_balance_side,
+                   financial.patient_id IS NOT NULL AS has_financial_position,
                    portal.id AS portal_user_id,
                    portal.email AS portal_email,
                    portal.is_active AS portal_active,
@@ -2756,6 +2798,7 @@ async fn list_patients(
         Ok(rows) => {
             let policies = load_patient_field_policies(&state, &auth).await?;
             let mut patients = Vec::with_capacity(rows.len());
+            let mut with_ledger: Vec<(usize, Uuid)> = Vec::new();
             for r in rows {
                 let patient_id: Uuid = r.try_get("id").map_err(|_| {
                     err(
@@ -2826,7 +2869,59 @@ async fn list_patients(
                     );
                     map.insert("subscription".to_string(), patient_subscription_summary(&r));
                 }
+                if include_financial_balance
+                    && r.try_get::<bool, _>("has_financial_position")
+                        .unwrap_or(false)
+                {
+                    with_ledger.push((patients.len(), patient_id));
+                }
                 patients.push(summary);
+            }
+            // The balance of the card header (QA verify2 B-3): the same
+            // account statement, so the list nets overpayment credit the
+            // same way.
+            let mut summaries = Vec::with_capacity(with_ledger.len());
+            for chunk in with_ledger.chunks(8) {
+                let mut tasks = tokio::task::JoinSet::new();
+                for &(index, patient_id) in chunk {
+                    let state = state.clone();
+                    tasks.spawn(async move {
+                        (
+                            index,
+                            crate::routes::patient_financials::staff_balance_summary(
+                                &state, patient_id,
+                            )
+                            .await,
+                        )
+                    });
+                }
+                while let Some(joined) = tasks.join_next().await {
+                    match joined {
+                        Ok(value) => summaries.push(value),
+                        Err(error) => {
+                            tracing::error!(%error, "patient balance task");
+                            return Err(err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to list patients",
+                            ));
+                        }
+                    }
+                }
+            }
+            for (index, summary) in summaries {
+                let summary = match summary {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::error!(%error, "load the patient balance for the list");
+                        return Err(err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to list patients",
+                        ));
+                    }
+                };
+                if let Some(Value::Object(map)) = patients.get_mut(index) {
+                    apply_staff_balance_summary(map, summary);
+                }
             }
             Ok(Json(patients))
         }

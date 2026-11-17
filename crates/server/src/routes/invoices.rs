@@ -3405,6 +3405,15 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "already_paid") => "Уже оплачено",
         ("en", "already_paid") => "Already paid",
         (_, "already_paid") => "Bereits bezahlt",
+        // Received beyond the invoice amount: kept as the patient's credit.
+        ("uk", "overpayment") => "Переплата (на балансі)",
+        ("ru", "overpayment") => "Переплата (на балансе)",
+        ("en", "overpayment") => "Overpayment (credit)",
+        (_, "overpayment") => "Überzahlung (Guthaben)",
+        ("uk", "received_applied") => "зараховано на рахунок",
+        ("ru", "received_applied") => "зачтено в счёт",
+        ("en", "received_applied") => "applied to the invoice",
+        (_, "received_applied") => "auf die Rechnung angerechnet",
         _ => key,
     }
 }
@@ -6748,19 +6757,57 @@ fn format_invoice_pdf_period(
     }
 }
 
-/// Money received before the invoice: what was payable after the credited
-/// advances, and what is left of it.
-fn invoice_pdf_received_figures(
-    context: &InvoicePdfContext,
-) -> Option<(document::ReceivedPayment, Decimal)> {
+/// Money received before the invoice, split as the books carry it: the part
+/// the invoice takes (at most what was payable after the credited advances),
+/// the excess kept as the patient's credit, and what is left to pay.
+struct ReceivedFigures {
+    received: document::ReceivedPayment,
+    applied: Decimal,
+    overpayment: Decimal,
+    remaining: Decimal,
+}
+
+fn invoice_pdf_received_figures(context: &InvoicePdfContext) -> Option<ReceivedFigures> {
     let received = context.received_payment?;
     let gross = Decimal::from_str_exact(context.total_gross.trim()).unwrap_or(Decimal::ZERO);
     let prepayment =
         Decimal::from_str_exact(context.prepayment_applied_amount.trim()).unwrap_or(Decimal::ZERO);
-    let remaining = (gross - prepayment - received.amount)
-        .max(Decimal::ZERO)
-        .round_cents();
-    Some((received, remaining))
+    let payable = (gross - prepayment).max(Decimal::ZERO).round_cents();
+    let applied = received.amount.min(payable).max(Decimal::ZERO);
+    Some(ReceivedFigures {
+        received,
+        applied,
+        overpayment: (received.amount - applied).max(Decimal::ZERO),
+        remaining: payable - applied,
+    })
+}
+
+/// The text the e-invoice carries for money received before the invoice
+/// (§ 14 Abs. 4 Nr. 6 UStG: its day), as the PDF prints it: the day, the
+/// amount the invoice takes and an excess kept as credit.
+fn einvoice_received_note(
+    received: document::ReceivedPayment,
+    applied: Decimal,
+    currency: &str,
+) -> String {
+    let money = |value: Decimal| format_invoice_pdf_money(&value.to_string(), currency);
+    let mut note = format!(
+        "{} {}: {}",
+        invoice_pdf_label("de", "payment_received_on"),
+        format_invoice_pdf_date(Some(received.received_on)),
+        money(received.amount)
+    );
+    let overpayment = (received.amount - applied).max(Decimal::ZERO);
+    if overpayment > Decimal::ZERO {
+        note.push_str(&format!(
+            "; {} {}; {} {}",
+            invoice_pdf_label("de", "received_applied"),
+            money(applied),
+            invoice_pdf_label("de", "overpayment"),
+            money(overpayment)
+        ));
+    }
+    note
 }
 
 /// The totals of an invoice paid (in part) before it was issued: the invoice
@@ -6772,9 +6819,10 @@ fn render_invoice_pdf_received_payment(
     total_gross: &str,
 ) {
     let language = context.language.as_str();
-    let Some((received, remaining)) = invoice_pdf_received_figures(context) else {
+    let Some(figures) = invoice_pdf_received_figures(context) else {
         return;
     };
+    let received = figures.received;
     layout.summary_row(
         invoice_pdf_label(language, "invoice_amount"),
         total_gross,
@@ -6795,16 +6843,26 @@ fn render_invoice_pdf_received_payment(
             invoice_pdf_label(language, "payment_received_on"),
             format_invoice_pdf_date(Some(received.received_on))
         ),
-        &format_invoice_pdf_deduction(&received.amount.to_string(), &context.currency),
+        &format_invoice_pdf_deduction(&figures.applied.to_string(), &context.currency),
         false,
         false,
     );
     layout.summary_row(
         invoice_pdf_label(language, "amount_payable"),
-        &format_invoice_pdf_money(&remaining.to_string(), &context.currency),
+        &format_invoice_pdf_money(&figures.remaining.to_string(), &context.currency),
         true,
         true,
     );
+    // More received than the invoice asks (QA verify2 B-1): the invoice takes
+    // its amount, the excess stays as the patient's credit.
+    if figures.overpayment > Decimal::ZERO {
+        layout.summary_row(
+            invoice_pdf_label(language, "overpayment"),
+            &format_invoice_pdf_money(&figures.overpayment.to_string(), &context.currency),
+            false,
+            false,
+        );
+    }
 }
 
 fn invoice_pdf_vat_group_label(language: &str, row: &document::VatBreakdownRow) -> String {
@@ -7146,11 +7204,17 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     }
     // Money that arrived before the invoice (owner 2026-11-17): its day, and
     // its amount when something is left to pay; nothing left, no due date.
-    if let Some((received, remaining)) = invoice_pdf_received_figures(context) {
+    if let Some(ReceivedFigures {
+        received,
+        remaining,
+        overpayment,
+        ..
+    }) = invoice_pdf_received_figures(context)
+    {
         let day = format_invoice_pdf_date(Some(received.received_on));
         meta_cells.push((
             invoice_pdf_label(language, "payment_received_on"),
-            if remaining > Decimal::ZERO {
+            if remaining > Decimal::ZERO || overpayment > Decimal::ZERO {
                 format!(
                     "{day} · {}",
                     format_invoice_pdf_money(&received.amount.to_string(), &context.currency)
@@ -9558,13 +9622,10 @@ async fn create_invoice_from_quote(
             "Select at least one invoice item",
         );
     }
-    // Without an amount the money received is the invoice total.
+    // Without an amount the money received is what is left to pay at the
+    // release, after the advances it credits (QA verify2 B-2).
     if let Some(input) = body.payment_received.as_ref() {
-        match document_terms::parse_received_payment(
-            input,
-            crate::app_time::today(),
-            invoice_snapshot.total_gross,
-        ) {
+        match document_terms::parse_received_payment(input, crate::app_time::today()) {
             Ok(value) => document_terms.received_payment = Some(value),
             Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
         }
@@ -11452,7 +11513,7 @@ async fn record_received_payment_at_release(
             "Failed to record payment",
         )
     })?;
-    let (Some(received_on), Some(amount_gross), Some(payment_method)) = (
+    let (Some(received_on), typed_amount, Some(payment_method)) = (
         row.try_get::<Option<NaiveDate>, _>("payment_received_on")
             .unwrap_or_default(),
         row.try_get::<Option<Decimal>, _>("payment_received_amount")
@@ -11496,6 +11557,58 @@ async fn record_received_payment_at_release(
         line_items: row
             .try_get::<Value, _>("line_items")
             .unwrap_or_else(|_| json!([])),
+    };
+    let failed = |error: sqlx::Error, what: &str| {
+        tracing::error!(%error, %invoice_id, what, "resolve the payment received before the invoice");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        )
+    };
+    // No amount typed: the money received is what the invoice leaves to pay
+    // now, after the advances this release credited (QA verify2 B-2). It is
+    // fixed on the invoice once, before the payment and the document.
+    let amount_gross = match typed_amount {
+        Some(amount) => amount,
+        None => {
+            let paid: Decimal = sqlx::query_scalar(
+                r#"SELECT COALESCE(SUM(
+                          CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END
+                       ), 0)
+                   FROM invoice_payment_transactions
+                   WHERE invoice_id = $1"#,
+            )
+            .bind(invoice_id)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(|error| failed(error, "sum payments"))?;
+            let due = (context.total_gross
+                - context.credited_amount
+                - context.prepayment_applied_amount
+                - paid)
+                .max(Decimal::ZERO)
+                .round_cents();
+            if due.is_zero() {
+                // Nothing left to pay: no payment, and the invoice states none.
+                sqlx::query(
+                    r#"UPDATE invoices
+                       SET payment_received_on = NULL, payment_received_method = NULL
+                       WHERE id = $1"#,
+                )
+                .bind(invoice_id)
+                .execute(&mut **transaction)
+                .await
+                .map_err(|error| failed(error, "drop the note"))?;
+                return Ok(None);
+            }
+            sqlx::query("UPDATE invoices SET payment_received_amount = $2 WHERE id = $1")
+                .bind(invoice_id)
+                .bind(due)
+                .execute(&mut **transaction)
+                .await
+                .map_err(|error| failed(error, "fix the amount"))?;
+            due
+        }
     };
     let recorded = record_invoice_payment_tx(
         transaction,
@@ -14912,15 +15025,18 @@ async fn load_einvoice(
     let advances_credited = row
         .try_get::<Decimal, _>("prepayment_applied_amount")
         .unwrap_or(Decimal::ZERO);
-    let received_before = document::ReceivedPayment::from_columns(
+    let received_payment = document::ReceivedPayment::from_columns(
         row.try_get("payment_received_on").unwrap_or_default(),
         row.try_get("payment_received_amount").unwrap_or_default(),
-    )
-    .map_or(Decimal::ZERO, |received| {
+    );
+    let received_before = received_payment.map_or(Decimal::ZERO, |received| {
         received
             .amount
             .min((total_gross - advances_credited).max(Decimal::ZERO))
     });
+    // Its day (§ 14 Abs. 4 Nr. 6 UStG) and an excess, as the PDF prints them.
+    let received_note = received_payment
+        .map(|received| einvoice_received_note(received, received_before, &currency));
     let prepaid_amount = advances_credited + received_before;
     let due_date = if received_before > Decimal::ZERO && prepaid_amount >= total_gross {
         None
@@ -14971,6 +15087,7 @@ async fn load_einvoice(
             })
             .collect(),
         prepayment_note,
+        received_note,
         bank_iban: setting("agency_bank_iban"),
         bank_bic: setting("agency_bank_swift"),
         bank_holder: setting("agency_bank_holder"),
@@ -17930,6 +18047,29 @@ mod tests {
         assert!(text.contains("45,00 €"), "{text}");
         assert!(text.contains("30.06.2026"), "{text}");
         assert!(!text.contains("Bereits bezahlt"), "{text}");
+
+        // More than the invoice (QA verify2 B-1): the invoice takes its
+        // amount, the excess is printed as credit, nothing is left to pay.
+        context.received_payment = Some(document::ReceivedPayment {
+            received_on: day(11, 15),
+            amount: rust_decimal::Decimal::new(200, 0),
+        });
+        let text = pdf_text(&context);
+        // 200,00 only in the header line; the summary deducts 145,00.
+        assert_eq!(text.matches("200,00 €").count(), 1, "{text}");
+        assert!(text.contains("145,00 €"), "{text}");
+        assert!(text.contains("Überzahlung (Guthaben)"), "{text}");
+        assert!(text.contains("55,00 €"), "{text}");
+        assert!(text.contains("0,00 €"), "{text}");
+        assert!(text.contains("Bereits bezahlt"), "{text}");
+        assert_eq!(
+            super::einvoice_received_note(
+                context.received_payment.unwrap(),
+                rust_decimal::Decimal::new(145, 0),
+                "EUR"
+            ),
+            "Zahlung erhalten am 15.11.2026: 200,00 €; auf die Rechnung angerechnet 145,00 €; Überzahlung (Guthaben) 55,00 €"
+        );
 
         // Staff set the period: only its end known on a final invoice.
         context.invoice_type = "final".to_string();

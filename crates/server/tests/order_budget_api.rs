@@ -413,6 +413,75 @@ async fn budget_counts_own_services_against_the_signed_contract() {
     );
 }
 
+/// QA verify2 D-F1/O1: a legacy (seed) quote whose lines name no order line
+/// and carry no VAT rate or line amounts. A client-signature snapshot older
+/// than the quote must not count the contract twice, and the quote API
+/// states the line amounts an invoice bills it with.
+#[tokio::test]
+async fn a_legacy_quote_after_a_signed_snapshot_counts_the_contract_once() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let (app, pool, admin_id) = (context.app, context.pool, context.admin_id);
+    let ceo = auth_header(admin_id, "ceo");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (order_id, patient_id) = seed_order(&pool, admin_id, &tag).await;
+    seed_line(
+        &pool,
+        order_id,
+        patient_id,
+        "Treatment package",
+        1,
+        1000,
+        0,
+        false,
+    )
+    .await;
+    // The snapshot was written at a staff change, dated the older signature.
+    sign_order(&pool, order_id, "to_jsonb(now() - interval '1 hour')").await;
+    let quote_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO quotes (order_id, quote_number, total_net, total_vat, total_gross,
+                               status, line_items, created_by)
+           VALUES ($1, $2, 1000, 0, 1000, 'accepted', $3, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(format!("QU-L-{tag}"))
+    .bind(json!([{
+        "description": "Treatment package", "quantity": 1,
+        "unit_price": "1000.00", "total_gross": "1000.00"
+    }]))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, budget) = get_budget(&app, order_id, &ceo).await;
+    assert_eq!(status, StatusCode::OK, "{budget}");
+    assert_eq!(
+        money(&budget["contract_own_services_gross"]),
+        Decimal::from(1000),
+        "{budget}"
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/quotes/{quote_id}"))
+        .header("Authorization", &ceo)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    let quote: Value = serde_json::from_slice(&bytes).unwrap();
+    let line = &quote["line_items"][0];
+    assert_eq!(line["vat_rate"], "0", "{quote}");
+    assert_eq!(money(&line["line_net"]), Decimal::from(1000), "{quote}");
+    assert_eq!(money(&line["line_vat"]), Decimal::ZERO, "{quote}");
+    assert_eq!(money(&line["line_gross"]), Decimal::from(1000), "{quote}");
+}
+
 async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO users (email, password_hash, name, role)

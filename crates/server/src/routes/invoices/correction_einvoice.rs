@@ -264,6 +264,7 @@ pub(super) fn correction_einvoice(context: &CreditNotePdfContext) -> EInvoice {
         prepaid_amount: round_cents(released_totals(context).2),
         prepaid_invoices: references,
         prepayment_note: released_advances_note(context),
+        received_note: None,
         bank_iban: None,
         bank_bic: None,
         bank_holder: None,

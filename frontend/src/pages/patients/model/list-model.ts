@@ -23,6 +23,14 @@ export type PatientSummary = {
   account_balance?: string | null;
   account_balance_currency?: string | null;
   account_balance_side?: "debit" | "credit" | "settled" | "reconciliation_required";
+  /** The card header's statement summary behind the balance (QA verify2 B-3). */
+  account_balance_summary?: {
+    closing_balance: string | null;
+    provisional_balance?: string | null;
+    balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
+    third_party_open_due?: string | null;
+    available_prepayment?: string | null;
+  } | null;
   is_active: boolean;
   lifecycle_status?: "prospective" | "active" | "inactive" | "deleted";
   created_at: string;

@@ -751,6 +751,7 @@ fn invoiceable_quote_lines(row: &sqlx::postgres::PgRow) -> (Value, Value) {
         let Some(map) = item.as_object_mut() else {
             continue;
         };
+        complete_legacy_quote_line_amounts(map);
         // Beside an active final invoice only a line credited on it in full
         // is open again.
         if closed_by_final {
@@ -773,6 +774,36 @@ fn invoiceable_quote_lines(row: &sqlx::postgres::PgRow) -> (Value, Value) {
         );
     }
     (lines, Value::Array(extras))
+}
+
+/// A legacy/seed quote line stored without its VAT rate or line amounts
+/// (QA verify2 D-O1): the rate and amounts an invoice bills it with — the
+/// missing rate is 0 % as in `build_selected_invoice_snapshot`, the amounts
+/// are quantity × unit price with that rate, as the invoice prices them.
+fn complete_legacy_quote_line_amounts(map: &mut serde_json::Map<String, Value>) {
+    let present = |map: &serde_json::Map<String, Value>, key: &str| {
+        map.get(key)
+            .is_some_and(|value| !value.is_null() && value.as_str() != Some(""))
+    };
+    if !present(map, "vat_rate") {
+        map.insert("vat_rate".to_string(), json!("0"));
+    }
+    if present(map, "line_net") && present(map, "line_vat") && present(map, "line_gross") {
+        return;
+    }
+    let quantity = quote_decimal_value(map.get("quantity"));
+    let unit_price = quote_decimal_value(map.get("unit_price")).round_cents();
+    let vat_rate = quote_decimal_value(map.get("vat_rate")).round_commercial(2);
+    let amounts = crate::money::line_amounts(quantity, unit_price, vat_rate);
+    for (key, value) in [
+        ("line_net", amounts.net),
+        ("line_vat", amounts.vat),
+        ("line_gross", amounts.gross),
+    ] {
+        if !present(map, key) {
+            map.insert(key.to_string(), json!(decimal_to_string(value)));
+        }
+    }
 }
 
 fn add_remaining_quote_quantities(
