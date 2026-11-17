@@ -738,4 +738,12 @@ describe("canStornoInvoice", () => {
     expect(canStornoInvoice({ ...base, status: "sent", invoice_type: "standard" })).toBe(true);
     expect(canStornoInvoice({ ...base, status: "draft", released_at: null, invoice_type: "final" })).toBe(false);
   });
+
+  // verify2-A S2-3: the advance rest the release set off goes back with the Storno.
+  it("offers it when the only money on the final is the advance rest its release set off", () => {
+    const final = { ...base, status: "partially_paid", invoice_type: "final", prepayment_applied_amount: "912.23" };
+    expect(canStornoInvoice({ ...final, paid_amount: "87.77", release_advance_rest_gross: "87.77" })).toBe(true);
+    expect(canStornoInvoice({ ...final, prepayment_applied_amount: "0", paid_amount: "87.77", release_advance_rest_gross: "87.77" })).toBe(true);
+    expect(canStornoInvoice({ ...final, paid_amount: "100.00", release_advance_rest_gross: "87.77" })).toBe(false);
+  });
 });

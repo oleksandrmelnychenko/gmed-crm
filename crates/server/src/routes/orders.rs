@@ -1638,7 +1638,10 @@ async fn load_order_completion_blockers(
         r#"SELECT COUNT(*)
            FROM order_leistungen
            WHERE order_id = $1
-             AND status IN ('planned', 'delivered')"#,
+             AND status IN ('planned', 'delivered')
+             -- Billed at 0 by the released final (waived): settled, no
+             -- approval by hand needed (verify2-A S3-10).
+             AND billing_waived_at IS NULL"#,
     )
     .bind(order_id)
     .fetch_one(&state.db)

@@ -149,11 +149,43 @@ pub(super) async fn preview_final_invoice(
         Err(error) => return failed(error),
     };
 
-    let mut target_open = advance_vat_rows(&snapshot.line_items, &[]);
-    let mut left = snapshot.total_gross;
-    let mut deducted_total = Decimal::ZERO;
-    let mut advance_items = Vec::with_capacity(advances.len());
+    let mut set_off_advances = Vec::with_capacity(advances.len());
     for advance in &advances {
+        let advance_id = advance.try_get::<Uuid, _>("id").unwrap_or_default();
+        let available_gross = advance
+            .try_get::<Decimal, _>("available_amount")
+            .unwrap_or(Decimal::ZERO);
+        let categorised = match advance_rows::settlement_rows(&mut conn, advance_id).await {
+            Ok(value) => value.is_some(),
+            Err(error) => return failed(error),
+        };
+        let available_rows = if categorised && available_gross > Decimal::ZERO {
+            match advance_rows::advance_available_rows(&mut conn, advance_id).await {
+                Ok(value) => Some(value),
+                Err(error) => return failed(error),
+            }
+        } else if categorised {
+            Some(Vec::new())
+        } else {
+            None
+        };
+        set_off_advances.push(advance_rows::SetOffAdvance {
+            available_rows,
+            available_gross,
+            rest_allowed: true,
+        });
+    }
+    // The release's own plan: deductions per VAT category, then the paid
+    // rests no category takes set off as payments (owner 2026-11-17).
+    let plans = advance_rows::plan_final_set_off(
+        &advance_vat_rows(&snapshot.line_items, &[]),
+        snapshot.total_gross,
+        &set_off_advances,
+    );
+    let mut deducted_total = Decimal::ZERO;
+    let mut rest_total = Decimal::ZERO;
+    let mut advance_items = Vec::with_capacity(advances.len());
+    for (advance, plan) in advances.iter().zip(&plans) {
         let advance_id = advance.try_get::<Uuid, _>("id").unwrap_or_default();
         let paid = advance
             .try_get::<Decimal, _>("paid_amount")
@@ -161,29 +193,9 @@ pub(super) async fn preview_final_invoice(
         let available = advance
             .try_get::<Decimal, _>("available_amount")
             .unwrap_or(Decimal::ZERO);
-        let max = available.min(left).max(Decimal::ZERO);
-        let mut rows = Vec::new();
-        let mut amount = Decimal::ZERO;
-        if max > Decimal::ZERO {
-            let categorised = match advance_rows::settlement_rows(&mut conn, advance_id).await {
-                Ok(value) => value.is_some(),
-                Err(error) => return failed(error),
-            };
-            if categorised {
-                let available_rows =
-                    match advance_rows::advance_available_rows(&mut conn, advance_id).await {
-                        Ok(value) => value,
-                        Err(error) => return failed(error),
-                    };
-                rows = advance_rows::plan_allocation_rows(&available_rows, &target_open, max);
-                amount = rows.iter().map(|row| row.gross).sum();
-                target_open = advance_rows::subtract_rows(&target_open, &rows);
-            } else {
-                amount = max;
-            }
-        }
-        left -= amount;
+        let (rows, amount) = (&plan.rows, plan.deduction);
         deducted_total += amount;
+        rest_total += plan.rest_applied;
         advance_items.push(json!({
             "invoice_id": advance_id,
             "invoice_number": advance.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
@@ -194,9 +206,24 @@ pub(super) async fn preview_final_invoice(
             "paid_gross": decimal_to_string(paid),
             "available_gross": decimal_to_string(available),
             "deduction_gross": decimal_to_string(amount),
-            "deduction_rows": rows_json(&rows),
+            "deduction_rows": rows_json(rows),
+            "rest_applied_gross": decimal_to_string(plan.rest_applied),
         }));
     }
+
+    // The Leistungszeitraum the issued invoice prints for these lines (the
+    // dialog proposes exactly this; verify2-A S2-4).
+    let service_period = match super::document_terms::default_service_period(
+        &mut conn,
+        "final",
+        Some(ctx.order_id),
+        &snapshot.line_items,
+    )
+    .await
+    {
+        Ok(period) => period,
+        Err(error) => return failed(error),
+    };
 
     let interims = match sqlx::query(
         r#"SELECT id, invoice_number, total_gross - credited_amount AS total_gross,
@@ -222,7 +249,12 @@ pub(super) async fn preview_final_invoice(
         "rows": rows_json(&advance_vat_rows(&snapshot.line_items, &[])),
         "advances": advance_items,
         "deducted_gross": decimal_to_string(deducted_total),
-        "due_gross": decimal_to_string(snapshot.total_gross - deducted_total),
+        "rest_applied_gross": decimal_to_string(rest_total),
+        "due_gross": decimal_to_string(snapshot.total_gross - deducted_total - rest_total),
+        "service_period": service_period.map(|(from, to)| json!({
+            "from": from.to_string(),
+            "to": to.to_string(),
+        })),
         "interim_invoices": interims.iter().map(|row| json!({
             "invoice_id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),

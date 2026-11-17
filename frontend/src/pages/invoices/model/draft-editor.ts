@@ -74,7 +74,10 @@ export type DraftEditorPayload = {
     description?: string;
     unit_price?: string;
     vat_rate?: string;
+    is_cost_passthrough?: boolean;
+    unit?: string | null;
     quote_line_index?: number | null;
+    comment?: string | null;
   }[];
   advance: {
     amount_gross: string;
@@ -94,6 +97,8 @@ export type DraftForm = {
   split: string[];
   receivedPayment: ReceivedPaymentForm;
   servicePeriod: ServicePeriodForm;
+  /** Final drafts: remarks of the kept services outside the estimate, by order service id. */
+  serviceComments?: Record<string, string>;
 };
 
 function storedPeriod(payload: DraftEditorPayload): ServicePeriodForm {
@@ -137,6 +142,7 @@ export function draftFormFrom(payload: DraftEditorPayload): DraftForm {
     split: (payload.advance?.groups ?? []).map((group) => amountText(group.amount_gross)),
     receivedPayment: receivedPaymentFormFrom(payload.payment_received),
     servicePeriod: shownPeriod(payload),
+    serviceComments: Object.fromEntries((payload.order_service_lines ?? []).map((service) => [service.order_leistung_id, service.comment ?? ""])),
   };
 }
 
@@ -217,7 +223,36 @@ export function draftLinesTotal(payload: DraftEditorPayload, form: DraftForm): S
       gross: roundCents(total.gross + part.gross),
     };
   }
+  // A final draft also bills the services outside the estimate it keeps
+  // (verify2-A S3-2: the running total left them out).
+  for (const service of draftKeptServices(payload)) {
+    total = {
+      net: roundCents(total.net + service.amounts.net),
+      vat: roundCents(total.vat + service.amounts.vat),
+      gross: roundCents(total.gross + service.amounts.gross),
+    };
+  }
   return total;
+}
+
+/** Final drafts: the services outside the estimate the draft bills, with their amounts (shown read-only). */
+export function draftKeptServices(payload: DraftEditorPayload) {
+  return (payload.order_service_lines ?? [])
+    .filter((service) => service.selected_quantity !== null)
+    .map((service) => ({
+      ...service,
+      quantity: Number(service.selected_quantity),
+      amounts: moneyLineAmounts(Number(service.selected_quantity), Number(service.unit_price ?? 0), Number(service.vat_rate ?? 0)),
+    }));
+}
+
+/** Own services of the draft (no pass-through costs): what the contract budget counts. */
+export function draftOwnServicesTotal(payload: DraftEditorPayload, form: DraftForm): SplitRow | null {
+  return draftLinesTotal({
+    ...payload,
+    quote_lines: payload.quote_lines.filter((line) => !line.is_cost_passthrough),
+    order_service_lines: (payload.order_service_lines ?? []).filter((service) => !service.is_cost_passthrough),
+  }, form);
 }
 
 /** Net and VAT of a gross share, worked back like the server (`line_amounts_for_gross`). */
@@ -300,6 +335,16 @@ export function draftUpdatePayload(payload: DraftEditorPayload, form: DraftForm)
   if (draftReceivedPaymentChanged(payload, form)) {
     body.payment_received = receivedPaymentPayload(form.receivedPayment);
   }
+  if (draftServiceCommentsChanged(payload, form)) {
+    // The kept services outside the estimate with their remarks (quantities unchanged).
+    body.order_services = (payload.order_service_lines ?? [])
+      .filter((service) => service.selected_quantity !== null)
+      .map((service) => ({
+        order_leistung_id: service.order_leistung_id,
+        quantity: service.selected_quantity,
+        comment: (form.serviceComments?.[service.order_leistung_id] ?? "").trim() || null,
+      }));
+  }
   if (draftPeriodChanged(payload, form)) {
     // The default again = none set by staff.
     body.service_period = servicePeriodPayload(form.servicePeriod, draftPeriodDefault(payload));
@@ -309,6 +354,13 @@ export function draftUpdatePayload(payload: DraftEditorPayload, form: DraftForm)
 
 export function draftReceivedPaymentChanged(payload: DraftEditorPayload, form: DraftForm): boolean {
   return !sameReceivedPayment(form.receivedPayment, receivedPaymentFormFrom(payload.payment_received));
+}
+
+/** Whether a remark of a kept service outside the estimate was changed. */
+export function draftServiceCommentsChanged(payload: DraftEditorPayload, form: DraftForm): boolean {
+  return (payload.order_service_lines ?? [])
+    .filter((service) => service.selected_quantity !== null)
+    .some((service) => (form.serviceComments?.[service.order_leistung_id] ?? "").trim() !== (service.comment ?? "").trim());
 }
 
 export function draftPeriodChanged(payload: DraftEditorPayload, form: DraftForm): boolean {
@@ -323,7 +375,8 @@ export function draftFormDirty(payload: DraftEditorPayload, form: DraftForm): bo
     draftLinesChanged(payload, form) ||
     advanceSplitChanged(payload, form.split) ||
     draftReceivedPaymentChanged(payload, form) ||
-    draftPeriodChanged(payload, form)
+    draftPeriodChanged(payload, form) ||
+    draftServiceCommentsChanged(payload, form)
   );
 }
 
@@ -361,9 +414,7 @@ export function draftFinalLineComparison(payload: DraftEditorPayload, line: Draf
 export function draftFinalSummary(payload: DraftEditorPayload, form: DraftForm) {
   const estimate = roundCents(payload.quote_lines.reduce((sum, line) => sum + Number(line.line_gross ?? 0), 0));
   const billedBefore = roundCents(payload.quote_lines.reduce((sum, line) => sum + Number(line.billed_gross ?? 0), 0));
-  const kept = (payload.order_service_lines ?? [])
-    .filter((service) => service.selected_quantity !== null)
-    .reduce((sum, service) => sum + moneyLineAmounts(Number(service.selected_quantity), Number(service.unit_price ?? 0), Number(service.vat_rate ?? 0)).gross, 0);
-  const actual = roundCents(billedBefore + (draftLinesTotal(payload, form)?.gross ?? 0) + kept);
+  // The draft's own total carries the services outside the estimate it keeps.
+  const actual = roundCents(billedBefore + (draftLinesTotal(payload, form)?.gross ?? 0));
   return { estimate, actual, difference: roundCents(actual - estimate) };
 }

@@ -1549,7 +1549,7 @@ function useStaffInvoicesPageContent() {
         render: (row) => (
           <span className="block text-right tabular-nums text-foreground">
             {formatMoney(row.balance_due, row.currency)}
-            {Number(row.advance_credit_available ?? 0) > 0 ? (
+            {Number(row.advance_credit_available ?? 0) > 0 && row.invoice_type !== "final" ? (
               <InvoiceSubAmount
                 label={`${t.finance_invoice_amount_to_pay}:`}
                 amount={formatMoney(row.amount_to_pay, row.currency)}
@@ -2099,7 +2099,13 @@ function useStaffInvoicesPageContent() {
     setCreateError(null);
     try {
       const selectedLines = invoiceLineSelectionPayload(createForm);
-      const documentTerms = createDocumentTermsPayload(createForm, quotePeriodDefaults(selectedCreateQuote));
+      // A final proposes the period of its lines (preview); a period staff
+      // touched is sent as typed, an untouched one is computed the same way
+      // by the server (verify2-A S2-4).
+      const documentTerms = createDocumentTermsPayload(
+        createForm,
+        createForm.invoiceType === "final" ? { from: "", to: "" } : quotePeriodDefaults(selectedCreateQuote),
+      );
       const created = await createInvoice(createForm.quoteId, prepaymentAdvance
         ? {
             invoice_type: "advance",
@@ -3513,7 +3519,7 @@ function useStaffInvoicesPageContent() {
                             : `${lang === "de" ? "bis" : "до"} ${detail.service_period.to.slice(5, 7)}.${detail.service_period.to.slice(0, 4)}`}
                         />
                       ) : null}
-                      {Number(detail.advance_credit_available ?? 0) > 0 ? (
+                      {Number(detail.advance_credit_available ?? 0) > 0 && detail.invoice_type !== "final" ? (
                         <>
                           <SummaryLine
                             label={t.finance_invoice_advance_credit}

@@ -219,10 +219,10 @@ test("a new invoice is no longer offered as interim", async ({ page }) => {
 test("a position remark is sent with the invoice and can be changed on the draft", async ({ page }) => {
   const fixture = await prepare(page);
   const dialog = await openCreate(page);
-  // A final invoice bills every open position (interim, where positions
-  // could be left out, is no longer offered — owner 2026-11-17); every
-  // position has its remark field.
-  await expect(dialog.getByRole("checkbox", { name: "Позиция: Service 2", exact: true })).toBeChecked();
+  // A final invoice bills every position with its delivered quantity
+  // (interim is no longer offered — owner 2026-11-17); every final line has
+  // its remark field again (lost with fix-96).
+  await expect(dialog.getByTestId("final-invoice-lines")).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: "Примечание в счёте: Service 2", exact: true })).toHaveCount(1);
   await dialog.getByRole("textbox", { name: "Примечание в счёте: Service 1", exact: true }).fill("  за 2 и 3 квартал 2026 ");
   await page.screenshot({ path: "../artifacts/design-qa/invoice-create-remark-ru.png", animations: "disabled" });

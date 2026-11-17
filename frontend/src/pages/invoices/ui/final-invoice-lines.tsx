@@ -20,7 +20,8 @@ import {
   isFinalSelectionValid,
   type FinalInvoicePreview,
 } from "../model/final-invoice";
-import { invoiceLineSelectionPayload } from "../model/invoice-model";
+import type { ServicePeriodForm } from "../model/document-terms";
+import { INVOICE_LINE_COMMENT_MAX_LENGTH, invoiceLineSelectionPayload } from "../model/invoice-model";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import type { CreateForm, DeliveredOrderService, InvoiceLineItem, QuoteOption } from "../model/types";
 
@@ -47,6 +48,20 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
   const quantityLabel = de ? "Menge" : "Количество";
   const unitCount = (value: string, unit?: string | null) => agencyServiceUnitCount(value, unit, t, lang);
   const outside = extras.filter((extra) => extra.quote_line_index == null || !lines[extra.quote_line_index]);
+  // The remark printed under a position (e.g. «за 2 и 3 квартал 2026»), on
+  // every final line as before fix-96.
+  const commentLabel = de ? "Anmerkung auf der Rechnung" : "Примечание в счёте";
+  const commentPlaceholder = de ? "z. B. 2. und 3. Quartal 2026" : "например: за 2 и 3 квартал 2026";
+  const remarkField = (name: string, value: string, onChange: (value: string) => void) => (
+    <label className="col-span-3 block min-w-0 space-y-1 text-xs text-muted-foreground">
+      <span>{commentLabel}</span>
+      <Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={busy}
+        aria-label={`${commentLabel}: ${name}`} placeholder={commentPlaceholder}
+        value={value}
+        className={cn(inputClass, "h-8 w-full min-w-0")}
+        onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
 
   const serviceRow = (extra: DeliveredOrderService, nested: boolean) => {
     const quantity = finalServiceQuantity(form, extra.order_leistung_id);
@@ -75,6 +90,10 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
           <span className="block">{de ? "erbracht" : "фактически"} {unitCount(formatQuantity(Number(extra.quantity)), extra.unit)}</span>
         </label>
         <p className="whitespace-nowrap pt-5 text-right font-mono text-sm font-medium tabular-nums">{money(totals.serviceGrossById[extra.order_leistung_id] ?? 0)}</p>
+        {remarkField(name, form.orderServiceComments?.[extra.order_leistung_id] ?? "", (value) => onFormChange((current) => ({
+          ...current,
+          orderServiceComments: { ...current.orderServiceComments, [extra.order_leistung_id]: value },
+        })))}
       </div>
     );
   };
@@ -124,6 +143,10 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
               </label>
               <p className="whitespace-nowrap pt-5 text-right font-mono text-sm font-medium tabular-nums">{money(totals.lineGrossByIndex[index] ?? 0)}</p>
               {invalid ? <p role="alert" className="col-span-3 text-xs text-destructive">{de ? "Menge muss 0 oder größer sein." : "Количество должно быть 0 или больше."}</p> : null}
+              {remarkField(name, form.lineComments[String(index)] ?? "", (value) => onFormChange((current) => ({
+                ...current,
+                lineComments: { ...current.lineComments, [String(index)]: value },
+              })))}
             </div>
             {siblings.map((extra) => serviceRow(extra, true))}
           </div>
@@ -140,8 +163,10 @@ type SettlementProps = {
   extras: DeliveredOrderService[];
   form: CreateForm;
   money: (value: unknown) => string;
-  /** «К оплате» after the advance set-off, for the default of «Оплата уже поступила». */
+  /** «К оплате» after the advance set-off (rests set off included), for the default of «Оплата уже поступила». */
   onDueChange?: (due: number | null) => void;
+  /** The Leistungszeitraum the issued invoice prints for these lines (verify2-A S2-4). */
+  onServicePeriod?: (period: ServicePeriodForm | null) => void;
 };
 
 function categoryLabel(row: { kind: string; vat_rate: string }, de: boolean) {
@@ -153,13 +178,14 @@ function categoryLabel(row: { kind: string; vat_rate: string }, de: boolean) {
  * The final invoice against the estimate, and the set-off its release makes
  * (`POST /quotes/{id}/final-preview`, the server's own rules).
  */
-export function FinalInvoiceSettlement({ open, quote, extras, form, money, onDueChange }: SettlementProps) {
+export function FinalInvoiceSettlement({ open, quote, extras, form, money, onDueChange, onServicePeriod }: SettlementProps) {
   const { lang } = useLang();
   const de = lang === "de";
   const summary = finalInvoiceSummary(quote, form, extras);
   const valid = isFinalSelectionValid(quote.line_items, form, extras);
   const payload = valid
-    ? JSON.stringify({ line_items: invoiceLineSelectionPayload(form), order_services: finalOrderServicesPayload(form, extras) })
+    // Remarks change no amount: the preview ignores them.
+    ? JSON.stringify({ line_items: invoiceLineSelectionPayload({ ...form, lineComments: {} }), order_services: finalOrderServicesPayload({ ...form, orderServiceComments: {} }, extras) })
     : "";
   const [preview, setPreview] = useState<{ key: string; data?: FinalInvoicePreview; error?: string } | null>(null);
   useEffect(() => {
@@ -182,6 +208,12 @@ export function FinalInvoiceSettlement({ open, quote, extras, form, money, onDue
   useEffect(() => {
     onDueChange?.(due != null && Number.isFinite(due) ? due : null);
   }, [due, onDueChange]);
+  const periodFrom = data?.service_period?.from ?? "";
+  const periodTo = data?.service_period?.to ?? "";
+  useEffect(() => {
+    if (!data || !onServicePeriod) return;
+    onServicePeriod(periodTo ? { from: periodFrom, to: periodTo } : null);
+  }, [data, periodFrom, periodTo, onServicePeriod]);
 
   return (
     <div className="space-y-3 border-t border-border pt-4 text-sm" data-testid="final-invoice-settlement">
@@ -226,6 +258,12 @@ export function FinalInvoiceSettlement({ open, quote, extras, form, money, onDue
                     <span>{categoryLabel(row, de)}</span><span className="font-mono tabular-nums">−{money(row.gross)}</span>
                   </p>
                 ))}
+                {Number(advance.rest_applied_gross ?? 0) > 0 ? (
+                  <p className="flex justify-between gap-3" data-testid="final-preview-advance-rest">
+                    <span>{de ? "Restbetrag der Anzahlung verrechnet" : "Остаток аванса зачтён"}</span>
+                    <span className="font-mono tabular-nums">−{money(advance.rest_applied_gross)}</span>
+                  </p>
+                ) : null}
               </div>
             );
           })}

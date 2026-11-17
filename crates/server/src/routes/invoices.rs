@@ -924,6 +924,9 @@ struct InvoicePdfContext {
     prepayment_applied_amount: String,
     /// The credited advance invoices with net and VAT per rate.
     deducted_advances: Vec<document::DeductedAdvance>,
+    /// Paid advance money no VAT category took, set off at the release as a
+    /// payment (owner 2026-11-17).
+    advance_rests: Vec<document::SetOffAdvanceRest>,
     notes: Option<String>,
     patient_pid: String,
     patient_name: String,
@@ -1160,9 +1163,10 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 /// advances available for crediting, the supporting documents list, the
 /// contract link, the credit-note form data, credit transfers (internal
 /// notes, other invoices) and the patient's relatives offered as payers.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 16] = [
+const STAFF_ONLY_INVOICE_KEYS: [&str; 17] = [
     "advance_categories",
     "expected_prepayment_gross",
+    "release_advance_rest_gross",
     "dunning_block",
     "visibility_note",
     "internal_note",
@@ -3298,6 +3302,10 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "remaining_payable") => "Остаток к оплате",
         ("en", "remaining_payable") => "Remaining amount due",
         (_, "remaining_payable") => "Verbleibender Zahlbetrag",
+        ("uk", "advance_rest_set_off") => "Залишок авансу",
+        ("ru", "advance_rest_set_off") => "Остаток аванса",
+        ("en", "advance_rest_set_off") => "Advance rest set off",
+        (_, "advance_rest_set_off") => "Restbetrag Anzahlung",
         ("uk", "balance_due") => "До сплати",
         ("ru", "balance_due") => "Остаток",
         ("en", "balance_due") => "Balance due",
@@ -5729,27 +5737,30 @@ async fn advance_detail_figures(
             .fetch_all(&mut *conn)
             .await
             .map_err(failed)?;
-        let Some(mut target_open) = advance_rows::target_open_rows(&mut conn, invoice_id)
+        let Some(target_open) = advance_rows::target_open_rows(&mut conn, invoice_id)
             .await
             .map_err(failed)?
         else {
             return Ok((Value::Null, None));
         };
-        let mut left: Decimal = target_open.iter().map(|row| row.gross).sum();
-        let mut expected = Decimal::ZERO;
+        let total: Decimal = target_open.iter().map(|row| row.gross).sum();
+        let mut advances = Vec::with_capacity(advance_ids.len());
         for advance_id in advance_ids {
-            if left <= Decimal::ZERO {
-                break;
-            }
             let available = advance_rows::advance_available_rows(&mut conn, advance_id)
                 .await
                 .map_err(failed)?;
-            let plan = advance_rows::plan_allocation_rows(&available, &target_open, left);
-            let taken: Decimal = plan.iter().map(|row| row.gross).sum();
-            target_open = advance_rows::subtract_rows(&target_open, &plan);
-            left -= taken;
-            expected += taken;
+            advances.push(advance_rows::SetOffAdvance {
+                available_gross: available.iter().map(|row| row.gross).sum(),
+                available_rows: Some(available),
+                rest_allowed: true,
+            });
         }
+        // The release's plan: deductions per category, then the paid rests
+        // set off as payments (owner 2026-11-17).
+        let expected = advance_rows::plan_final_set_off(&target_open, total, &advances)
+            .iter()
+            .map(|plan| plan.deduction + plan.rest_applied)
+            .sum();
         return Ok((Value::Null, Some(expected)));
     }
     Ok((Value::Null, None))
@@ -6025,6 +6036,47 @@ async fn load_invoice_detail(
             })
         })
         .collect::<Vec<_>>()
+    };
+    // Offer only what the set-off accepts: per VAT category within what the
+    // invoice still bills there (verify2-A S2-1: an offer the server
+    // refuses with `prepayment_exceeds_vat_category` is gone).
+    let available_prepayments = if available_prepayments.is_empty() {
+        available_prepayments
+    } else {
+        let mut conn = state.db.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "acquire connection for prepayment offers");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?;
+        let mut offers = Vec::with_capacity(available_prepayments.len());
+        for mut offer in available_prepayments {
+            let advance_id = offer
+                .get("invoice_id")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .unwrap_or_default();
+            let available = offer
+                .get("available_amount")
+                .and_then(Value::as_str)
+                .and_then(|value| Decimal::from_str_exact(value).ok())
+                .unwrap_or(Decimal::ZERO);
+            let planned = advance_rows::plan_allocation(
+                &mut conn, advance_id, invoice_id, available,
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "plan prepayment offer");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?;
+            if let Some(rows) = planned {
+                let capped: Decimal = rows.iter().map(|row| row.gross).sum();
+                if capped <= Decimal::ZERO {
+                    continue;
+                }
+                offer["available_amount"] = json!(decimal_to_string(capped.min(available)));
+            }
+            offers.push(offer);
+        }
+        offers
     };
     // An advance invoice that a released final invoice settles: where to
     // record further payments and what rest a credit note still closes.
@@ -6327,10 +6379,23 @@ async fn load_invoice_detail(
 
     let (advance_categories, expected_prepayment) =
         advance_detail_figures(state, invoice_id, &row).await?;
+    let release_advance_rest = {
+        let mut conn = state.db.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "acquire connection for release rests");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?;
+        advance_settlement::release_rest_transfers_gross(&mut conn, invoice_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load release rests");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?
+    };
 
     let mut detail = serde_json::json!({
         "advance_categories": advance_categories,
         "expected_prepayment_gross": expected_prepayment.map(decimal_to_string),
+        "release_advance_rest_gross": decimal_to_string(release_advance_rest),
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
@@ -6560,6 +6625,7 @@ async fn load_invoice_pdf_context_on(
         _ => None,
     };
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
+    let advance_rests = document::load_set_off_advance_rests(conn, invoice_id).await?;
     let payment_term_days = if row.try_get::<bool, _>("released").unwrap_or(false) {
         release::DEFAULT_INVOICE_PAYMENT_TERM_DAYS
     } else {
@@ -6638,6 +6704,7 @@ async fn load_invoice_pdf_context_on(
                 .unwrap_or(Decimal::ZERO),
         ),
         deducted_advances,
+        advance_rests,
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -6769,10 +6836,9 @@ struct ReceivedFigures {
 
 fn invoice_pdf_received_figures(context: &InvoicePdfContext) -> Option<ReceivedFigures> {
     let received = context.received_payment?;
-    let gross = Decimal::from_str_exact(context.total_gross.trim()).unwrap_or(Decimal::ZERO);
-    let prepayment =
-        Decimal::from_str_exact(context.prepayment_applied_amount.trim()).unwrap_or(Decimal::ZERO);
-    let payable = (gross - prepayment).max(Decimal::ZERO).round_cents();
+    // Payable after the credited advances and the advance rests set off at
+    // the release (fix-103).
+    let payable = invoice_pdf_payable_after_advances(context).round_cents();
     let applied = received.amount.min(payable).max(Decimal::ZERO);
     Some(ReceivedFigures {
         received,
@@ -6810,6 +6876,32 @@ fn einvoice_received_note(
     note
 }
 
+/// What the invoice asks after its credited advances and the advance rests
+/// set off at its release.
+fn invoice_pdf_payable_after_advances(context: &InvoicePdfContext) -> Decimal {
+    let gross = Decimal::from_str_exact(context.total_gross.trim()).unwrap_or(Decimal::ZERO);
+    let prepayment =
+        Decimal::from_str_exact(context.prepayment_applied_amount.trim()).unwrap_or(Decimal::ZERO);
+    let rests: Decimal = context.advance_rests.iter().map(|rest| rest.amount).sum();
+    (gross - prepayment - rests).max(Decimal::ZERO)
+}
+
+/// One summary row per advance rest set off at the release:
+/// "Restbetrag Anzahlung −87,77 €".
+fn render_invoice_pdf_advance_rests(layout: &mut InvoicePdfLayout, context: &InvoicePdfContext) {
+    let language = context.language.as_str();
+    // The advance is named in the deduction table above; the label stays on
+    // one line of the summary column.
+    for rest in &context.advance_rests {
+        layout.summary_row(
+            invoice_pdf_label(language, "advance_rest_set_off"),
+            &format_invoice_pdf_deduction(&rest.amount.to_string(), &context.currency),
+            false,
+            false,
+        );
+    }
+}
+
 /// The totals of an invoice paid (in part) before it was issued: the invoice
 /// amount, the credited advances, the received payment with its day and what
 /// is still to pay.
@@ -6837,6 +6929,7 @@ fn render_invoice_pdf_received_payment(
             false,
         );
     }
+    render_invoice_pdf_advance_rests(layout, context);
     layout.summary_row(
         &format!(
             "{} {}",
@@ -7446,7 +7539,9 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     // received before the release is (owner 2026-11-17).
     if context.received_payment.is_some() {
         render_invoice_pdf_received_payment(&mut layout, context, &total_gross);
-    } else if invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
+    } else if invoice_pdf_amount_is_zero(&context.prepayment_applied_amount)
+        && context.advance_rests.is_empty()
+    {
         layout.summary_row(
             invoice_pdf_label(language, "invoice_amount"),
             &total_gross,
@@ -7454,21 +7549,26 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             true,
         );
     } else {
-        let gross = Decimal::from_str_exact(context.total_gross.trim()).unwrap_or(Decimal::ZERO);
-        let prepayment = Decimal::from_str_exact(context.prepayment_applied_amount.trim())
-            .unwrap_or(Decimal::ZERO);
         layout.summary_row(
             invoice_pdf_label(language, "invoice_amount"),
             &total_gross,
             true,
             false,
         );
-        layout.summary_row(
-            invoice_pdf_label(language, "prepayment_applied"),
-            &format_invoice_pdf_deduction(&context.prepayment_applied_amount, &context.currency),
-            false,
-            false,
-        );
+        if !invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
+            layout.summary_row(
+                invoice_pdf_label(language, "prepayment_applied"),
+                &format_invoice_pdf_deduction(
+                    &context.prepayment_applied_amount,
+                    &context.currency,
+                ),
+                false,
+                false,
+            );
+        }
+        // The paid advance money no VAT category took is set off as a
+        // payment: one amount to pay (owner 2026-11-17).
+        render_invoice_pdf_advance_rests(&mut layout, context);
         layout.summary_row(
             invoice_pdf_label(
                 language,
@@ -7479,7 +7579,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
                 },
             ),
             &format_invoice_pdf_money(
-                &(gross - prepayment).max(Decimal::ZERO).to_string(),
+                &invoice_pdf_payable_after_advances(context).to_string(),
                 &context.currency,
             ),
             true,
@@ -11566,7 +11666,8 @@ async fn record_received_payment_at_release(
         )
     };
     // No amount typed: the money received is what the invoice leaves to pay
-    // now, after the advances this release credited (QA verify2 B-2). It is
+    // now, after the advances this release credited and the advance rests it
+    // set off as payments (QA verify2 B-2, fix-103: in `paid` below). It is
     // fixed on the invoice once, before the payment and the document.
     let amount_gross = match typed_amount {
         Some(amount) => amount,
@@ -13070,6 +13171,7 @@ async fn create_invoice_credit_note(
             request_id,
             user_id: auth.user_id,
             source_order_leistung_id: None,
+            final_release_invoice_id: None,
         },
     )
     .await
@@ -13120,6 +13222,9 @@ struct CreditNoteIssue<'a> {
     pub user_id: Uuid,
     /// The order service cancelled together with this credit note.
     pub source_order_leistung_id: Option<Uuid>,
+    /// The final invoice whose release issued this credit note on one of its
+    /// advances; the Storno of that final reverses it.
+    pub final_release_invoice_id: Option<Uuid>,
 }
 
 /// A credit note issued in a transaction that has not committed yet.
@@ -13258,6 +13363,7 @@ async fn issue_credit_note_locked(
             &context.invoice_number,
             issue.user_id,
             advance_settlement::AdvanceRest::Unused,
+            None,
         )
         .await
         {
@@ -13364,9 +13470,9 @@ async fn store_credit_note_tx(
                 amount_net, amount_vat, amount_gross, currency,
                 issued_on, portal_visible, created_by,
                 credit_mode, line_items, request_selection, source_order_leistung_id,
-                released_advances
+                released_advances, final_release_invoice_id
            ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                     $16)
+                     $16, $17)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -13390,6 +13496,7 @@ async fn store_credit_note_tx(
         (!released_advances.is_empty())
             .then(|| storno::deducted_advances_to_json(released_advances)),
     )
+    .bind(issue.final_release_invoice_id)
     .fetch_one(&mut **transaction)
     .await
     {
@@ -13540,68 +13647,28 @@ async fn load_invoice_for_credit_note(
     Ok(Some((context, issued_at)))
 }
 
-async fn reverse_invoice_credit_note(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path((invoice_id, credit_note_id)): Path<(Uuid, Uuid)>,
-    body: JsonBody<ReverseInvoiceCreditNoteRequest>,
-) -> axum::response::Response {
-    if !can_manage_invoice_finance(auth.role) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-    let body = match read_json_body(body) {
-        Ok(body) => body,
-        Err(response) => return response,
-    };
-    let reason = match normalize_optional(Some(body.reason.as_str())) {
-        Some(value) if value.chars().count() <= 1000 => value,
-        _ => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Reversal reason is required",
-            );
-        }
-    };
-    let issued_on = match parse_optional_date(body.issued_on.as_deref()) {
-        Ok(Some(value)) if value <= crate::app_time::today() => value,
-        Ok(None) => crate::app_time::today(),
-        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
-    };
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT patient_id FROM invoices WHERE id = $1",
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(patient_id)) => patient_id,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "load credit-note reversal access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to reverse credit note",
-            );
-        }
-    };
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
-        return resp;
-    }
+/// A credit-note reversal written in a transaction that has not committed.
+struct ReversedCreditNote {
+    reversal_id: Uuid,
+    amount_gross: Decimal,
+    document: credit_note_pdf::IssuedCorrectionDocument,
+}
 
-    let mut transaction = match state.db.begin().await {
-        Ok(transaction) => transaction,
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "begin credit-note reversal");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to reverse credit note",
-            );
-        }
-    };
+/// Reverses a credit note (CNR-…, numbered, archived with its e-invoice,
+/// audited) inside the caller's transaction. The caller commits, discards
+/// the document when the commit fails and publishes the event.
+#[allow(clippy::too_many_arguments)]
+async fn reverse_credit_note_tx(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+    credit_note_id: Uuid,
+    reason: &str,
+    issued_on: NaiveDate,
+    actor_id: Uuid,
+    patient_id: Uuid,
+) -> Result<ReversedCreditNote, axum::response::Response> {
     // The reversal is a numbered correction document as well (QA D2-09).
-    if let Err(response) = release::ensure_issuer_tax_registration(&mut transaction).await {
-        return response;
-    }
+    release::ensure_issuer_tax_registration(transaction).await?;
     let row = match sqlx::query(
         r#"SELECT credit.amount_net, credit.amount_vat, credit.amount_gross,
                   credit.issued_on AS credit_issued_on,
@@ -13663,36 +13730,42 @@ async fn reverse_invoice_credit_note(
     )
     .bind(credit_note_id)
     .bind(invoice_id)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await
     {
         Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Credit note not found"),
+        Ok(None) => return Err(err(StatusCode::NOT_FOUND, "Credit note not found")),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, credit_note_id = %credit_note_id, "lock credit note reversal");
-            return err(
+            return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to reverse credit note",
-            );
+            ));
         }
     };
     if row.try_get::<bool, _>("rebilled_since").unwrap_or(false) {
-        return coded_err(
+        return Err(coded_err(
             StatusCode::CONFLICT,
             "credit_note_rebilled",
             "A later invoice bills these lines again; cancel or correct that invoice before reversing this credit note",
             json!({}),
-        );
+        ));
     }
     if row
         .try_get::<String, _>("transaction_type")
         .unwrap_or_default()
         != "credit_note"
     {
-        return err(StatusCode::CONFLICT, "Only a credit note can be reversed");
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Only a credit note can be reversed",
+        ));
     }
     if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
-        return err(StatusCode::CONFLICT, "Credit note was already reversed");
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Credit note was already reversed",
+        ));
     }
     // The credit note of a cancelled order service belongs to that
     // cancellation (owner decision 2026-09-29): reversing it alone would bill
@@ -13701,7 +13774,7 @@ async fn reverse_invoice_credit_note(
         .try_get::<Option<Uuid>, _>("source_order_leistung_id")
         .unwrap_or_default()
     {
-        return (
+        return Err((
             StatusCode::CONFLICT,
             Json(serde_json::json!({
                 "error": "Conflict",
@@ -13710,17 +13783,17 @@ async fn reverse_invoice_credit_note(
                 "order_leistung_id": service_id,
             })),
         )
-            .into_response();
+            .into_response());
     }
     if issued_on
         < row
             .try_get::<NaiveDate, _>("credit_issued_on")
             .unwrap_or(issued_on)
     {
-        return err(
+        return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Reversal date cannot precede the credit-note date",
-        );
+        ));
     }
     let amount_net = row
         .try_get::<Decimal, _>("amount_net")
@@ -13734,19 +13807,16 @@ async fn reverse_invoice_credit_note(
     let currency = row
         .try_get::<String, _>("currency")
         .unwrap_or_else(|_| "EUR".to_string());
-    let sequence = match release::next_correction_number(
-        &mut transaction,
-        release::SERIES_CREDIT_NOTE,
-    )
-    .await
+    let sequence = match release::next_correction_number(transaction, release::SERIES_CREDIT_NOTE)
+        .await
     {
         Ok(value) => value,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "allocate credit-note reversal number");
-            return err(
+            return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to reverse credit note",
-            );
+            ));
         }
     };
     let document_number = release::credit_note_number("CNR", issued_on, sequence);
@@ -13762,14 +13832,14 @@ async fn reverse_invoice_credit_note(
     .bind(invoice_id)
     .bind(credit_note_id)
     .bind(&document_number)
-    .bind(&reason)
+    .bind(reason)
     .bind(amount_net)
     .bind(amount_vat)
     .bind(amount_gross)
     .bind(&currency)
     .bind(issued_on)
     .bind(row.try_get::<bool, _>("portal_visible").unwrap_or(false))
-    .bind(auth.user_id)
+    .bind(actor_id)
     // The reversal mirrors the credited lines, so VAT per rate reverses too.
     // `credit_line_items` are the credit note's lines; the row also carries
     // the invoice's `line_items`, which must not end up on the reversal.
@@ -13781,7 +13851,7 @@ async fn reverse_invoice_credit_note(
         row.try_get::<Option<Value>, _>("credit_line_items")
             .unwrap_or_default(),
     )
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut **transaction)
     .await
     {
         Ok(id) => id,
@@ -13794,7 +13864,7 @@ async fn reverse_invoice_credit_note(
                 ),
                 _ => credit_notes::ReversalInsertFailure::Unexpected,
             };
-            return match failure {
+            return Err(match failure {
                 credit_notes::ReversalInsertFailure::AlreadyReversed => {
                     err(StatusCode::CONFLICT, "Credit note was already reversed")
                 }
@@ -13809,30 +13879,30 @@ async fn reverse_invoice_credit_note(
                         "Failed to reverse credit note",
                     )
                 }
-            };
+            });
         }
     };
-    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+    if let Err(e) = recompute_invoice_settlement_status(transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after credit-note reversal");
-        return err(
+        return Err(err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to reverse credit note",
-        );
+        ));
     }
     let document = match credit_note_pdf::store_issued_credit_note(
-        &mut transaction,
+        transaction,
         invoice_id,
         reversal_id,
-        auth.user_id,
+        actor_id,
     )
     .await
     {
         Ok(value) => value,
-        Err(resp) => return resp,
+        Err(resp) => return Err(resp),
     };
     let audited = write_invoice_audit_tx(
-        &mut transaction,
-        auth.user_id,
+        transaction,
+        actor_id,
         "credit_note_reversed",
         invoice_id,
         serde_json::json!({
@@ -13847,11 +13917,98 @@ async fn reverse_invoice_credit_note(
         }),
     )
     .await;
-    let committed = match audited {
-        Ok(()) => transaction.commit().await,
-        Err(error) => Err(error),
+    audited.map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "audit credit-note reversal");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse credit note",
+        )
+    })?;
+    Ok(ReversedCreditNote {
+        reversal_id,
+        amount_gross,
+        document,
+    })
+}
+
+async fn reverse_invoice_credit_note(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, credit_note_id)): Path<(Uuid, Uuid)>,
+    body: JsonBody<ReverseInvoiceCreditNoteRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
     };
-    if let Err(e) = committed {
+    let reason = match normalize_optional(Some(body.reason.as_str())) {
+        Some(value) if value.chars().count() <= 1000 => value,
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Reversal reason is required",
+            );
+        }
+    };
+    let issued_on = match parse_optional_date(body.issued_on.as_deref()) {
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
+    };
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load credit-note reversal access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin credit-note reversal");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
+        }
+    };
+    let reversed = match reverse_credit_note_tx(
+        &mut transaction,
+        invoice_id,
+        credit_note_id,
+        &reason,
+        issued_on,
+        auth.user_id,
+        patient_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let (reversal_id, amount_gross, document) = (
+        reversed.reversal_id,
+        reversed.amount_gross,
+        reversed.document,
+    );
+    if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit credit-note reversal");
         if let Some(blob) = document.blob {
             blob.discard().await;
@@ -14933,7 +15090,7 @@ async fn load_einvoice(
     let total_gross = row
         .try_get::<Decimal, _>("total_gross")
         .unwrap_or(Decimal::ZERO);
-    let prepayment_note = einvoice_prepayment_note(
+    let mut prepayment_note = einvoice_prepayment_note(
         &deducted_advances,
         &currency,
         (
@@ -15022,9 +15179,34 @@ async fn load_einvoice(
 
     // Money received before the invoice is paid already (BT-113), as the
     // printed invoice deducts it; nothing left to pay, no due date.
+    // Advance rests set off at the release (owner 2026-11-17) are paid
+    // already as well: the printed invoice deducts them.
+    let advance_rests = document::load_set_off_advance_rests(conn, invoice_id).await?;
+    if !advance_rests.is_empty() {
+        let rests = advance_rests
+            .iter()
+            .map(|rest| {
+                format!(
+                    "{} {}: {}",
+                    invoice_pdf_label("de", "advance_rest_set_off"),
+                    rest.invoice_number.trim(),
+                    format_invoice_pdf_money(&rest.amount.to_string(), &currency)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        prepayment_note = Some(match prepayment_note {
+            Some(note) => format!("{note}; {rests}"),
+            None => rests,
+        });
+    }
     let advances_credited = row
         .try_get::<Decimal, _>("prepayment_applied_amount")
-        .unwrap_or(Decimal::ZERO);
+        .unwrap_or(Decimal::ZERO)
+        + advance_rests
+            .iter()
+            .map(|rest| rest.amount)
+            .sum::<Decimal>();
     let received_payment = document::ReceivedPayment::from_columns(
         row.try_get("payment_received_on").unwrap_or_default(),
         row.try_get("payment_received_amount").unwrap_or_default(),
@@ -16295,8 +16477,36 @@ async fn update_invoice_status(
         );
     }
     let requested_status = body.status.clone();
+    // Advance money the release of a final moved onto it is given back by
+    // its Storno (verify2-A S2-3): it is no payment the patient made here.
+    let release_rest_paid = if requested_status == "cancelled" {
+        match state.db.acquire().await {
+            Ok(mut conn) => {
+                match advance_settlement::release_rest_transfers_gross(&mut conn, invoice_id).await
+                {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, invoice_id = %invoice_id, "load release rest transfers");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to update invoice",
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load release rest transfers");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        }
+    } else {
+        Decimal::ZERO
+    };
     if requested_status == "cancelled"
-        && requested_paid_amount.unwrap_or(existing_paid_amount) > Decimal::ZERO
+        && requested_paid_amount.unwrap_or(existing_paid_amount) - release_rest_paid > Decimal::ZERO
     {
         return err(
             StatusCode::CONFLICT,
@@ -16393,6 +16603,58 @@ async fn update_invoice_status(
     let locked_notes = locked_invoice
         .try_get::<Option<String>, _>("notes")
         .unwrap_or_default();
+    // The Storno of a released final first gives back the advance money its
+    // release moved onto it (verify2-A S2-3); real payments still block.
+    let mut locked_paid_amount = locked_paid_amount;
+    let mut storno_reversed_transfers: Vec<Value> = Vec::new();
+    let reverses_release_rests = requested_status == "cancelled"
+        && locked_status != "cancelled"
+        && locked_released
+        && locked_invoice_type == "final"
+        && release_rest_paid > Decimal::ZERO;
+    if reverses_release_rests {
+        let reason = format!(
+            "Stornierung der Rechnung {}",
+            locked_invoice_number.clone().unwrap_or_default()
+        );
+        storno_reversed_transfers = match advance_settlement::reverse_release_transfers_tx(
+            &mut transaction,
+            invoice_id,
+            &reason,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        locked_paid_amount = match sqlx::query_scalar::<_, Decimal>(
+            r#"SELECT COALESCE((
+                       SELECT SUM(CASE WHEN payment.transaction_type = 'payment'
+                                       THEN payment.amount_gross ELSE -payment.amount_gross END)
+                       FROM invoice_payment_transactions payment
+                       WHERE payment.invoice_id = $1
+                   ), 0) - COALESCE((
+                       SELECT SUM(CASE WHEN refund.transaction_type = 'refund'
+                                       THEN refund.amount_gross ELSE -refund.amount_gross END)
+                       FROM invoice_refund_transactions refund
+                       WHERE refund.invoice_id = $1
+                   ), 0)"#,
+        )
+        .bind(invoice_id)
+        .fetch_one(&mut *transaction)
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "reload paid amount after release transfers");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        };
+    }
     if locked_status == "cancelled" && requested_status != "cancelled" {
         return err(
             StatusCode::CONFLICT,
@@ -16422,7 +16684,7 @@ async fn update_invoice_status(
     let storno_releases_advances = requested_status == "cancelled"
         && locked_invoice_type == "final"
         && locked_released
-        && locked_prepayment_amount > Decimal::ZERO;
+        && (locked_prepayment_amount > Decimal::ZERO || reverses_release_rests);
     if !settles_through_payment
         && !is_valid_invoice_status_transition(&locked_status, &requested_status)
         && !(storno_releases_advances && locked_status == "paid")
@@ -17253,6 +17515,30 @@ async fn update_invoice_status(
                 );
             }
 
+            // With the final cancelled and its deductions released, the
+            // Storno reverses the credit notes its release issued on its
+            // advances (unpaid rest, unused rest): each advance asks again
+            // for what it asked before the final (verify2-A S2-3).
+            let mut storno_reversed_credits =
+                if cancelling_released && locked_invoice_type == "final" {
+                    match advance_settlement::reverse_release_credit_notes_tx(
+                        &mut transaction,
+                        invoice_id,
+                        &format!(
+                            "Stornierung der Schlussrechnung {}",
+                            locked_invoice_number.clone().unwrap_or_default()
+                        ),
+                        auth.user_id,
+                    )
+                    .await
+                    {
+                        Ok(value) => value,
+                        Err(response) => return response,
+                    }
+                } else {
+                    Vec::new()
+                };
+
             let issued_storno = match &storno_reason {
                 Some(reason) => {
                     match storno::issue_storno_tx(
@@ -17345,6 +17631,32 @@ async fn update_invoice_status(
             } else {
                 Vec::new()
             };
+            // Paid advance money no VAT category of the final takes is
+            // corrected on the advance and set off as a payment (owner
+            // 2026-11-17, verify2-A S2-1): one amount to pay.
+            let mut release_rests = if locked_status == "draft"
+                && requested_status == "sent"
+                && locked_invoice_type == "final"
+            {
+                match advance_settlement::apply_advance_rests_tx(
+                    &mut transaction,
+                    invoice_id,
+                    auth.user_id,
+                )
+                .await
+                {
+                    Ok(value) => value,
+                    Err(response) => {
+                        for credit in &mut advance_credit_notes {
+                            credit.discard_document().await;
+                        }
+                        return response;
+                    }
+                }
+            } else {
+                advance_settlement::ReleaseRests::default()
+            };
+            advance_credit_notes.append(&mut release_rests.credit_notes);
 
             // Money that arrived before the invoice (owner 2026-11-17): the
             // release records it with its receipt day, after the advances it
@@ -17470,6 +17782,12 @@ async fn update_invoice_status(
                             .iter()
                             .map(IssuedCreditNote::summary_json)
                             .collect::<Vec<_>>(),
+                        "advance_rest_transfers": release_rests.audit_json()["advance_rest_transfers"].clone(),
+                        "storno_reversed_advance_rest_transfers": storno_reversed_transfers.clone(),
+                        "storno_reversed_advance_credit_notes": storno_reversed_credits
+                            .iter()
+                            .map(advance_settlement::ReversedReleaseCredit::audit_json)
+                            .collect::<Vec<_>>(),
                     }),
                 )
                 .await?;
@@ -17497,6 +17815,9 @@ async fn update_invoice_status(
                 for credit in &mut advance_credit_notes {
                     credit.discard_document().await;
                 }
+                for credit in &mut storno_reversed_credits {
+                    credit.discard_document().await;
+                }
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to update invoice",
@@ -17511,6 +17832,57 @@ async fn update_invoice_status(
             .await;
             for credit in &advance_credit_notes {
                 credit.publish(&state, auth.user_id).await;
+            }
+            for transfer in &release_rests.transfers {
+                for (id, event) in [
+                    (
+                        transfer.advance_invoice_id,
+                        "invoice.credit_transferred_out",
+                    ),
+                    (invoice_id, "invoice.credit_transferred_in"),
+                ] {
+                    crate::realtime::publish_invoice_event(
+                        &state,
+                        Some(auth.user_id),
+                        event,
+                        id,
+                        transfer.payload.clone(),
+                    )
+                    .await;
+                }
+            }
+            for payload in &storno_reversed_transfers {
+                for key in ["source_invoice_id", "target_invoice_id"] {
+                    if let Some(id) = payload
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .and_then(|value| Uuid::parse_str(value).ok())
+                    {
+                        crate::realtime::publish_invoice_event(
+                            &state,
+                            Some(auth.user_id),
+                            "invoice.credit_transfer_reversed",
+                            id,
+                            payload.clone(),
+                        )
+                        .await;
+                    }
+                }
+            }
+            for credit in &storno_reversed_credits {
+                crate::realtime::publish_invoice_event(
+                    &state,
+                    Some(auth.user_id),
+                    "invoice.credit_note_reversed",
+                    credit.advance_invoice_id,
+                    serde_json::json!({
+                        "credit_note_transaction_id": credit.credit_note_id,
+                        "reversal_transaction_id": credit.reversal_id,
+                        "amount_gross": decimal_to_string(credit.amount_gross),
+                        "patient_id": credit.patient_id,
+                    }),
+                )
+                .await;
             }
             if let Some(payment) = &received_payment {
                 advance_application::follow_up_applied_advances(
@@ -17616,6 +17988,7 @@ mod tests {
             total_gross: "145.00".to_string(),
             prepayment_applied_amount: "0.00".to_string(),
             deducted_advances: Vec::new(),
+            advance_rests: Vec::new(),
             notes: Some("Оплатить после получения счёта.".to_string()),
             patient_pid: "PT-INV-UNIT".to_string(),
             patient_name: "Макс Мюллер".to_string(),

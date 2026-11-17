@@ -243,6 +243,7 @@ pub(super) async fn close_advance_rest_tx(
     final_invoice_number: &str,
     actor_id: Uuid,
     scope: AdvanceRest,
+    final_release_invoice_id: Option<Uuid>,
 ) -> Result<Option<IssuedCreditNote>, axum::response::Response> {
     let Some((context, _)) = load_invoice_for_credit_note(transaction, advance_invoice_id, true)
         .await
@@ -315,6 +316,7 @@ pub(super) async fn close_advance_rest_tx(
         request_id: Uuid::new_v4(),
         user_id: actor_id,
         source_order_leistung_id: None,
+        final_release_invoice_id,
     };
     let plan = plan_credit_note_tx(transaction, &context, issue.selection).await?;
     let issued = store_credit_note_tx(
@@ -440,6 +442,7 @@ pub(super) async fn close_settled_advances_tx(
             &final_number,
             actor_id,
             AdvanceRest::Unpaid,
+            Some(final_invoice_id),
         )
         .await
         {
@@ -454,6 +457,373 @@ pub(super) async fn close_settled_advances_tx(
         }
     }
     Ok(issued)
+}
+
+/// Paid advance money that a released final invoice took as a payment.
+pub(crate) struct AppliedAdvanceRest {
+    pub advance_invoice_id: Uuid,
+    pub advance_invoice_number: String,
+    pub credit_transfer_id: Uuid,
+    pub amount_gross: Decimal,
+    pub payload: Value,
+}
+
+/// What the release of a final invoice did beyond deducting its advances.
+#[derive(Default)]
+pub(super) struct ReleaseRests {
+    /// Credit notes on the advances for the paid share no category of the
+    /// final takes (the VAT correction of that share).
+    pub credit_notes: Vec<IssuedCreditNote>,
+    /// That money moved onto the final as a payment.
+    pub transfers: Vec<AppliedAdvanceRest>,
+}
+
+impl ReleaseRests {
+    pub async fn discard_documents(&mut self) {
+        for credit in &mut self.credit_notes {
+            credit.discard_document().await;
+        }
+    }
+
+    pub fn audit_json(&self) -> Value {
+        json!({
+            "advance_rest_credit_notes": self
+                .credit_notes
+                .iter()
+                .map(IssuedCreditNote::summary_json)
+                .collect::<Vec<_>>(),
+            "advance_rest_transfers": self.transfers.iter().map(|transfer| json!({
+                "credit_transfer_id": transfer.credit_transfer_id,
+                "advance_invoice_id": transfer.advance_invoice_id,
+                "advance_invoice_number": transfer.advance_invoice_number,
+                "amount_gross": decimal_to_string(transfer.amount_gross),
+            })).collect::<Vec<_>>(),
+        })
+    }
+}
+
+/// After the deductions of a released final invoice (owner 2026-11-17,
+/// verify2-A S2-1): an advance may hold paid money in a VAT category the
+/// final bills less of (own services came out lower, pass-through costs
+/// higher). The deduction stays per category (§ 14 Abs. 5 Satz 2 UStG); the
+/// rest is applied to the final anyway as a payment against what it still
+/// asks, so the patient pays one amount:
+///
+/// 1. a credit note on the advance closes its unused share per category
+///    (the advance's VAT on a service that is not rendered is corrected);
+/// 2. the paid money that share freed is moved onto the final by an ordinary
+///    credit transfer (refund leg on the advance, payment leg on the final).
+///
+/// Both name the final (`final_release_invoice_id`); its Storno reverses
+/// them. Nothing happens when the final asks for nothing more (the rest
+/// stays on the advance for the close-rest / refund path, fix-96) or the
+/// advance belongs to another recipient (credit never moves to another
+/// person, owner 2026-11-12). Advances in release order, oldest first.
+pub(super) async fn apply_advance_rests_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    final_invoice_id: Uuid,
+    actor_id: Uuid,
+) -> Result<ReleaseRests, axum::response::Response> {
+    let mut done = ReleaseRests::default();
+    let sql = format!(
+        r#"SELECT advance.id, advance.invoice_number AS advance_invoice_number,
+                  final_invoice.invoice_number AS final_invoice_number,
+                  (invoice_recipient_identity(advance.recipient_snapshot)
+                      IS NOT DISTINCT FROM invoice_recipient_identity(final_invoice.recipient_snapshot))
+                      AS same_recipient,
+                  advance.recipient_snapshot ->> 'name' AS advance_recipient_name,
+                  advance.payer_role AS advance_payer_role,
+                  final_invoice.recipient_snapshot ->> 'name' AS final_recipient_name,
+                  final_invoice.payer_role AS final_payer_role,
+                  upper(advance.currency) = upper(final_invoice.currency) AS same_currency,
+                  GREATEST(
+                      LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
+                      - COALESCE((
+                          SELECT SUM(allocation.amount_gross)
+                          FROM invoice_prepayment_allocations allocation
+                          WHERE allocation.advance_invoice_id = advance.id
+                      ), 0),
+                      0
+                  ) AS unused_paid
+           FROM invoices final_invoice
+           JOIN invoices advance ON {FINAL_SETTLES_ADVANCE}
+           WHERE final_invoice.id = $1
+           ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#
+    );
+    let rows = match sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+        .bind(final_invoice_id)
+        .fetch_all(&mut **transaction)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => return Err(failed_response(error, final_invoice_id, "advance rests")),
+    };
+    for row in rows {
+        let text = |column: &str| row.try_get::<Option<String>, _>(column).unwrap_or_default();
+        let same_person = row
+            .try_get::<Option<bool>, _>("same_recipient")
+            .unwrap_or_default()
+            .unwrap_or(false)
+            || super::payer::advance_names_same_person(
+                text("advance_recipient_name").as_deref(),
+                text("advance_payer_role").as_deref(),
+                text("final_recipient_name").as_deref().unwrap_or_default(),
+                text("final_payer_role").as_deref(),
+            );
+        let unused_paid = row
+            .try_get::<Decimal, _>("unused_paid")
+            .unwrap_or(Decimal::ZERO);
+        if !same_person
+            || !row
+                .try_get::<Option<bool>, _>("same_currency")
+                .unwrap_or_default()
+                .unwrap_or(false)
+            || unused_paid <= Decimal::ZERO
+        {
+            continue;
+        }
+        let advance_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let final_number = text("final_invoice_number").unwrap_or_default();
+        let final_open =
+            match super::credit_transfers::load_locked_invoice(transaction, final_invoice_id).await
+            {
+                Ok(Some(value)) => value,
+                Ok(None) => break,
+                Err(error) => {
+                    done.discard_documents().await;
+                    return Err(failed_response(error, final_invoice_id, "lock final"));
+                }
+            };
+        if final_open.balance_due() <= Decimal::ZERO {
+            break;
+        }
+        match close_advance_rest_tx(
+            transaction,
+            advance_id,
+            &final_number,
+            actor_id,
+            AdvanceRest::Unused,
+            Some(final_invoice_id),
+        )
+        .await
+        {
+            Ok(Some(credit)) => done.credit_notes.push(credit),
+            Ok(None) => {}
+            Err(response) => {
+                done.discard_documents().await;
+                return Err(response);
+            }
+        }
+        let advance =
+            match super::credit_transfers::load_locked_invoice(transaction, advance_id).await {
+                Ok(Some(value)) => value,
+                Ok(None) => continue,
+                Err(error) => {
+                    done.discard_documents().await;
+                    return Err(failed_response(error, advance_id, "lock advance rest"));
+                }
+            };
+        let amount = advance
+            .refundable_credit()
+            .min(final_open.balance_due())
+            .min(unused_paid);
+        if amount <= Decimal::ZERO {
+            continue;
+        }
+        let request = super::credit_transfers::TransferRequest {
+            request_id: Uuid::new_v4(),
+            amount_gross: amount,
+            transferred_on: crate::app_time::today(),
+            note: Some(format!(
+                "Restbetrag der Anzahlungsrechnung {} – verrechnet mit der Schlussrechnung {}",
+                advance.context.invoice_number.trim(),
+                final_number.trim()
+            )),
+            actor_id,
+            final_release_invoice_id: Some(final_invoice_id),
+        };
+        match super::credit_transfers::transfer_credit_tx(
+            transaction,
+            &request,
+            &advance,
+            &final_open,
+        )
+        .await
+        {
+            Ok(legs) => done.transfers.push(AppliedAdvanceRest {
+                advance_invoice_id: advance_id,
+                advance_invoice_number: advance.context.invoice_number.clone(),
+                credit_transfer_id: legs.transfer_id,
+                amount_gross: amount,
+                payload: legs.payload,
+            }),
+            Err(response) => {
+                done.discard_documents().await;
+                return Err(response);
+            }
+        }
+    }
+    Ok(done)
+}
+
+/// The paid advance money the release of `final_invoice_id` moved onto it
+/// and that is still there (not reversed): what its Storno gives back.
+pub(crate) async fn release_rest_transfers_gross(
+    conn: &mut PgConnection,
+    final_invoice_id: Uuid,
+) -> Result<Decimal, sqlx::Error> {
+    sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(transfer.amount_gross), 0)
+           FROM invoice_credit_transfers transfer
+           WHERE transfer.final_release_invoice_id = $1
+             AND transfer.target_invoice_id = $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoice_payment_transactions reversal
+                 WHERE reversal.reverses_transaction_id = transfer.target_payment_transaction_id
+                   AND reversal.transaction_type = 'reversal'
+             )"#,
+    )
+    .bind(final_invoice_id)
+    .fetch_one(conn)
+    .await
+}
+
+/// Storno of a final invoice, first step (verify2-A S2-3): the advance
+/// money its release moved onto it goes back to the advances (credit
+/// transfers reversed, newest first). Before the cash check of the Storno:
+/// that money is no payment of the patient on this invoice.
+pub(super) async fn reverse_release_transfers_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    final_invoice_id: Uuid,
+    reason: &str,
+    actor_id: Uuid,
+) -> Result<Vec<Value>, axum::response::Response> {
+    let ids = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT transfer.id
+           FROM invoice_credit_transfers transfer
+           WHERE transfer.final_release_invoice_id = $1
+             AND transfer.target_invoice_id = $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoice_payment_transactions reversal
+                 WHERE reversal.reverses_transaction_id = transfer.target_payment_transaction_id
+                   AND reversal.transaction_type = 'reversal'
+             )
+           ORDER BY transfer.created_at DESC, transfer.id DESC"#,
+    )
+    .bind(final_invoice_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| failed_response(error, final_invoice_id, "release transfers"))?;
+    let mut payloads = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(transfer) = super::credit_transfers::load_stored_transfer(transaction, id)
+            .await
+            .map_err(|error| failed_response(error, final_invoice_id, "load release transfer"))?
+        else {
+            continue;
+        };
+        payloads.push(
+            super::credit_transfers::reverse_credit_transfer_tx(
+                transaction,
+                &transfer,
+                reason,
+                crate::app_time::today().max(transfer.transferred_on),
+                actor_id,
+            )
+            .await?,
+        );
+    }
+    Ok(payloads)
+}
+
+/// A credit note of an advance reversed together with the Storno of the
+/// final whose release issued it.
+pub(crate) struct ReversedReleaseCredit {
+    pub advance_invoice_id: Uuid,
+    pub credit_note_id: Uuid,
+    pub reversal_id: Uuid,
+    pub patient_id: Uuid,
+    pub amount_gross: Decimal,
+    blob: Option<super::stored_documents::PendingBlob>,
+}
+
+impl ReversedReleaseCredit {
+    pub async fn discard_document(&mut self) {
+        if let Some(blob) = self.blob.take() {
+            blob.discard().await;
+        }
+    }
+
+    pub fn audit_json(&self) -> Value {
+        json!({
+            "advance_invoice_id": self.advance_invoice_id,
+            "credit_note_transaction_id": self.credit_note_id,
+            "reversal_transaction_id": self.reversal_id,
+            "amount_gross": decimal_to_string(self.amount_gross),
+        })
+    }
+}
+
+/// Storno of a final invoice, last step (verify2-A S2-3), after its
+/// deductions were released: the credit notes its release issued on the
+/// advances (unpaid rest, unused rest) are reversed (CNR-…, the fix-100
+/// reversal path), so each advance asks for what it asked before the final.
+pub(super) async fn reverse_release_credit_notes_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    final_invoice_id: Uuid,
+    reason: &str,
+    actor_id: Uuid,
+) -> Result<Vec<ReversedReleaseCredit>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT credit.id, credit.invoice_id, advance.patient_id
+           FROM invoice_credit_note_transactions credit
+           JOIN invoices advance ON advance.id = credit.invoice_id
+           WHERE credit.final_release_invoice_id = $1
+             AND credit.transaction_type = 'credit_note'
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoice_credit_note_transactions reversal
+                 WHERE reversal.reverses_transaction_id = credit.id
+                   AND reversal.transaction_type = 'reversal'
+             )
+           ORDER BY credit.created_at DESC, credit.document_number DESC"#,
+    )
+    .bind(final_invoice_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| failed_response(error, final_invoice_id, "release credit notes"))?;
+    let mut reversed: Vec<ReversedReleaseCredit> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let credit_note_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let advance_id = row.try_get::<Uuid, _>("invoice_id").unwrap_or_default();
+        let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+        match super::reverse_credit_note_tx(
+            transaction,
+            advance_id,
+            credit_note_id,
+            reason,
+            crate::app_time::today(),
+            actor_id,
+            patient_id,
+        )
+        .await
+        {
+            Ok(value) => reversed.push(ReversedReleaseCredit {
+                advance_invoice_id: advance_id,
+                credit_note_id,
+                reversal_id: value.reversal_id,
+                patient_id,
+                amount_gross: value.amount_gross,
+                blob: value.document.blob,
+            }),
+            Err(response) => {
+                for item in &mut reversed {
+                    item.discard_document().await;
+                }
+                return Err(response);
+            }
+        }
+    }
+    Ok(reversed)
 }
 
 /// What a credit note had to release so that the invoice keeps its rules:
@@ -1162,6 +1532,7 @@ pub(super) async fn close_advance_rest(
         &settling.invoice_number,
         auth.user_id,
         AdvanceRest::Unused,
+        None,
     )
     .await
     {

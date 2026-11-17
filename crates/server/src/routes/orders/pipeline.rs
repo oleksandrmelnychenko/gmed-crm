@@ -374,8 +374,14 @@ async fn get_order_pipeline(
                  WHERE order_id = $1 AND status = 'delivered') AS services_delivered,
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'approved') AS services_approved,
+               -- A delivered service a released final billed at 0 on purpose
+               -- (`billing_waived_at`) is settled like an invoiced one
+               -- (verify2-A S3-10).
                (SELECT COUNT(*) FROM order_leistungen
-                 WHERE order_id = $1 AND status = 'invoiced') AS services_invoiced,
+                 WHERE order_id = $1
+                   AND (status = 'invoiced'
+                        OR (status IN ('delivered', 'approved')
+                            AND billing_waived_at IS NOT NULL))) AS services_invoiced,
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'cancelled') AS services_cancelled,
                (SELECT COUNT(*) FROM invoices

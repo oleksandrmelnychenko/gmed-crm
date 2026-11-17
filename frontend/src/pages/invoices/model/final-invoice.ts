@@ -31,9 +31,15 @@ export type FinalInvoicePreview = {
     available_gross: string;
     deduction_gross: string;
     deduction_rows: FinalPreviewRow[];
+    /** Paid money no VAT category of the final takes: set off as a payment at the release (owner 2026-11-17). */
+    rest_applied_gross?: string;
   }[];
   deducted_gross: string;
+  rest_applied_gross?: string;
+  /** What the patient is asked: after the deductions and the advance rests set off. */
   due_gross: string;
+  /** The Leistungszeitraum the issued invoice prints for these lines. */
+  service_period?: { from: string; to: string } | null;
   interim_invoices: { invoice_id: string; invoice_number: string | null; total_gross: string; status: string }[];
 };
 
@@ -164,6 +170,13 @@ export function finalInvoiceTotals(
   return totals;
 }
 
+/** Gross of the own services outside the estimate the final bills (pass-through costs left out, as the contract budget counts). */
+export function finalOwnExtrasGross(form: FinalForm, extras: DeliveredOrderService[] = []) {
+  return roundCents(extras
+    .filter((extra) => !extra.is_cost_passthrough)
+    .reduce((sum, extra) => sum + finalServiceAmounts(extra, finalServiceQuantity(form, extra.order_leistung_id)).gross, 0));
+}
+
 /**
  * «по смете X € · фактически Y €»: the estimate gross against what the
  * quote's invoices bill of it before plus this final invoice.
@@ -195,10 +208,14 @@ export function isFinalSelectionValid(
 }
 
 /** The services outside the estimate as the API takes them (quantity above 0). */
-export function finalOrderServicesPayload(form: FinalForm, extras: DeliveredOrderService[] = []) {
+export function finalOrderServicesPayload(
+  form: FinalForm & Pick<CreateForm, "orderServiceComments">,
+  extras: DeliveredOrderService[] = [],
+) {
   return extras.flatMap((extra) => {
     const quantity = finalServiceQuantity(form, extra.order_leistung_id);
-    return quantity > 0 ? [{ order_leistung_id: extra.order_leistung_id, quantity }] : [];
+    const comment = (form.orderServiceComments?.[extra.order_leistung_id] ?? "").trim();
+    return quantity > 0 ? [{ order_leistung_id: extra.order_leistung_id, quantity, ...(comment ? { comment } : {}) }] : [];
   });
 }
 

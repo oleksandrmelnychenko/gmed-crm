@@ -152,11 +152,15 @@ export function canStornoInvoice(
   invoice: Pick<
     InvoiceItem,
     "released_at" | "status" | "paid_amount" | "credited_amount" | "prepayment_applied_amount" | "invoice_type"
-  >,
+  > & Partial<Pick<InvoiceItem, "release_advance_rest_gross">>,
 ) {
   if (!isInvoiceReleased(invoice) || invoice.status === "cancelled" || invoice.status === "draft") return false;
-  if ([invoice.paid_amount, invoice.credited_amount].some((value) => Number(value ?? 0) > 0)) return false;
-  if (Number(invoice.prepayment_applied_amount ?? 0) > 0) return invoice.invoice_type === "final";
+  // Advance money the release of a final set off as a payment goes back with
+  // its Storno; only cash the patient paid on it blocks (verify2-A S2-3).
+  const releaseRest = invoice.invoice_type === "final" ? Number(invoice.release_advance_rest_gross ?? 0) : 0;
+  const cash = Number(invoice.paid_amount ?? 0) - releaseRest;
+  if (cash > 0.004 || Number(invoice.credited_amount ?? 0) > 0) return false;
+  if (Number(invoice.prepayment_applied_amount ?? 0) > 0 || releaseRest > 0) return invoice.invoice_type === "final";
   return canPickInvoiceStatus(invoice.status, "cancelled");
 }
 

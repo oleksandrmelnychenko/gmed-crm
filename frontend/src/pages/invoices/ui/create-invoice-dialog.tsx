@@ -40,7 +40,7 @@ import { ownServicesGrossOfSelection } from "@/components/order-budget/order-bud
 import { partlyCreditedHint } from "../model/billing-release";
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
-import { finalInvoiceTotals } from "../model/final-invoice";
+import { finalInvoiceTotals, finalOwnExtrasGross } from "../model/final-invoice";
 import { FinalInvoiceLines, FinalInvoiceSettlement } from "./final-invoice-lines";
 import type { CreateForm, InvoiceType, PrepaymentAdvancePreview, QuoteOption } from "../model/types";
 import { appDateKey } from "@/lib/app-time-zone";
@@ -54,6 +54,7 @@ import {
   receivedPaymentProblemText,
   servicePeriodProblem,
   servicePeriodProblemText,
+  type ServicePeriodForm,
 } from "../model/document-terms";
 import { GuardedDateInput } from "./guarded-date-input";
 import { ReleaseDueDateField } from "./release-due-date-field";
@@ -169,7 +170,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   // (owner 2026-11-17); the release records the payment with its day.
   const canRecordPayment = hasCapability(user, "invoices.finance");
   const [receivedDateRefused, setReceivedDateRefused] = useState(false);
-  const periodDefaults = quotePeriodDefaults(selectedQuote);
+  // A final proposes the period its issued invoice prints for these lines
+  // (the dates of the services, from the preview); else the order's planned
+  // one (verify2-A S2-4).
+  const [finalPeriod, setFinalPeriod] = useState<ServicePeriodForm | null>(null);
+  const periodDefaults = final && finalPeriod ? finalPeriod : quotePeriodDefaults(selectedQuote);
   const period = form.servicePeriod ?? periodDefaults;
   const periodProblem = servicePeriodProblem(period);
   const received = form.receivedPayment;
@@ -552,8 +557,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t.invoices_vat}</dt><dd>{money(totals.vat)}</dd></div>
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
-                  {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross)} testId="invoice-create-budget" /> : null}
-                  {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} onDueChange={setFinalDue} /> : null}
+                  {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross) + (final ? finalOwnExtrasGross(form, extras) : 0)} testId="invoice-create-budget" /> : null}
+                  {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} onDueChange={setFinalDue} onServicePeriod={setFinalPeriod} /> : null}
                   {selectedQuote && !prepaymentMode && !final && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>

@@ -22,7 +22,9 @@ import {
   draftFormDirty,
   draftFormFrom,
   draftLinesProblem,
+  draftKeptServices,
   draftLinesTotal,
+  draftOwnServicesTotal,
   draftUpdatePayload,
   draftFinalLineComparison,
   draftFinalSummary,
@@ -74,6 +76,7 @@ const COPY: Record<"ru" | "de", Copy> = {
     estimate: "по смете",
     actual: "фактически",
     notDelivered: "не оказано",
+    outsideEstimate: "вне сметы",
     aboveEstimate: "больше сметы",
     quantity: "Кол-во",
     comment: "Примечание к позиции",
@@ -122,6 +125,7 @@ const COPY: Record<"ru" | "de", Copy> = {
     estimate: "laut Angebot",
     actual: "erbracht",
     notDelivered: "nicht erbracht",
+    outsideEstimate: "nicht im Angebot",
     aboveEstimate: "über Angebot",
     quantity: "Menge",
     comment: "Anmerkung zur Position",
@@ -230,9 +234,10 @@ export function DraftInvoiceEditorDialog({
   // A final draft bills the delivered quantities: estimate against actual (owner 2026-11-17).
   const finalDraft = Boolean(payload && isFinalDraft(payload));
   const finalSummary = payload && form && finalDraft ? draftFinalSummary(payload, form) : null;
-  const ownLinesTotal = payload && form
-    ? draftLinesTotal({ ...payload, quote_lines: payload.quote_lines.filter((line) => !line.is_cost_passthrough) }, form)
-    : null;
+  // Own services the budget counts, the kept services outside the estimate
+  // included (verify2-A S3-9).
+  const ownLinesTotal = payload && form ? draftOwnServicesTotal(payload, form) : null;
+  const keptServices = payload && finalDraft ? draftKeptServices(payload) : [];
 
   async function save() {
     if (!payload || !form || busy || problem || !dirty) return;
@@ -440,6 +445,33 @@ export function DraftInvoiceEditorDialog({
                         </div>
                       );
                     })}
+                    {keptServices.map((service) => (
+                      <div
+                        key={service.order_leistung_id}
+                        className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-3 py-2 text-sm"
+                        data-testid="invoice-draft-kept-service"
+                      >
+                        <span className="min-w-0">
+                          <span className="block break-words text-foreground">{service.description}</span>
+                          <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                            {money(service.unit_price)} · {service.is_cost_passthrough ? copy.passthroughGroup : `${service.vat_rate ?? "0"} %`} · {formatQuantity(service.quantity)}
+                            <span className="rounded-sm bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{copy.outsideEstimate}</span>
+                          </span>
+                        </span>
+                        <span className="whitespace-nowrap font-mono tabular-nums text-foreground">{money(service.amounts.gross)}</span>
+                        <Input
+                          className={`${inputClass} w-full`}
+                          maxLength={300}
+                          placeholder={copy.comment}
+                          aria-label={`${copy.comment}: ${service.description}`}
+                          value={form.serviceComments?.[service.order_leistung_id] ?? ""}
+                          onChange={(event) => setForm({
+                            ...form,
+                            serviceComments: { ...form.serviceComments, [service.order_leistung_id]: event.target.value },
+                          })}
+                        />
+                      </div>
+                    ))}
                   </div>
                   {linesTotal ? (
                     <div

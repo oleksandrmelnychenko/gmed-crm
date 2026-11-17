@@ -7,7 +7,9 @@ import {
   draftFormDirty,
   draftFormFrom,
   draftLinesProblem,
+  draftKeptServices,
   draftLinesTotal,
+  draftOwnServicesTotal,
   draftUpdatePayload,
   draftFinalLineComparison,
   draftFinalSummary,
@@ -192,6 +194,36 @@ describe("final draft against the estimate", () => {
     });
     // 5 h = 357,00 and the kept service 95,20 against the estimate 214,20.
     expect(draftFinalSummary(finalDraft, form)).toEqual({ estimate: 214.2, actual: 452.2, difference: 238 });
+  });
+
+  // verify2-A S3-2/S3-9: the draft's own total, its rows and the budget count the services outside the estimate.
+  it("counts the kept services outside the estimate in the total and the own-services budget", () => {
+    const withPassthrough: DraftEditorPayload = {
+      ...finalDraft,
+      order_service_lines: [
+        ...(finalDraft.order_service_lines ?? []),
+        { order_leistung_id: "svc-2", selected_quantity: "1", unit_price: "2000", vat_rate: "0", is_cost_passthrough: true, quote_line_index: null },
+        { order_leistung_id: "svc-3", selected_quantity: null, unit_price: "50", vat_rate: "19", quote_line_index: null },
+      ],
+    };
+    const form = draftFormFrom(withPassthrough);
+    expect(draftLinesTotal(withPassthrough, form)).toEqual({ net: 2380, vat: 72.2, gross: 2452.2 });
+    expect(draftOwnServicesTotal(withPassthrough, form)?.gross).toBe(452.2);
+    expect(draftKeptServices(withPassthrough).map((service) => [service.order_leistung_id, service.amounts.gross])).toEqual([
+      ["svc-1", 95.2],
+      ["svc-2", 2000],
+    ]);
+    expect(draftFinalSummary(withPassthrough, form).actual).toBe(2452.2);
+  });
+
+  it("sends a changed remark of a kept service with its quantity", () => {
+    const form = draftFormFrom(finalDraft);
+    expect(draftFormDirty(finalDraft, form)).toBe(false);
+    form.serviceComments = { "svc-1": " Fahrt am 15.11. " };
+    expect(draftFormDirty(finalDraft, form)).toBe(true);
+    expect(draftUpdatePayload(finalDraft, form).order_services).toEqual([
+      { order_leistung_id: "svc-1", quantity: "1", comment: "Fahrt am 15.11." },
+    ]);
   });
 
   it("marks a line left out as not delivered", () => {

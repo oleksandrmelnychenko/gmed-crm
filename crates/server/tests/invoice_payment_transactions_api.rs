@@ -2728,8 +2728,9 @@ async fn a_manual_split_after_a_pro_rata_payment_is_booked_and_deducted_as_enter
     assert!(text.contains("-123,33"), "{text}");
 
     // The unpaid 300 was closed per category at the release (19 % 245,89,
-    // 0 % 54,11): the advance still holds exactly what each category was
-    // paid, and a new final deducts the same rows.
+    // 0 % 54,11); the Storno of the final reverses that credit note
+    // (verify2-A S2-3): the advance asks its full amount again, each
+    // category keeps what it was paid, and a new final deducts the same rows.
     let detail = invoice_detail(&app, &billing, advance).await;
     let categories = detail["advance_categories"]["categories"]
         .as_array()
@@ -2743,10 +2744,11 @@ async fn a_manual_split_after_a_pro_rata_payment_is_booked_and_deducted_as_enter
                 .unwrap()[field],
         )
     };
-    assert_eq!(category("taxed", "gross"), dec("227.53"));
+    assert_eq!(category("taxed", "gross"), dec("473.42"));
     assert_eq!(category("taxed", "paid_gross"), dec("227.53"));
-    assert_eq!(category("zero_rated", "gross"), dec("272.47"));
+    assert_eq!(category("zero_rated", "gross"), dec("326.58"));
     assert_eq!(category("zero_rated", "paid_gross"), dec("272.47"));
+    assert_eq!(money(&detail["credited_amount"]), dec("0"));
     let second_final: Uuid = sqlx::query_scalar(
         r#"INSERT INTO invoices (
                 order_id, patient_id, invoice_type, status, due_date,

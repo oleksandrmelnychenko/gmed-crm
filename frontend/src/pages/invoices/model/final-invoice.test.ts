@@ -6,6 +6,7 @@ import {
   createFinalInvoiceSelection,
   finalInvoiceSummary,
   finalInvoiceTotals,
+  finalOwnExtrasGross,
   finalLineComparison,
   finalOrderServicesPayload,
   formatFinalDifference,
@@ -161,5 +162,16 @@ describe("a legacy (seed) quote line", () => {
     } as InvoiceLineItem;
     const totals = finalInvoiceTotals([seed], form([seed]));
     expect(totals).toMatchObject({ net: 1000, vat: 0, gross: 1000 });
+  });
+});
+
+// verify2-A S3-9: the budget projection of a final counts its own services outside the estimate.
+describe("finalOwnExtrasGross", () => {
+  it("counts own services outside the estimate and leaves pass-through costs out", () => {
+    const clinic: DeliveredOrderService = { ...extraVisit, order_leistung_id: "svc-2", unit_price: "2000", vat_rate: "0", is_cost_passthrough: true };
+    const extras = [extraVisit, clinic];
+    expect(finalOwnExtrasGross(form([hours()], extras), extras)).toBe(119);
+    const none = { ...form([hours()], extras), orderServiceQuantities: { "svc-1": "0", "svc-2": "1" } };
+    expect(finalOwnExtrasGross(none, extras)).toBe(0);
   });
 });

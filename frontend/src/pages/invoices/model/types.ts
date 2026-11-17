@@ -497,8 +497,10 @@ export type InvoiceItem = {
   supplier_cost_allocated_gross?: unknown;
   /** Issued advances: VAT categories with paid/open, and whether a payment split can still be set. */
   advance_categories?: { split_frozen: boolean; categories: AdvanceCategory[] } | null;
-  /** Final-invoice drafts: the advance money the release will deduct. */
+  /** Final-invoice drafts: the advance money the release will deduct, rests set off as payments included. */
   expected_prepayment_gross?: string | null;
+  /** Released finals: paid advance rest the release set off as a payment (given back by the Storno). */
+  release_advance_rest_gross?: string | null;
 };
 
 /** `GET /quotes/{id}/advance-preview`: the advance creation would make. */
@@ -683,6 +685,8 @@ export type CreateForm = {
   servicePeriod: ServicePeriodForm | null;
   /** Final invoice: quantities of delivered services outside the quote, by order service id. */
   orderServiceQuantities?: Record<string, string>;
+  /** Final invoice: remarks printed on the services outside the quote, by order service id. */
+  orderServiceComments?: Record<string, string>;
 };
 
 export type StatusForm = {

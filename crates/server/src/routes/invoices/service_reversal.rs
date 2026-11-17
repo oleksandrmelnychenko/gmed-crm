@@ -537,6 +537,7 @@ pub(crate) async fn reverse_order_service_in_tx(
                 request_id: Uuid::new_v4(),
                 user_id: request.actor.user_id,
                 source_order_leistung_id: Some(leistung_id),
+                final_release_invoice_id: None,
             },
         )
         .await;

@@ -134,7 +134,7 @@ pub(crate) async fn load_invoice_credit_transfers(
     let rows = sqlx::query(
         r#"SELECT transfer.id, transfer.source_invoice_id, transfer.target_invoice_id,
                   transfer.amount_gross, transfer.currency, transfer.transferred_on,
-                  transfer.note, transfer.created_at,
+                  transfer.note, transfer.created_at, transfer.final_release_invoice_id,
                   source.invoice_number AS source_invoice_number,
                   target.invoice_number AS target_invoice_number,
                   creator.name AS created_by_name,
@@ -172,6 +172,7 @@ pub(crate) async fn load_invoice_credit_transfers(
                 "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                 "is_reversed": row.try_get::<bool, _>("is_reversed").unwrap_or(false),
+                "final_release_invoice_id": row.try_get::<Option<Uuid>, _>("final_release_invoice_id").unwrap_or_default(),
             })
         })
         .collect())
@@ -527,176 +528,25 @@ pub(crate) async fn create_credit_transfer(
         );
     }
 
-    let refund_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO invoice_refund_transactions (
-                invoice_id, transaction_type, request_id, amount_gross,
-                payment_method, payment_reference, refunded_on, reason, note, created_by
-           ) VALUES ($1, 'refund', $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING id"#,
-    )
-    .bind(invoice_id)
-    .bind(body.request_id)
-    .bind(amount_gross)
-    .bind(CREDIT_TRANSFER_METHOD)
-    .bind(&target.context.invoice_number)
-    .bind(transferred_on)
-    .bind(format!(
-        "Credit applied to invoice {}",
-        target.context.invoice_number
-    ))
-    .bind(note.clone())
-    .bind(auth.user_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(value) => value,
-        Err(sqlx::Error::Database(db_error))
-            if matches!(
-                db_error.code().as_deref(),
-                Some("23505" | "23514" | "P0001")
-            ) =>
-        {
-            tracing::warn!(error = %db_error, %invoice_id, "credit transfer refund leg refused");
-            return err(
-                StatusCode::CONFLICT,
-                "The credit balance changed or the date precedes the latest movement; reload and try again",
-            );
-        }
-        Err(error) => {
-            tracing::error!(%error, %invoice_id, "insert credit transfer refund leg");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    };
-    if let Err(error) = insert_invoice_refund_accounting_entries(
+    let legs = match transfer_credit_tx(
         &mut transaction,
-        &source.context,
-        refund_id,
-        "refund",
-        amount_gross,
-        CREDIT_TRANSFER_METHOD,
-        Some(target.context.invoice_number.as_str()),
-        transferred_on,
-        auth.user_id,
+        &TransferRequest {
+            request_id: body.request_id,
+            amount_gross,
+            transferred_on,
+            note: note.clone(),
+            actor_id: auth.user_id,
+            final_release_invoice_id: None,
+        },
+        &source,
+        &target,
     )
-    .await
-    {
-        tracing::error!(%error, %invoice_id, "book credit transfer refund leg");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-    let payment_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO invoice_payment_transactions (
-                invoice_id, transaction_type, request_id, amount_gross, payment_method,
-                payment_reference, received_on, note, created_by
-           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8)
-           RETURNING id"#,
-    )
-    .bind(body.target_invoice_id)
-    .bind(body.request_id)
-    .bind(amount_gross)
-    .bind(CREDIT_TRANSFER_METHOD)
-    .bind(&source.context.invoice_number)
-    .bind(transferred_on)
-    .bind(format!(
-        "Credit from invoice {}",
-        source.context.invoice_number
-    ))
-    .bind(auth.user_id)
-    .fetch_one(&mut *transaction)
     .await
     {
         Ok(value) => value,
-        Err(sqlx::Error::Database(db_error))
-            if matches!(
-                db_error.code().as_deref(),
-                Some("23505" | "23514" | "P0001")
-            ) =>
-        {
-            return err(
-                StatusCode::CONFLICT,
-                "The target invoice changed; reload and try again",
-            );
-        }
-        Err(error) => {
-            tracing::error!(%error, %invoice_id, "insert credit transfer payment leg");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
+        Err(response) => return response,
     };
-    if let Err(error) = insert_invoice_payment_accounting_entries(
-        &mut transaction,
-        &target.context,
-        payment_id,
-        "payment",
-        amount_gross,
-        CREDIT_TRANSFER_METHOD,
-        Some(source.context.invoice_number.as_str()),
-        transferred_on,
-        auth.user_id,
-    )
-    .await
-    {
-        tracing::error!(%error, %invoice_id, "book credit transfer payment leg");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-    let transfer_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO invoice_credit_transfers (
-                request_id, source_invoice_id, target_invoice_id, amount_gross, currency,
-                transferred_on, source_refund_transaction_id, target_payment_transaction_id,
-                note, created_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-           RETURNING id"#,
-    )
-    .bind(body.request_id)
-    .bind(invoice_id)
-    .bind(body.target_invoice_id)
-    .bind(amount_gross)
-    .bind(source.context.currency.to_uppercase())
-    .bind(transferred_on)
-    .bind(refund_id)
-    .bind(payment_id)
-    .bind(note.clone())
-    .bind(auth.user_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(%error, %invoice_id, "insert credit transfer");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    };
-    for id in [invoice_id, body.target_invoice_id] {
-        if let Err(error) = recompute_invoice_settlement_status(&mut transaction, id).await {
-            tracing::error!(%error, invoice_id = %id, "recompute invoice after credit transfer");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    }
-    let payload = json!({
-        "credit_transfer_id": transfer_id,
-        "request_id": body.request_id,
-        "source_invoice_id": invoice_id,
-        "source_invoice_number": source.context.invoice_number,
-        "target_invoice_id": body.target_invoice_id,
-        "target_invoice_number": target.context.invoice_number,
-        "refund_transaction_id": refund_id,
-        "payment_transaction_id": payment_id,
-        "amount_gross": decimal_to_string(amount_gross),
-        "currency": source.context.currency,
-        "transferred_on": transferred_on.to_string(),
-        "patient_id": patient_id,
-    });
-    // Both legs are audited in the transfer's transaction.
-    for (id, action) in [
-        (invoice_id, "credit_transferred_out"),
-        (body.target_invoice_id, "credit_transferred_in"),
-    ] {
-        if let Err(error) =
-            write_invoice_audit_tx(&mut transaction, auth.user_id, action, id, payload.clone())
-                .await
-        {
-            tracing::error!(%error, %invoice_id, "audit credit transfer");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    }
+    let (transfer_id, payment_id, payload) = (legs.transfer_id, legs.payment_id, legs.payload);
     if let Err(error) = transaction.commit().await {
         tracing::error!(%error, %invoice_id, "commit credit transfer");
         return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
@@ -755,52 +605,27 @@ pub(crate) async fn reverse_credit_transfer(
         Ok(value) => value,
         Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
-    let transfer = match sqlx::query(
-        r#"SELECT transfer.source_invoice_id, transfer.target_invoice_id, transfer.amount_gross,
-                  transfer.transferred_on, transfer.source_refund_transaction_id,
-                  transfer.target_payment_transaction_id, source.patient_id
-           FROM invoice_credit_transfers transfer
-           JOIN invoices source ON source.id = transfer.source_invoice_id
-           WHERE transfer.id = $1
-             AND (transfer.source_invoice_id = $2 OR transfer.target_invoice_id = $2)"#,
-    )
-    .bind(transfer_id)
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Credit transfer not found"),
+    let mut conn = match state.db.acquire().await {
+        Ok(value) => value,
         Err(error) => {
             tracing::error!(%error, %transfer_id, "load credit transfer");
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
-    let patient_id = transfer
-        .try_get::<Uuid, _>("patient_id")
-        .unwrap_or_default();
-    if let Err(response) = ensure_patient_access(&state, &auth, patient_id).await {
+    let transfer_row = match load_stored_transfer(&mut conn, transfer_id).await {
+        Ok(Some(row)) if row.source_id == invoice_id || row.target_id == invoice_id => row,
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Credit transfer not found"),
+        Err(error) => {
+            tracing::error!(%error, %transfer_id, "load credit transfer");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    drop(conn);
+    if let Err(response) = ensure_patient_access(&state, &auth, transfer_row.patient_id).await {
         return response;
     }
-    let source_id = transfer
-        .try_get::<Uuid, _>("source_invoice_id")
-        .unwrap_or_default();
-    let target_id = transfer
-        .try_get::<Uuid, _>("target_invoice_id")
-        .unwrap_or_default();
-    let amount_gross = transfer
-        .try_get::<Decimal, _>("amount_gross")
-        .unwrap_or(Decimal::ZERO);
-    let refund_id = transfer
-        .try_get::<Uuid, _>("source_refund_transaction_id")
-        .unwrap_or_default();
-    let payment_id = transfer
-        .try_get::<Uuid, _>("target_payment_transaction_id")
-        .unwrap_or_default();
-    if transfer
-        .try_get::<NaiveDate, _>("transferred_on")
-        .is_ok_and(|date| reversed_on < date)
-    {
+    let (source_id, target_id) = (transfer_row.source_id, transfer_row.target_id);
+    if reversed_on < transfer_row.transferred_on {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Reversal date cannot precede the transfer",
@@ -814,207 +639,19 @@ pub(crate) async fn reverse_credit_transfer(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
-    if let Err(error) = lock_pair(&mut transaction, source_id, target_id).await {
-        tracing::error!(%error, %transfer_id, "lock credit transfer reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-    match sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS (
-               SELECT 1 FROM invoice_payment_transactions
-               WHERE reverses_transaction_id = $1 AND transaction_type = 'reversal'
-           )"#,
-    )
-    .bind(payment_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(false) => {}
-        Ok(true) => return err(StatusCode::CONFLICT, "Credit transfer was already reversed"),
-        Err(error) => {
-            tracing::error!(%error, %transfer_id, "check credit transfer reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    }
-    let (source, target) = match (
-        load_locked_invoice(&mut transaction, source_id).await,
-        load_locked_invoice(&mut transaction, target_id).await,
-    ) {
-        (Ok(Some(source)), Ok(Some(target))) => (source, target),
-        (Ok(_), Ok(_)) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
-        (Err(error), _) | (_, Err(error)) => {
-            tracing::error!(%error, %transfer_id, "load credit transfer reversal invoices");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    };
-    // The moved credit must still be on the target: refunds or advances drawn
-    // from it have to be reversed first.
-    let target_capacity = match sqlx::query(
-        r#"SELECT
-               COALESCE((
-                   SELECT SUM(CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END)
-                   FROM invoice_payment_transactions WHERE invoice_id = $1
-               ), 0) AS cash_received,
-               COALESCE((
-                   SELECT SUM(CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END)
-                   FROM invoice_refund_transactions WHERE invoice_id = $1
-               ), 0) AS cash_refunded,
-               COALESCE((
-                   SELECT SUM(amount_gross) FROM invoice_prepayment_allocations
-                   WHERE advance_invoice_id = $1
-               ), 0) AS allocated_advance"#,
-    )
-    .bind(target_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(row) => row,
-        Err(error) => {
-            tracing::error!(%error, %transfer_id, "load credit transfer reversal capacity");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    };
-    let decimal = |column: &str| {
-        target_capacity
-            .try_get::<Decimal, _>(column)
-            .unwrap_or(Decimal::ZERO)
-    };
-    if decimal("cash_received") - amount_gross
-        < decimal("cash_refunded") + decimal("allocated_advance")
-    {
-        return err(
-            StatusCode::CONFLICT,
-            "Refunds and applied advances of the target invoice must be reversed first",
-        );
-    }
-
-    let note = format!("Credit transfer reversed: {reason}");
-    let payment_reversal_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO invoice_payment_transactions (
-                invoice_id, transaction_type, reverses_transaction_id, amount_gross,
-                payment_method, payment_reference, received_on, note, created_by
-           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8)
-           RETURNING id"#,
-    )
-    .bind(target_id)
-    .bind(payment_id)
-    .bind(amount_gross)
-    .bind(CREDIT_TRANSFER_METHOD)
-    .bind(&source.context.invoice_number)
-    .bind(reversed_on)
-    .bind(&note)
-    .bind(auth.user_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
-        Ok(value) => value,
-        Err(sqlx::Error::Database(db_error))
-            if matches!(db_error.code().as_deref(), Some("23505" | "P0001")) =>
-        {
-            return err(
-                StatusCode::CONFLICT,
-                "The moved credit is no longer on the target invoice",
-            );
-        }
-        Err(error) => {
-            tracing::error!(%error, %transfer_id, "insert credit transfer payment reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    };
-    if let Err(error) = insert_invoice_payment_accounting_entries(
+    let reversed = match reverse_credit_transfer_tx(
         &mut transaction,
-        &target.context,
-        payment_reversal_id,
-        "reversal",
-        amount_gross,
-        CREDIT_TRANSFER_METHOD,
-        Some(source.context.invoice_number.as_str()),
+        &transfer_row,
+        &reason,
         reversed_on,
         auth.user_id,
     )
     .await
     {
-        tracing::error!(%error, %transfer_id, "book credit transfer payment reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-    let refund_reversal_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO invoice_refund_transactions (
-                invoice_id, transaction_type, reverses_transaction_id, amount_gross,
-                payment_method, payment_reference, refunded_on, reason, note, created_by
-           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $7, $8)
-           RETURNING id"#,
-    )
-    .bind(source_id)
-    .bind(refund_id)
-    .bind(amount_gross)
-    .bind(CREDIT_TRANSFER_METHOD)
-    .bind(&target.context.invoice_number)
-    .bind(reversed_on)
-    .bind(&note)
-    .bind(auth.user_id)
-    .fetch_one(&mut *transaction)
-    .await
-    {
         Ok(value) => value,
-        Err(sqlx::Error::Database(db_error))
-            if matches!(
-                db_error.code().as_deref(),
-                Some("23505" | "23514" | "P0001")
-            ) =>
-        {
-            return err(StatusCode::CONFLICT, "Credit transfer was already reversed");
-        }
-        Err(error) => {
-            tracing::error!(%error, %transfer_id, "insert credit transfer refund reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
+        Err(response) => return response,
     };
-    if let Err(error) = insert_invoice_refund_accounting_entries(
-        &mut transaction,
-        &source.context,
-        refund_reversal_id,
-        "reversal",
-        amount_gross,
-        CREDIT_TRANSFER_METHOD,
-        Some(target.context.invoice_number.as_str()),
-        reversed_on,
-        auth.user_id,
-    )
-    .await
-    {
-        tracing::error!(%error, %transfer_id, "book credit transfer refund reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-    for id in [source_id, target_id] {
-        if let Err(error) = recompute_invoice_settlement_status(&mut transaction, id).await {
-            tracing::error!(%error, invoice_id = %id, "recompute invoice after credit transfer reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    }
-    let payload = json!({
-        "credit_transfer_id": transfer_id,
-        "source_invoice_id": source_id,
-        "target_invoice_id": target_id,
-        "payment_reversal_transaction_id": payment_reversal_id,
-        "refund_reversal_transaction_id": refund_reversal_id,
-        "amount_gross": decimal_to_string(amount_gross),
-        "reason": reason,
-        "reversed_on": reversed_on.to_string(),
-        "patient_id": patient_id,
-    });
-    for id in [source_id, target_id] {
-        if let Err(error) = write_invoice_audit_tx(
-            &mut transaction,
-            auth.user_id,
-            "credit_transfer_reversed",
-            id,
-            payload.clone(),
-        )
-        .await
-        {
-            tracing::error!(%error, %transfer_id, "audit credit transfer reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-        }
-    }
+    let payload = reversed;
     if let Err(error) = transaction.commit().await {
         tracing::error!(%error, %transfer_id, "commit credit transfer reversal");
         return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
@@ -1039,6 +676,478 @@ pub(crate) async fn reverse_credit_transfer(
         Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(response) => response,
     }
+}
+
+/// A credit transfer to write: amount, day and who moves it.
+pub(crate) struct TransferRequest {
+    pub request_id: Uuid,
+    pub amount_gross: Decimal,
+    pub transferred_on: NaiveDate,
+    pub note: Option<String>,
+    pub actor_id: Uuid,
+    /// The final invoice whose release moves an advance's unused rest onto
+    /// itself (owner 2026-11-17); its Storno reverses the transfer.
+    pub final_release_invoice_id: Option<Uuid>,
+}
+
+/// The rows a credit transfer wrote.
+pub(crate) struct TransferLegs {
+    pub transfer_id: Uuid,
+    pub payment_id: Uuid,
+    pub payload: Value,
+}
+
+/// Writes both legs of a credit transfer from `source` to `target` (locked
+/// by the caller, checks done), books them, links them and audits both
+/// invoices, inside the caller's transaction.
+pub(crate) async fn transfer_credit_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    request: &TransferRequest,
+    source: &LockedInvoice,
+    target: &LockedInvoice,
+) -> Result<TransferLegs, axum::response::Response> {
+    const FAILED: &str = "Failed to transfer credit";
+    let refund_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_refund_transactions (
+                invoice_id, transaction_type, request_id, amount_gross,
+                payment_method, payment_reference, refunded_on, reason, note, created_by
+           ) VALUES ($1, 'refund', $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id"#,
+    )
+    .bind(source.context.invoice_id)
+    .bind(request.request_id)
+    .bind(request.amount_gross)
+    .bind(CREDIT_TRANSFER_METHOD)
+    .bind(&target.context.invoice_number)
+    .bind(request.transferred_on)
+    .bind(format!(
+        "Credit applied to invoice {}",
+        target.context.invoice_number
+    ))
+    .bind(request.note.clone())
+    .bind(request.actor_id)
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
+        {
+            tracing::warn!(error = %db_error, invoice_id = %source.context.invoice_id, "credit transfer refund leg refused");
+            return Err(err(
+                StatusCode::CONFLICT,
+                "The credit balance changed or the date precedes the latest movement; reload and try again",
+            ));
+        }
+        Err(error) => {
+            tracing::error!(%error, invoice_id = %source.context.invoice_id, "insert credit transfer refund leg");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    };
+    if let Err(error) = insert_invoice_refund_accounting_entries(
+        transaction,
+        &source.context,
+        refund_id,
+        "refund",
+        request.amount_gross,
+        CREDIT_TRANSFER_METHOD,
+        Some(target.context.invoice_number.as_str()),
+        request.transferred_on,
+        request.actor_id,
+    )
+    .await
+    {
+        tracing::error!(%error, invoice_id = %source.context.invoice_id, "book credit transfer refund leg");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+    }
+    let payment_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, request_id, amount_gross, payment_method,
+                payment_reference, received_on, note, created_by
+           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(target.context.invoice_id)
+    .bind(request.request_id)
+    .bind(request.amount_gross)
+    .bind(CREDIT_TRANSFER_METHOD)
+    .bind(&source.context.invoice_number)
+    .bind(request.transferred_on)
+    .bind(format!(
+        "Credit from invoice {}",
+        source.context.invoice_number
+    ))
+    .bind(request.actor_id)
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
+        {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "The target invoice changed; reload and try again",
+            ));
+        }
+        Err(error) => {
+            tracing::error!(%error, invoice_id = %source.context.invoice_id, "insert credit transfer payment leg");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    };
+    if let Err(error) = insert_invoice_payment_accounting_entries(
+        transaction,
+        &target.context,
+        payment_id,
+        "payment",
+        request.amount_gross,
+        CREDIT_TRANSFER_METHOD,
+        Some(source.context.invoice_number.as_str()),
+        request.transferred_on,
+        request.actor_id,
+    )
+    .await
+    {
+        tracing::error!(%error, invoice_id = %source.context.invoice_id, "book credit transfer payment leg");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+    }
+    let transfer_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_credit_transfers (
+                request_id, source_invoice_id, target_invoice_id, amount_gross, currency,
+                transferred_on, source_refund_transaction_id, target_payment_transaction_id,
+                note, created_by, final_release_invoice_id
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING id"#,
+    )
+    .bind(request.request_id)
+    .bind(source.context.invoice_id)
+    .bind(target.context.invoice_id)
+    .bind(request.amount_gross)
+    .bind(source.context.currency.to_uppercase())
+    .bind(request.transferred_on)
+    .bind(refund_id)
+    .bind(payment_id)
+    .bind(request.note.clone())
+    .bind(request.actor_id)
+    .bind(request.final_release_invoice_id)
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, invoice_id = %source.context.invoice_id, "insert credit transfer");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    };
+    for id in [source.context.invoice_id, target.context.invoice_id] {
+        if let Err(error) = recompute_invoice_settlement_status(transaction, id).await {
+            tracing::error!(%error, invoice_id = %id, "recompute invoice after credit transfer");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    }
+    let payload = json!({
+        "credit_transfer_id": transfer_id,
+        "request_id": request.request_id,
+        "source_invoice_id": source.context.invoice_id,
+        "source_invoice_number": source.context.invoice_number,
+        "target_invoice_id": target.context.invoice_id,
+        "target_invoice_number": target.context.invoice_number,
+        "refund_transaction_id": refund_id,
+        "payment_transaction_id": payment_id,
+        "amount_gross": decimal_to_string(request.amount_gross),
+        "currency": source.context.currency,
+        "transferred_on": request.transferred_on.to_string(),
+        "patient_id": source.context.patient_id,
+    });
+    // Both legs are audited in the transfer's transaction.
+    for (id, action) in [
+        (source.context.invoice_id, "credit_transferred_out"),
+        (target.context.invoice_id, "credit_transferred_in"),
+    ] {
+        if let Err(error) =
+            write_invoice_audit_tx(transaction, request.actor_id, action, id, payload.clone()).await
+        {
+            tracing::error!(%error, invoice_id = %source.context.invoice_id, "audit credit transfer");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    }
+    Ok(TransferLegs {
+        transfer_id,
+        payment_id,
+        payload,
+    })
+}
+
+/// A credit transfer as stored, for its reversal.
+pub(crate) struct StoredTransfer {
+    pub id: Uuid,
+    pub source_id: Uuid,
+    pub target_id: Uuid,
+    pub amount_gross: Decimal,
+    pub transferred_on: NaiveDate,
+    pub refund_id: Uuid,
+    pub payment_id: Uuid,
+    pub patient_id: Uuid,
+}
+
+pub(crate) async fn load_stored_transfer(
+    conn: &mut sqlx::PgConnection,
+    transfer_id: Uuid,
+) -> Result<Option<StoredTransfer>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT transfer.id, transfer.source_invoice_id, transfer.target_invoice_id,
+                  transfer.amount_gross, transfer.transferred_on,
+                  transfer.source_refund_transaction_id,
+                  transfer.target_payment_transaction_id, source.patient_id
+           FROM invoice_credit_transfers transfer
+           JOIN invoices source ON source.id = transfer.source_invoice_id
+           WHERE transfer.id = $1"#,
+    )
+    .bind(transfer_id)
+    .fetch_optional(conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(StoredTransfer {
+        id: row.try_get("id")?,
+        source_id: row.try_get("source_invoice_id")?,
+        target_id: row.try_get("target_invoice_id")?,
+        amount_gross: row.try_get("amount_gross")?,
+        transferred_on: row.try_get("transferred_on")?,
+        refund_id: row.try_get("source_refund_transaction_id")?,
+        payment_id: row.try_get("target_payment_transaction_id")?,
+        patient_id: row.try_get("patient_id")?,
+    }))
+}
+
+/// Reverses both legs of a credit transfer inside the caller's transaction:
+/// locks both invoices, refuses when the moved credit is no longer on the
+/// target, books, recomputes and audits. Returns the audit payload.
+pub(crate) async fn reverse_credit_transfer_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    transfer: &StoredTransfer,
+    reason: &str,
+    reversed_on: NaiveDate,
+    actor_id: Uuid,
+) -> Result<Value, axum::response::Response> {
+    const FAILED: &str = "Failed to reverse credit transfer";
+    if let Err(error) = lock_pair(transaction, transfer.source_id, transfer.target_id).await {
+        tracing::error!(%error, transfer_id = %transfer.id, "lock credit transfer reversal");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+    }
+    match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM invoice_payment_transactions
+               WHERE reverses_transaction_id = $1 AND transaction_type = 'reversal'
+           )"#,
+    )
+    .bind(transfer.payment_id)
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Credit transfer was already reversed",
+            ));
+        }
+        Err(error) => {
+            tracing::error!(%error, transfer_id = %transfer.id, "check credit transfer reversal");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    }
+    let (source, target) = match (
+        load_locked_invoice(transaction, transfer.source_id).await,
+        load_locked_invoice(transaction, transfer.target_id).await,
+    ) {
+        (Ok(Some(source)), Ok(Some(target))) => (source, target),
+        (Ok(_), Ok(_)) => return Err(err(StatusCode::NOT_FOUND, "Invoice not found")),
+        (Err(error), _) | (_, Err(error)) => {
+            tracing::error!(%error, transfer_id = %transfer.id, "load credit transfer reversal invoices");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    };
+    // The moved credit must still be on the target: refunds or advances drawn
+    // from it have to be reversed first.
+    let target_capacity = match sqlx::query(
+        r#"SELECT
+               COALESCE((
+                   SELECT SUM(CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END)
+                   FROM invoice_payment_transactions WHERE invoice_id = $1
+               ), 0) AS cash_received,
+               COALESCE((
+                   SELECT SUM(CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END)
+                   FROM invoice_refund_transactions WHERE invoice_id = $1
+               ), 0) AS cash_refunded,
+               COALESCE((
+                   SELECT SUM(amount_gross) FROM invoice_prepayment_allocations
+                   WHERE advance_invoice_id = $1
+               ), 0) AS allocated_advance"#,
+    )
+    .bind(transfer.target_id)
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(%error, transfer_id = %transfer.id, "load credit transfer reversal capacity");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    };
+    let decimal = |column: &str| {
+        target_capacity
+            .try_get::<Decimal, _>(column)
+            .unwrap_or(Decimal::ZERO)
+    };
+    if decimal("cash_received") - transfer.amount_gross
+        < decimal("cash_refunded") + decimal("allocated_advance")
+    {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Refunds and applied advances of the target invoice must be reversed first",
+        ));
+    }
+
+    let note = format!("Credit transfer reversed: {reason}");
+    let payment_reversal_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, reverses_transaction_id, amount_gross,
+                payment_method, payment_reference, received_on, note, created_by
+           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(transfer.target_id)
+    .bind(transfer.payment_id)
+    .bind(transfer.amount_gross)
+    .bind(CREDIT_TRANSFER_METHOD)
+    .bind(&source.context.invoice_number)
+    .bind(reversed_on)
+    .bind(&note)
+    .bind(actor_id)
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(db_error.code().as_deref(), Some("23505" | "P0001")) =>
+        {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "The moved credit is no longer on the target invoice",
+            ));
+        }
+        Err(error) => {
+            tracing::error!(%error, transfer_id = %transfer.id, "insert credit transfer payment reversal");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    };
+    if let Err(error) = insert_invoice_payment_accounting_entries(
+        transaction,
+        &target.context,
+        payment_reversal_id,
+        "reversal",
+        transfer.amount_gross,
+        CREDIT_TRANSFER_METHOD,
+        Some(source.context.invoice_number.as_str()),
+        reversed_on,
+        actor_id,
+    )
+    .await
+    {
+        tracing::error!(%error, transfer_id = %transfer.id, "book credit transfer payment reversal");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+    }
+    let refund_reversal_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_refund_transactions (
+                invoice_id, transaction_type, reverses_transaction_id, amount_gross,
+                payment_method, payment_reference, refunded_on, reason, note, created_by
+           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(transfer.source_id)
+    .bind(transfer.refund_id)
+    .bind(transfer.amount_gross)
+    .bind(CREDIT_TRANSFER_METHOD)
+    .bind(&target.context.invoice_number)
+    .bind(reversed_on)
+    .bind(&note)
+    .bind(actor_id)
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
+        {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Credit transfer was already reversed",
+            ));
+        }
+        Err(error) => {
+            tracing::error!(%error, transfer_id = %transfer.id, "insert credit transfer refund reversal");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    };
+    if let Err(error) = insert_invoice_refund_accounting_entries(
+        transaction,
+        &source.context,
+        refund_reversal_id,
+        "reversal",
+        transfer.amount_gross,
+        CREDIT_TRANSFER_METHOD,
+        Some(target.context.invoice_number.as_str()),
+        reversed_on,
+        actor_id,
+    )
+    .await
+    {
+        tracing::error!(%error, transfer_id = %transfer.id, "book credit transfer refund reversal");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+    }
+    for id in [transfer.source_id, transfer.target_id] {
+        if let Err(error) = recompute_invoice_settlement_status(transaction, id).await {
+            tracing::error!(%error, invoice_id = %id, "recompute invoice after credit transfer reversal");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    }
+    let payload = json!({
+        "credit_transfer_id": transfer.id,
+        "source_invoice_id": transfer.source_id,
+        "target_invoice_id": transfer.target_id,
+        "payment_reversal_transaction_id": payment_reversal_id,
+        "refund_reversal_transaction_id": refund_reversal_id,
+        "amount_gross": decimal_to_string(transfer.amount_gross),
+        "reason": reason,
+        "reversed_on": reversed_on.to_string(),
+        "patient_id": transfer.patient_id,
+    });
+    for id in [transfer.source_id, transfer.target_id] {
+        if let Err(error) = write_invoice_audit_tx(
+            transaction,
+            actor_id,
+            "credit_transfer_reversed",
+            id,
+            payload.clone(),
+        )
+        .await
+        {
+            tracing::error!(%error, transfer_id = %transfer.id, "audit credit transfer reversal");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, FAILED));
+        }
+    }
+    Ok(payload)
 }
 
 #[cfg(test)]

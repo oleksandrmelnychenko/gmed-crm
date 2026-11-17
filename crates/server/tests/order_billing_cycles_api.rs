@@ -1440,3 +1440,436 @@ async fn a_released_final_cancels_lines_left_out_and_waives_services_billed_at_z
     .unwrap();
     assert!(!waived);
 }
+
+async fn raw_get(app: &axum::Router, path: &str, token: &str) -> (StatusCode, Vec<u8>) {
+    let request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("Authorization", token)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap();
+    (status, bytes.to_vec())
+}
+
+async fn seed_agency(pool: &PgPool, admin_id: Uuid) {
+    for (key, value) in [
+        ("agency_name", "GMED Test Agentur"),
+        (
+            "agency_address",
+            "Albert-Schweitzer-Straße 56\n81735 München",
+        ),
+        ("agency_country_code", "DE"),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO system_settings (key, value, description, updated_by)
+               VALUES ($1, to_jsonb($2::text), $1, $3)
+               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(admin_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn invoice_detail(ctx: &support::TestSuiteContext, token: &str, invoice_id: &str) -> Value {
+    let (status, invoice) = call(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{invoice:?}");
+    invoice
+}
+
+/// A released prepayment advance of `amount` with `paid` received.
+async fn paid_prepayment_advance(
+    ctx: &support::TestSuiteContext,
+    token: &str,
+    case: &InterpreterCase,
+    amount: Decimal,
+    paid: Decimal,
+) -> String {
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = $2 WHERE id = $1",
+    )
+    .bind(case.order_id)
+    .bind(amount)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, advance) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        token,
+        Some(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{advance:?}");
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+    release_invoice(ctx, token, &advance_id).await;
+    let (status, body) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_id}/payments"),
+        token,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": paid.to_string(),
+            "payment_method": "bank_transfer",
+            "received_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    advance_id
+}
+
+/// "1.234,56" as the printed invoice writes money.
+fn de_money(value: Decimal) -> String {
+    let text = format!("{value:.2}");
+    let (whole, cents) = text.split_once('.').unwrap();
+    let mut grouped = String::new();
+    for (index, digit) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
+            grouped.push('.');
+        }
+        grouped.push(digit);
+    }
+    format!("{grouped},{cents}")
+}
+
+async fn cancel_invoice(ctx: &support::TestSuiteContext, token: &str, invoice_id: &str) -> Value {
+    let (status, cancelled) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        token,
+        Some(json!({ "status": "cancelled", "reason": "Neu ausstellen" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    cancelled
+}
+
+/// Owner decision 2026-11-17 (verify2-A S2-1/S2-3, V2A-1-like data): the
+/// advance paid own services (19 %) in full; the final bills one hour of
+/// them and a pass-through cost. The 19 % share no service takes is corrected
+/// by a credit note on the advance and its money is set off against the
+/// pass-through cost as a payment: one amount to pay, in preview, release,
+/// PDF and XML alike. The Storno gives all of it back; a new final repeats it.
+#[tokio::test]
+async fn the_paid_advance_rest_no_category_takes_is_set_off_and_the_storno_gives_it_back() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case(&ctx, &ceo, 3).await;
+    seed_agency(&ctx.pool, ctx.admin_id).await;
+    let own = gross_of(Decimal::from(3), case.unit_price);
+    let advance_id = paid_prepayment_advance(&ctx, &ceo, &case, own, own).await;
+    report_hours(&ctx, &ceo, &case, 1.0, 1).await;
+    let clinic_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               is_cost_passthrough, status, delivered_at, approved_at
+           ) VALUES ($1, $2, 'Klinik MRT', 1, 1000, 'EUR', 0, true, 'approved', now(), now())
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let one = gross_of(Decimal::ONE, case.unit_price);
+    let rest = own - one;
+    let total = one + Decimal::from(1000);
+    let due = total - one - rest;
+    let selection = json!({
+        "line_items": [{ "line_index": 0, "quantity": 1 }],
+        "order_services": [{ "order_leistung_id": clinic_id, "quantity": 1 }],
+    });
+
+    let (status, preview) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/final-preview", case.quote_id),
+        &ceo,
+        Some(selection.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview:?}");
+    assert_eq!(money(&preview["total_gross"]), total);
+    assert_eq!(money(&preview["deducted_gross"]), one);
+    assert_eq!(money(&preview["rest_applied_gross"]), rest);
+    assert_eq!(money(&preview["advances"][0]["rest_applied_gross"]), rest);
+    assert_eq!(money(&preview["due_gross"]), due);
+
+    let mut body = selection.clone();
+    body["invoice_type"] = json!("final");
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    let final_id = invoice["id"].as_str().unwrap().to_string();
+    // The draft asks what the release will ask.
+    let draft = invoice_detail(&ctx, &ceo, &final_id).await;
+    assert_eq!(money(&draft["expected_prepayment_gross"]), one + rest);
+    let released = release_invoice(&ctx, &ceo, &final_id).await;
+    assert_eq!(money(&released["prepayment_applied_amount"]), one);
+    assert_eq!(money(&released["balance_due"]), due, "{released:?}");
+    let detail = invoice_detail(&ctx, &ceo, &final_id).await;
+    assert_eq!(money(&detail["release_advance_rest_gross"]), rest);
+    assert_eq!(money(&detail["paid_amount"]), rest);
+    // No second figure, no dead offer.
+    assert_eq!(money(&detail["advance_credit_available"]), Decimal::ZERO);
+    assert_eq!(detail["available_prepayments"], json!([]), "{detail:?}");
+
+    // The advance: its unused 19 % share corrected, its money moved on.
+    let advance = invoice_detail(&ctx, &ceo, &advance_id).await;
+    assert_eq!(money(&advance["credited_amount"]), rest);
+    assert_eq!(money(&advance["refundable_cash_amount"]), Decimal::ZERO);
+    let final_uuid = Uuid::parse_str(&final_id).unwrap();
+    let (credits, credit_vat): (i64, Decimal) = sqlx::query_as(
+        r#"SELECT COUNT(*), COALESCE(SUM(amount_vat), 0) FROM invoice_credit_note_transactions
+           WHERE final_release_invoice_id = $1 AND transaction_type = 'credit_note'"#,
+    )
+    .bind(final_uuid)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(credits, 1);
+    assert!(credit_vat > Decimal::ZERO, "the 19 % share is corrected");
+    let moved: Decimal = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_gross), 0) FROM invoice_credit_transfers WHERE final_release_invoice_id = $1",
+    )
+    .bind(final_uuid)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(moved, rest);
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_log WHERE action = 'credit_transferred_in' AND entity_id = $1",
+    )
+    .bind(final_uuid)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // The issued invoice states one amount to pay.
+    let (status, pdf) = raw_get(&ctx.app, &format!("/api/v1/invoices/{final_id}/pdf"), &ceo).await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
+    assert!(text.contains("Restbetrag Anzahlung"), "{text}");
+    assert!(text.contains(&de_money(due)), "{text}");
+    let (status, xml) = raw_get(
+        &ctx.app,
+        &format!("/api/v1/invoices/{final_id}/zugferd.xml"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    assert!(
+        xml.contains(&format!(
+            "<ram:TotalPrepaidAmount>{:.2}</ram:TotalPrepaidAmount>",
+            one + rest
+        )),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(&format!(
+            "<ram:DuePayableAmount>{due:.2}</ram:DuePayableAmount>"
+        )),
+        "{xml}"
+    );
+
+    // Storno: the money goes back to the advance, the credit note is
+    // reversed, the advance asks what it asked before the final.
+    cancel_invoice(&ctx, &ceo, &final_id).await;
+    let advance = invoice_detail(&ctx, &ceo, &advance_id).await;
+    assert_eq!(
+        money(&advance["credited_amount"]),
+        Decimal::ZERO,
+        "{advance:?}"
+    );
+    assert_eq!(money(&advance["paid_amount"]), own);
+    assert_eq!(advance["status"], "paid");
+    let reversed: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM invoice_credit_note_transactions reversal
+           JOIN invoice_credit_note_transactions credit ON credit.id = reversal.reverses_transaction_id
+           WHERE credit.final_release_invoice_id = $1 AND reversal.transaction_type = 'reversal'"#,
+    )
+    .bind(final_uuid)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(reversed, 1);
+    let cancelled = invoice_detail(&ctx, &ceo, &final_id).await;
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(
+        money(&cancelled["release_advance_rest_gross"]),
+        Decimal::ZERO
+    );
+
+    // A new final sets off the same.
+    let (status, again) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{again:?}");
+    let released = release_invoice(&ctx, &ceo, again["id"].as_str().unwrap()).await;
+    assert_eq!(money(&released["prepayment_applied_amount"]), one);
+    assert_eq!(money(&released["balance_due"]), due);
+}
+
+/// verify2-A S2-3 (V2A-2/V2A-4-like): the release closes the unpaid part of
+/// a partly paid advance by credit note; the Storno of the final reverses it
+/// and the advance asks for its open rest again.
+#[tokio::test]
+async fn the_storno_of_a_final_reopens_the_unpaid_rest_of_its_advance() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case(&ctx, &ceo, 3).await;
+    let advance_id =
+        paid_prepayment_advance(&ctx, &ceo, &case, Decimal::from(300), Decimal::from(100)).await;
+    report_hours(&ctx, &ceo, &case, 1.0, 1).await;
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(
+            json!({ "invoice_type": "final", "line_items": [{ "line_index": 0, "quantity": 1 }] }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    let final_id = invoice["id"].as_str().unwrap().to_string();
+    release_invoice(&ctx, &ceo, &final_id).await;
+    let advance = invoice_detail(&ctx, &ceo, &advance_id).await;
+    assert_eq!(money(&advance["credited_amount"]), Decimal::from(200));
+
+    cancel_invoice(&ctx, &ceo, &final_id).await;
+    let advance = invoice_detail(&ctx, &ceo, &advance_id).await;
+    assert_eq!(
+        money(&advance["credited_amount"]),
+        Decimal::ZERO,
+        "{advance:?}"
+    );
+    assert_eq!(money(&advance["balance_due"]), Decimal::from(200));
+    assert_eq!(advance["status"], "partially_paid");
+    let (credit_reversed, credit_number): (bool, String) = sqlx::query_as(
+        r#"SELECT EXISTS (
+                  SELECT 1 FROM invoice_credit_note_transactions reversal
+                  WHERE reversal.reverses_transaction_id = credit.id
+                    AND reversal.transaction_type = 'reversal'),
+                  credit.document_number
+           FROM invoice_credit_note_transactions credit
+           WHERE credit.final_release_invoice_id = $1"#,
+    )
+    .bind(Uuid::parse_str(&final_id).unwrap())
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(credit_reversed, "{credit_number} reversed with the Storno");
+}
+
+/// verify2-A S2-4: the Leistungsdatum of interpreter hours is the day of the
+/// visit, not the day the report was approved; the dialog proposes the
+/// period the issued invoice prints.
+#[tokio::test]
+async fn interpreter_hours_are_dated_by_the_visit_not_by_the_approval() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case(&ctx, &ceo, 3).await;
+    seed_agency(&ctx.pool, ctx.admin_id).await;
+    report_hours(&ctx, &ceo, &case, 2.0, 3).await;
+    let visit = gmed_server::app_time::today() - chrono::Duration::days(3);
+    let selection = json!({ "line_items": [{ "line_index": 0, "quantity": 2 }] });
+    let (status, preview) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/final-preview", case.quote_id),
+        &ceo,
+        Some(selection.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview:?}");
+    assert_eq!(
+        preview["service_period"],
+        json!({ "from": visit.to_string(), "to": visit.to_string() })
+    );
+    let mut body = selection;
+    body["invoice_type"] = json!("final");
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    let final_id = invoice["id"].as_str().unwrap().to_string();
+    let (status, draft) = call(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{final_id}/draft"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{draft:?}");
+    assert_eq!(draft["service_period_default"], preview["service_period"]);
+    release_invoice(&ctx, &ceo, &final_id).await;
+    let (status, pdf) = raw_get(&ctx.app, &format!("/api/v1/invoices/{final_id}/pdf"), &ceo).await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
+    assert!(
+        text.contains(&visit.format("%d.%m.%Y").to_string()),
+        "{text}"
+    );
+    let (status, xml) = raw_get(
+        &ctx.app,
+        &format!("/api/v1/invoices/{final_id}/zugferd.xml"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    let delivery = xml
+        .split("<ram:ApplicableHeaderTradeDelivery>")
+        .nth(1)
+        .and_then(|part| part.split("</ram:ApplicableHeaderTradeDelivery>").next())
+        .unwrap_or_default();
+    assert!(
+        delivery.contains(&visit.format("%Y%m%d").to_string()),
+        "{delivery}"
+    );
+}

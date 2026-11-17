@@ -321,23 +321,18 @@ pub(super) async fn load_invoice_service_period(
     let mut service_days = concierge_service_days(line_items);
     let source_line_ids = super::extract_source_line_ids(line_items);
     if !source_line_ids.is_empty() {
-        let row = sqlx::query(
+        let sql = format!(
             r#"SELECT min(service_day) AS first_day, max(service_day) AS last_day
                FROM (
-                   SELECT COALESCE(
-                              appointment.date,
-                              (service.delivered_at AT TIME ZONE 'Europe/Berlin')::date
-                          ) AS service_day
+                   SELECT {ORDER_SERVICE_DAY_SQL} AS service_day
                    FROM order_leistungen service
-                   LEFT JOIN appointments appointment
-                          ON appointment.id = service.source_medical_appointment_id
-                         AND appointment.status <> 'cancelled'
                    WHERE service.id = ANY($1)
-               ) days"#,
-        )
-        .bind(&source_line_ids)
-        .fetch_one(&mut *conn)
-        .await?;
+               ) days"#
+        );
+        let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
+            .bind(&source_line_ids)
+            .fetch_one(&mut *conn)
+            .await?;
         service_days.extend(
             row.try_get::<Option<NaiveDate>, _>("first_day")
                 .unwrap_or_default(),
@@ -438,6 +433,43 @@ impl ReceivedPayment {
     }
 }
 
+/// Paid advance money that the release of a final invoice set off as a
+/// payment because no VAT category of the final took it (owner 2026-11-17).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SetOffAdvanceRest {
+    pub invoice_number: String,
+    pub amount: Decimal,
+}
+
+/// The advance rests the release of `invoice_id` set off, as the issued
+/// invoice states them (also when a Storno reversed them later).
+pub(super) async fn load_set_off_advance_rests(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<SetOffAdvanceRest>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT advance.invoice_number, transfer.amount_gross
+           FROM invoice_credit_transfers transfer
+           JOIN invoices advance ON advance.id = transfer.source_invoice_id
+           WHERE transfer.final_release_invoice_id = $1
+             AND transfer.target_invoice_id = $1
+           ORDER BY transfer.created_at, transfer.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(conn)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(SetOffAdvanceRest {
+                invoice_number: row
+                    .try_get::<Option<String>, _>("invoice_number")?
+                    .unwrap_or_default(),
+                amount: row.try_get("amount_gross")?,
+            })
+        })
+        .collect()
+}
+
 /// Service days (Europe/Berlin) of the Concierge service lines.
 fn concierge_service_days(line_items: &Value) -> Vec<NaiveDate> {
     line_items
@@ -465,6 +497,29 @@ fn supplier_invoice_days(line_items: &Value) -> Vec<NaiveDate> {
 fn day_span(days: &[NaiveDate]) -> Option<(NaiveDate, NaiveDate)> {
     days.iter().min().copied().zip(days.iter().max().copied())
 }
+
+/// The day an order service (alias `service`) was rendered (§ 14 Abs. 4
+/// Nr. 6 UStG): the day of its medical appointment, of the appointment its
+/// interpreter report covers, or of the service group's appointment; only a
+/// service without any of them (marked delivered by hand) falls back to the
+/// day it was marked delivered. Before, interpreter hours were dated by the
+/// approval of the report (verify2-A S2-4).
+pub(crate) const ORDER_SERVICE_DAY_SQL: &str = r#"COALESCE(
+    (SELECT appointment.date FROM appointments appointment
+      WHERE appointment.id = service.source_medical_appointment_id
+        AND appointment.status <> 'cancelled'),
+    (SELECT appointment.date
+       FROM interpreter_reports report
+       JOIN appointments appointment ON appointment.id = report.appointment_id
+      WHERE report.id = service.source_interpreter_report_id
+        AND appointment.status <> 'cancelled'),
+    (SELECT appointment.date
+       FROM order_service_groups service_group
+       JOIN appointments appointment ON appointment.id = service_group.appointment_id
+      WHERE service_group.id = service.source_service_group_id
+        AND appointment.status <> 'cancelled'),
+    (service.delivered_at AT TIME ZONE 'Europe/Berlin')::date
+)"#;
 
 /// An order service (alias `service`) that was neither delivered nor approved
 /// yet: still planned, or invoiced ahead of its delivery.
@@ -545,14 +600,8 @@ async fn load_rendered_service_period(
     let sql = format!(
         r#"SELECT min(service_day) AS first_day, max(service_day) AS last_day
            FROM (
-               SELECT COALESCE(
-                          appointment.date,
-                          (service.delivered_at AT TIME ZONE 'Europe/Berlin')::date
-                      ) AS service_day
+               SELECT {ORDER_SERVICE_DAY_SQL} AS service_day
                FROM order_leistungen service
-               LEFT JOIN appointments appointment
-                      ON appointment.id = service.source_medical_appointment_id
-                     AND appointment.status <> 'cancelled'
                WHERE service.id = ANY($1)
                  AND service.status <> 'cancelled'
                  AND NOT {SERVICE_NOT_RENDERED_SQL}

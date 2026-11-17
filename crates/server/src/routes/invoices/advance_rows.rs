@@ -316,6 +316,75 @@ pub(super) fn plan_allocation_rows(
         .collect()
 }
 
+/// An advance as the release of a final invoice finds it.
+pub(super) struct SetOffAdvance {
+    /// What it holds per category; `None` for an advance without line
+    /// amounts (set off by gross).
+    pub available_rows: Option<Vec<VatBreakdownRow>>,
+    /// Its paid money not deducted yet.
+    pub available_gross: Decimal,
+    /// Whether its rest may be set off as a payment (same recipient).
+    pub rest_allowed: bool,
+}
+
+/// What the release of a final invoice takes from one advance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PlannedSetOff {
+    pub rows: Vec<VatBreakdownRow>,
+    pub deduction: Decimal,
+    /// Paid money no category took, set off as a payment (owner 2026-11-17).
+    pub rest_applied: Decimal,
+}
+
+/// The set-off of a final invoice billing `target_rows` (`total` gross) at
+/// its release, oldest advance first: each advance deducted per VAT
+/// category (`plan_allocation_rows`), then the paid rests that no category
+/// took applied as payments against what is left. The release does the
+/// same with documents (`apply_available_advances_tx`, then
+/// `advance_settlement::apply_advance_rests_tx`); the dialog preview and the
+/// draft read this plan.
+pub(super) fn plan_final_set_off(
+    target_rows: &[VatBreakdownRow],
+    total: Decimal,
+    advances: &[SetOffAdvance],
+) -> Vec<PlannedSetOff> {
+    let mut target_open = target_rows.to_vec();
+    let mut left = total.max(Decimal::ZERO);
+    let mut plans = advances
+        .iter()
+        .map(|advance| {
+            let max = advance.available_gross.min(left).max(Decimal::ZERO);
+            let (rows, deduction) = match &advance.available_rows {
+                _ if max <= Decimal::ZERO => (Vec::new(), Decimal::ZERO),
+                Some(available) => {
+                    let rows = plan_allocation_rows(available, &target_open, max);
+                    let amount = rows.iter().map(|row| row.gross).sum::<Decimal>();
+                    target_open = subtract_rows(&target_open, &rows);
+                    (rows, amount)
+                }
+                None => (Vec::new(), max),
+            };
+            left -= deduction;
+            PlannedSetOff {
+                rows,
+                deduction,
+                rest_applied: Decimal::ZERO,
+            }
+        })
+        .collect::<Vec<_>>();
+    for (plan, advance) in plans.iter_mut().zip(advances) {
+        if !advance.rest_allowed || left <= Decimal::ZERO {
+            continue;
+        }
+        let rest = (advance.available_gross - plan.deduction)
+            .min(left)
+            .max(Decimal::ZERO);
+        plan.rest_applied = rest;
+        left -= rest;
+    }
+    plans
+}
+
 /// A payment split set by hand (owner 2026-11-15): every part names a
 /// category of the advance, none twice, none negative, none above what the
 /// category still has open, and the parts add up to the payment. Returns the
@@ -1059,6 +1128,54 @@ mod tests {
             plan.iter().map(|row| row.gross).sum::<Decimal>(),
             dec("2500.00")
         );
+    }
+
+    /// verify2-A V2A-1 (owner 2026-11-17): advance 1.000 paid (0 % own
+    /// 637,77 / 19 % 362,23); the final bills 0 % own 550 only. The 19 %
+    /// share and 550 of the 0 % share are deducted; the 87,77 no category
+    /// takes is set off as a payment: one amount to pay, 2.329,45.
+    #[test]
+    fn the_paid_rest_no_category_takes_is_set_off_as_a_payment() {
+        let target = [
+            row(VatGroupKind::Taxed, "19", "124.45", "779.45"),
+            row(VatGroupKind::ZeroRated, "0", "0", "550"),
+            row(VatGroupKind::Passthrough, "0", "0", "2000"),
+        ];
+        let advance = SetOffAdvance {
+            available_rows: Some(vec![
+                row(VatGroupKind::Taxed, "19", "57.84", "362.23"),
+                row(VatGroupKind::ZeroRated, "0", "0", "637.77"),
+            ]),
+            available_gross: dec("1000"),
+            rest_allowed: true,
+        };
+        let plan = plan_final_set_off(&target, dec("3329.45"), &[advance]);
+        assert_eq!(plan[0].deduction, dec("912.23"));
+        assert_eq!(plan[0].rest_applied, dec("87.77"));
+        let due = dec("3329.45") - plan[0].deduction - plan[0].rest_applied;
+        assert_eq!(due, dec("2329.45"));
+
+        // Another recipient's advance keeps its rest (owner 2026-11-12).
+        let other = SetOffAdvance {
+            available_rows: Some(vec![row(VatGroupKind::ZeroRated, "0", "0", "637.77")]),
+            available_gross: dec("637.77"),
+            rest_allowed: false,
+        };
+        let plan = plan_final_set_off(&target, dec("3329.45"), &[other]);
+        assert_eq!(plan[0].deduction, dec("550"));
+        assert_eq!(plan[0].rest_applied, Decimal::ZERO);
+
+        // A final asking less than the rest takes only what it asks; the
+        // rest stays on the advance (refund path).
+        let small = [row(VatGroupKind::Taxed, "19", "15.97", "100")];
+        let advance = SetOffAdvance {
+            available_rows: Some(vec![row(VatGroupKind::ZeroRated, "0", "0", "300")]),
+            available_gross: dec("300"),
+            rest_allowed: true,
+        };
+        let plan = plan_final_set_off(&small, dec("100"), &[advance]);
+        assert_eq!(plan[0].deduction, Decimal::ZERO);
+        assert_eq!(plan[0].rest_applied, dec("100"));
     }
 
     #[test]
