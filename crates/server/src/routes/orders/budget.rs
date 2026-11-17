@@ -39,6 +39,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use gmed_domain::access::capabilities::Capability;
+use gmed_domain::role::Role;
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -348,9 +349,13 @@ async fn get_order_budget(
     if let Err(response) = auth.require_capability(Capability::OrdersView) {
         return response;
     }
-    // Order sums belong to the full order view (the concierge and the
-    // interpreter team lead read only their part of the order).
-    if let Err(response) = super::require_full_order_read(&auth) {
+    // Order sums belong to the full order view. The concierge, who reads
+    // only the service part of the order, gets the totals for the concierge
+    // service form (owner decision 2026-11-17): contract sum, planned,
+    // remaining and over-by — no line prices, invoiced amounts or contract
+    // details. The interpreter team lead stays out.
+    let totals_only = auth.role == Role::Concierge;
+    if !totals_only && let Err(response) = super::require_full_order_read(&auth) {
         return response;
     }
     if let Err(response) =
@@ -746,6 +751,16 @@ async fn get_order_budget(
             .unwrap_or(Decimal::ZERO)
             .round_cents(),
     };
+    if totals_only {
+        return Json(totals_payload(
+            order_id,
+            &currency,
+            contract.as_ref(),
+            planned,
+            concierge_vat_rate,
+        ))
+        .into_response();
+    }
     Json(budget_payload(
         order_id,
         &currency,
@@ -828,6 +843,55 @@ pub(crate) fn budget_payload(
         "concierge_vat_rate": money_value(parts.concierge_vat_rate),
     })
 }
+
+/// The fields the concierge reads: an allowlist built on its own, so a field
+/// added to [`budget_payload`] never reaches the concierge by accident. The
+/// VAT rate of concierge sale prices lets the form project the service being
+/// entered; it is a tax rate, not a price.
+pub(crate) fn totals_payload(
+    order_id: Uuid,
+    currency: &str,
+    contract: Option<&Contract>,
+    planned: Amounts,
+    concierge_vat_rate: Decimal,
+) -> Value {
+    let full = budget_payload(
+        order_id,
+        currency,
+        contract,
+        planned,
+        Amounts::default(),
+        BudgetParts {
+            services: Amounts::default(),
+            concierge: Amounts::default(),
+            visits: Amounts::default(),
+            uncovered_visits: 0,
+            free_visit_units: 0,
+            visit_fee: None,
+            concierge_vat_rate,
+        },
+    );
+    let mut totals = serde_json::Map::new();
+    for key in TOTALS_FIELDS {
+        totals.insert(key.to_string(), full[key].clone());
+    }
+    Value::Object(totals)
+}
+
+/// What [`totals_payload`] returns.
+pub(crate) const TOTALS_FIELDS: [&str; 11] = [
+    "order_id",
+    "currency",
+    "contract_own_services_net",
+    "contract_own_services_gross",
+    "planned_own_services_net",
+    "planned_own_services_gross",
+    "remaining_net",
+    "remaining_gross",
+    "over_by_net",
+    "over_by_gross",
+    "concierge_vat_rate",
+];
 
 #[cfg(test)]
 mod tests {

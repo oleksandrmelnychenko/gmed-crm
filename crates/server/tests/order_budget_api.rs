@@ -413,23 +413,122 @@ async fn budget_counts_own_services_against_the_signed_contract() {
     );
 }
 
+async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, 'test-password-hash', $2, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}-{role}@example.com"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn assign(pool: &PgPool, patient_id: Uuid, user_id: Uuid, admin_id: Uuid) {
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)"#,
+    )
+    .bind(patient_id)
+    .bind(user_id)
+    .bind(admin_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Owner decision 2026-11-17: the concierge reads the order's budget totals
+/// on the concierge service form — contract sum, planned, remaining and
+/// over-by — and nothing else of the order's money. The interpreter team lead
+/// and interpreters stay out.
 #[tokio::test]
-async fn budget_is_closed_to_partial_order_readers() {
+async fn concierge_reads_budget_totals_only() {
     let Some(context) = support::suite_context(TEST_SECRET).await else {
         return;
     };
     let (app, pool, admin_id) = (context.app, context.pool, context.admin_id);
     let tag = Uuid::new_v4().simple().to_string();
-    let (order_id, _) = seed_order(&pool, admin_id, &tag).await;
-    let concierge: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO users (email, password_hash, name, role)
-           VALUES ($1, 'test-password-hash', 'Concierge', 'concierge')
-           RETURNING id"#,
+    let (order_id, patient_id) = seed_order(&pool, admin_id, &tag).await;
+    seed_line(
+        &pool,
+        order_id,
+        patient_id,
+        "Organisation",
+        1,
+        1000,
+        19,
+        false,
     )
-    .bind(format!("{tag}-concierge@example.com"))
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    let (status, _) = get_budget(&app, order_id, &auth_header(concierge, "concierge")).await;
+    .await;
+    sign_order(&pool, order_id, "to_jsonb(now() - interval '2 hours')").await;
+    seed_line(&pool, order_id, patient_id, "Transfer", 1, 100, 19, false).await;
+    seed_line(&pool, order_id, patient_id, "Klinik", 1, 500, 0, true).await;
+
+    let concierge = seed_user(&pool, &tag, "concierge").await;
+    let concierge_bearer = auth_header(concierge, "concierge");
+    // Without access to the patient: nothing.
+    let (status, _) = get_budget(&app, order_id, &concierge_bearer).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    assign(&pool, patient_id, concierge, admin_id).await;
+    let (status, totals) = get_budget(&app, order_id, &concierge_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{totals:?}");
+    let mut keys = totals
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    let mut expected = vec![
+        "concierge_vat_rate",
+        "contract_own_services_gross",
+        "contract_own_services_net",
+        "currency",
+        "order_id",
+        "over_by_gross",
+        "over_by_net",
+        "planned_own_services_gross",
+        "planned_own_services_net",
+        "remaining_gross",
+        "remaining_net",
+    ];
+    expected.sort();
+    assert_eq!(keys, expected, "{totals:?}");
+    // No contract details, invoiced amounts, visit fees or plan parts.
+    for absent in [
+        "contract",
+        "invoiced_own_services_gross",
+        "planned_parts",
+        "visit_fee_gross",
+        "free_visit_units",
+    ] {
+        assert!(totals.get(absent).is_none(), "{absent}: {totals:?}");
+    }
+    assert_eq!(
+        money(&totals["contract_own_services_gross"]),
+        Decimal::from(1190)
+    );
+    assert_eq!(
+        money(&totals["planned_own_services_gross"]),
+        Decimal::from(1309)
+    );
+    assert_eq!(money(&totals["remaining_gross"]), Decimal::from(-119));
+    assert_eq!(money(&totals["over_by_gross"]), Decimal::from(119));
+
+    // The figures are the full view's.
+    let (_, full) = get_budget(&app, order_id, &auth_header(admin_id, "ceo")).await;
+    for key in expected {
+        assert_eq!(totals[key], full[key], "{key}");
+    }
+    assert!(full.get("invoiced_own_services_gross").is_some());
+
+    for role in ["teamlead_interpreter", "interpreter"] {
+        let user = seed_user(&pool, &tag, role).await;
+        assign(&pool, patient_id, user, admin_id).await;
+        let (status, body) = get_budget(&app, order_id, &auth_header(user, role)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {body:?}");
+    }
 }

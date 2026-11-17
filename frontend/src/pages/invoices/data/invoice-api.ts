@@ -294,6 +294,16 @@ export function fetchInvoiceZugferdXmlBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/zugferd.xml`);
 }
 
+/** E-invoice XML (381 / reversal 380) of a credit note, as embedded in its stored PDF. */
+export function fetchCreditNoteZugferdXmlBlob(invoiceId: string, creditNoteId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/credit-notes/${creditNoteId}/zugferd.xml`);
+}
+
+/** E-invoice XML (381) of the cancellation document (Stornorechnung). */
+export function fetchStornoZugferdXmlBlob(invoiceId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/storno/zugferd.xml`);
+}
+
 export function fetchAccountingLedgerExportBlob(year: string, currency = "EUR") {
   return fetchProtectedBlob(`/invoices/accounting-ledger/export?year=${encodeURIComponent(year)}&currency=${encodeURIComponent(currency)}`);
 }

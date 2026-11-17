@@ -539,7 +539,7 @@ jobs:
           java-version: "21"
 
       - name: Export sample e-invoices
-        run: EINVOICE_SAMPLE_DIR="$PWD/target/einvoice-samples" cargo test -p gmed-server --locked --lib -- zugferd::tests::samples_can_be_exported_for_external_validation routes::invoices::tests::invoice_pdf_preserves_cyrillic_text
+        run: EINVOICE_SAMPLE_DIR="$PWD/target/einvoice-samples" cargo test -p gmed-server --locked --lib -- zugferd::tests::samples_can_be_exported_for_external_validation correction_einvoice::tests::correction_samples_can_be_exported_for_external_validation routes::invoices::tests::invoice_pdf_preserves_cyrillic_text
 
       - name: Download Mustang validator
         run: |

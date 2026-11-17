@@ -9,6 +9,12 @@ const MISSING_LABELS: Record<string, { de: string; ru: string }> = {
   buyer_country: { de: "Land in der Patientenadresse", ru: "страна в адресе пациента" },
   invoice_lines: { de: "Rechnungspositionen", ru: "позиции счёта" },
   line_name: { de: "Bezeichnung jeder Position", ru: "название каждой позиции" },
+  // Old pro-rata corrections without lines, or a Storno summary line at a
+  // blended rate: these documents stay PDF-only.
+  line_vat_rate: {
+    de: "MwSt.-Satz jeder Position (ältere Korrektur ohne Positionen)",
+    ru: "ставка НДС каждой позиции (старая корректировка без позиций)",
+  },
 };
 
 const MISSING_PREFIX = "E-invoice is missing mandatory data:";

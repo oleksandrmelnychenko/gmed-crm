@@ -565,6 +565,8 @@ const ACTIONS: Record<string, Pair> = {
   download_portal_credit_note_pdf: ["PDF кредит-ноты скачан в портале", "PDF der Gutschrift im Portal heruntergeladen"],
   download_storno_document_pdf: ["PDF сторно скачан", "Storno-PDF heruntergeladen"],
   download_portal_storno_document_pdf: ["PDF сторно скачан в портале", "Storno-PDF im Portal heruntergeladen"],
+  download_credit_note_zugferd_xml: ["XML кредит-ноты (ZUGFeRD) скачан", "XML der Gutschrift (ZUGFeRD) heruntergeladen"],
+  download_storno_zugferd_xml: ["XML сторно (ZUGFeRD) скачан", "Storno-XML (ZUGFeRD) heruntergeladen"],
   payment_recorded: ["Платёж записан", "Zahlung erfasst"],
   payment_corrected: ["Платёж исправлен", "Zahlung korrigiert"],
   payment_reversed: ["Платёж сторнирован", "Zahlung storniert"],

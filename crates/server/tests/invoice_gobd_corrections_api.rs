@@ -88,6 +88,19 @@ async fn seed_released_invoice(
     tag: &str,
     due_in_days: i32,
 ) -> (Uuid, Uuid, Uuid) {
+    seed_released_invoice_to(pool, admin_id, tag, due_in_days, false).await
+}
+
+/// The same invoice; `with_address` gives the patient a German postal
+/// address before the release freezes the recipient (the e-invoice needs
+/// the buyer's country).
+async fn seed_released_invoice_to(
+    pool: &PgPool,
+    admin_id: Uuid,
+    tag: &str,
+    due_in_days: i32,
+    with_address: bool,
+) -> (Uuid, Uuid, Uuid) {
     let patient_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO patients (
                 patient_id, first_name, last_name, birth_date, gender, created_by, languages
@@ -99,6 +112,9 @@ async fn seed_released_invoice(
     .fetch_one(pool)
     .await
     .unwrap();
+    if with_address {
+        set_patient_address(pool, patient_id).await;
+    }
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
            VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
@@ -518,6 +534,252 @@ async fn credit_notes_are_numbered_without_gaps_archived_and_fully_credited_show
     .await
     .unwrap();
     assert_eq!(stored, 1);
+}
+
+async fn seed_agency_einvoice_settings(pool: &PgPool, admin_id: Uuid) {
+    for (key, value) in [
+        ("agency_name", "GMED Test Agentur"),
+        (
+            "agency_address",
+            "Albert-Schweitzer-Straße 56\n81735 München",
+        ),
+        ("agency_country_code", "DE"),
+        ("agency_tax_number", "143/999/00001"),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO system_settings (key, value, description, updated_by)
+               VALUES ($1, to_jsonb($2::text), $1, $3)
+               ON CONFLICT (key)
+               DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by"#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(admin_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn set_patient_address(pool: &PgPool, patient_id: Uuid) {
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_street = 'Patientenweg 9', address_zip = '80331',
+               address_city = 'München', address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+fn embeds_xml(pdf: &[u8]) -> bool {
+    pdf.windows(12).any(|window| window == b"factur-x.xml")
+}
+
+/// Owner decision 2026-11-17: credit notes, their reversals and
+/// Stornorechnungen carry an EN 16931 e-invoice embedded in their archived
+/// PDF, downloadable as XML by staff who read invoices. A document stored
+/// without XML keeps its PDF.
+#[tokio::test]
+async fn corrections_carry_an_einvoice_in_their_archived_pdf() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    seed_agency_einvoice_settings(&ctx.pool, ctx.admin_id).await;
+    let tag = format!("cn-xml-{}", Uuid::new_v4().simple());
+    let (_, _, invoice_id) =
+        seed_released_invoice_to(&ctx.pool, ctx.admin_id, &tag, 10, true).await;
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let today = gmed_server::app_time::today().to_string();
+
+    // Rechnungskorrektur of the 19 % line: 381, positive amounts.
+    let (status, created) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 0 }],
+            "reason": "Leistung entfallen",
+            "issued_on": today,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created:?}");
+    let credit_id = created["credit_note_transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let credit_number = created["document_number"].as_str().unwrap().to_string();
+    let xml_path = format!("/api/v1/invoices/{invoice_id}/credit-notes/{credit_id}/zugferd.xml");
+    let (status, source, xml) = download(&ctx.app, &xml_path, &ceo).await;
+    let xml = String::from_utf8(xml).unwrap();
+    assert_eq!(status, StatusCode::OK, "{xml}");
+    assert_eq!(source, "stored");
+    assert!(xml.contains("<ram:TypeCode>381</ram:TypeCode>"), "{xml}");
+    assert!(xml.contains(&format!("<ram:ID>{credit_number}</ram:ID>")));
+    assert!(
+        xml.contains("<ram:GrandTotalAmount>595.00</ram:GrandTotalAmount>"),
+        "{xml}"
+    );
+    assert!(xml.contains(&format!(
+        "<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>INV-{tag}</ram:IssuerAssignedID>"
+    )));
+    assert!(xml.contains("<ram:CategoryCode>S</ram:CategoryCode>"));
+    support::export_einvoice_sample("credit-note.xml", xml.as_bytes());
+    let (status, _, pdf) = download(
+        &ctx.app,
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes/{credit_id}/pdf"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        embeds_xml(&pdf),
+        "the archived credit note is a ZUGFeRD hybrid"
+    );
+    support::export_einvoice_sample("hybrid-credit-note.pdf", &pdf);
+    assert_eq!(
+        audit_count(&ctx.pool, "download_credit_note_zugferd_xml", invoice_id).await,
+        1
+    );
+
+    // Its reversal owes the amount again: 380 referring to the credit note.
+    let (status, reversed) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes/{credit_id}/reversal"),
+        &ceo,
+        Some(json!({ "reason": "Irrtum" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed:?}");
+    let reversal_id = reversed["reversal_transaction_id"].as_str().unwrap();
+    let (status, source, reversal_xml) = download(
+        &ctx.app,
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes/{reversal_id}/zugferd.xml"),
+        &ceo,
+    )
+    .await;
+    let reversal_xml = String::from_utf8(reversal_xml).unwrap();
+    assert_eq!(status, StatusCode::OK, "{reversal_xml}");
+    assert_eq!(source, "stored");
+    assert!(reversal_xml.contains("<ram:TypeCode>380</ram:TypeCode>"));
+    assert!(reversal_xml.contains(&format!(
+        "<ram:IssuerAssignedID>{credit_number}</ram:IssuerAssignedID>"
+    )));
+    support::export_einvoice_sample("credit-note-reversal.xml", reversal_xml.as_bytes());
+
+    // Stornorechnung: 381 over the whole invoice.
+    let storno_tag = format!("{tag}-storno");
+    let (_, _, storno_invoice) =
+        seed_released_invoice_to(&ctx.pool, ctx.admin_id, &storno_tag, 10, true).await;
+    let (status, cancelled) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{storno_invoice}/status"),
+        &ceo,
+        Some(json!({ "status": "cancelled", "reason": "Behandlung abgesagt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    let storno_xml_path = format!("/api/v1/invoices/{storno_invoice}/storno/zugferd.xml");
+    let (status, source, storno_xml) = download(&ctx.app, &storno_xml_path, &ceo).await;
+    let storno_xml = String::from_utf8(storno_xml).unwrap();
+    assert_eq!(status, StatusCode::OK, "{storno_xml}");
+    assert_eq!(source, "stored");
+    assert!(storno_xml.contains("<ram:TypeCode>381</ram:TypeCode>"));
+    assert!(storno_xml.contains("<ram:GrandTotalAmount>1076.50</ram:GrandTotalAmount>"));
+    assert!(storno_xml.contains("<ram:CategoryCode>E</ram:CategoryCode>"));
+    // Negated stored rows: no signed zero (BR-E-09 read it as VAT ≠ 0).
+    assert!(!storno_xml.contains(">-0"), "{storno_xml}");
+    assert!(storno_xml.contains(&format!(
+        "<ram:IssuerAssignedID>INV-{storno_tag}</ram:IssuerAssignedID>"
+    )));
+    support::export_einvoice_sample("storno.xml", storno_xml.as_bytes());
+    let (_, _, storno_pdf) = download(
+        &ctx.app,
+        &format!("/api/v1/invoices/{storno_invoice}/storno/pdf"),
+        &ceo,
+    )
+    .await;
+    assert!(embeds_xml(&storno_pdf));
+    support::export_einvoice_sample("hybrid-storno.pdf", &storno_pdf);
+
+    // Staff who read invoices may download it; others not.
+    let billing = seed_user_with_role(&ctx.pool, &tag, "billing").await;
+    let (status, _, _) = download(&ctx.app, &xml_path, &auth_header(billing, "billing")).await;
+    assert_eq!(status, StatusCode::OK);
+    let interpreter = seed_user_with_role(&ctx.pool, &tag, "interpreter").await;
+    for path in [&xml_path, &storno_xml_path] {
+        let (status, _, _) =
+            download(&ctx.app, path, &auth_header(interpreter, "interpreter")).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+    }
+    // A patient manager without the patient: no access.
+    let manager = seed_user_with_role(&ctx.pool, &tag, "patient_manager").await;
+    let (status, _, _) = download(
+        &ctx.app,
+        &xml_path,
+        &auth_header(manager, "patient_manager"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // There is no portal route for the XML.
+    let (status, _, _) = download(
+        &ctx.app,
+        &format!("/api/v1/me/invoices/{storno_invoice}/storno/zugferd.xml"),
+        &ceo,
+    )
+    .await;
+    assert!(status.is_client_error(), "{status}");
+
+    // A Storno that cannot carry XML (the released invoice's frozen
+    // recipient has no country) is stored as a plain PDF; the XML route says
+    // what is missing instead of inventing a buyer.
+    let old_tag = format!("{tag}-old");
+    let (old_patient, _, old_invoice) =
+        seed_released_invoice(&ctx.pool, ctx.admin_id, &old_tag, 10).await;
+    let (status, _) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{old_invoice}/status"),
+        &ceo,
+        Some(json!({ "status": "cancelled", "reason": "Behandlung abgesagt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let old_xml_path = format!("/api/v1/invoices/{old_invoice}/storno/zugferd.xml");
+    let (status, _, body) = download(&ctx.app, &old_xml_path, &ceo).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(String::from_utf8_lossy(&body).contains("buyer_country"));
+    // The archived recipient decides, not today's patient address.
+    set_patient_address(&ctx.pool, old_patient).await;
+    let (status, _, _) = download(&ctx.app, &old_xml_path, &ceo).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, _, old_pdf) = download(
+        &ctx.app,
+        &format!("/api/v1/invoices/{old_invoice}/storno/pdf"),
+        &ceo,
+    )
+    .await;
+    assert!(!embeds_xml(&old_pdf), "the archived PDF is not rewritten");
+}
+
+async fn seed_user_with_role(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, 'test-password-hash', $2, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}-{role}@example.com"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 async fn run_scheduler(ctx: &support::TestSuiteContext) {

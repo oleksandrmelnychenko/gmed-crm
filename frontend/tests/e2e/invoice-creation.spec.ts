@@ -202,22 +202,28 @@ test("an advance invoice bills the order's required prepayment unless positions 
   expect(fixture.errors).toEqual([]);
 });
 
-test("allows an approved interim selection while other services remain unapproved", async ({ page }) => {
-  const fixture = await prepare(page);
-  fixture.order.leistungen[0].status = "pending";
-  const dialog = await openCreate(page);
-  await chooseComboboxOption(page, dialog.getByRole("combobox", { name: "Тип счёта", exact: true }), "Промежуточный");
-  await dialog.getByRole("checkbox", { name: "Позиция: Service 1", exact: true }).uncheck();
-  await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
+test("a new invoice is no longer offered as interim", async ({ page }) => {
+  // Owner 2026-11-17: «Промежуточный» is gone from the type choice, also
+  // when a link asks for it; existing interim invoices stay in the filters.
+  await prepare(page);
+  await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=interim&create=1`);
+  const dialog = page.getByRole("dialog", { name: "Новый счёт", exact: true });
+  const type = dialog.getByRole("combobox", { name: "Тип счёта", exact: true });
+  await expect(type).toContainText("Финальный");
+  await type.click();
+  const listbox = page.locator('[role="listbox"]');
+  await expect(listbox.getByRole("option", { name: "Промежуточный", exact: true })).toHaveCount(0);
+  await expect(listbox.getByRole("option")).toHaveCount(2);
 });
 
 test("a position remark is sent with the invoice and can be changed on the draft", async ({ page }) => {
   const fixture = await prepare(page);
   const dialog = await openCreate(page);
-  await chooseComboboxOption(page, dialog.getByRole("combobox", { name: "Тип счёта", exact: true }), "Промежуточный");
-  // Only a selected position has a remark field.
-  await dialog.getByRole("checkbox", { name: "Позиция: Service 2", exact: true }).uncheck();
-  await expect(dialog.getByRole("textbox", { name: "Примечание в счёте: Service 2", exact: true })).toHaveCount(0);
+  // A final invoice bills every open position (interim, where positions
+  // could be left out, is no longer offered — owner 2026-11-17); every
+  // position has its remark field.
+  await expect(dialog.getByRole("checkbox", { name: "Позиция: Service 2", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("textbox", { name: "Примечание в счёте: Service 2", exact: true })).toHaveCount(1);
   await dialog.getByRole("textbox", { name: "Примечание в счёте: Service 1", exact: true }).fill("  за 2 и 3 квартал 2026 ");
   await page.screenshot({ path: "../artifacts/design-qa/invoice-create-remark-ru.png", animations: "disabled" });
   await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
@@ -225,7 +231,7 @@ test("a position remark is sent with the invoice and can be changed on the draft
   const [write] = fixture.writes as { line_items: unknown[] }[];
   expect(write.line_items.slice(0, 2)).toEqual([
     { line_index: 0, quantity: 1, comment: "за 2 и 3 квартал 2026" },
-    { line_index: 2, quantity: 1 },
+    { line_index: 1, quantity: 1 },
   ]);
 
   // The new draft opens; a remark is saved when Enter is pressed in its field.

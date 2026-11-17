@@ -40,8 +40,17 @@ import {
   netForGross,
   prepaymentAdvanceSplit,
   quoteRequiredPrepayment,
+  INVOICE_TYPES,
+  NEW_INVOICE_TYPES,
 } from "./invoice-model";
 import type { InvoiceItem, InvoiceLineItem, QuoteOption } from "./types";
+
+it("offers no interim type for a new invoice but keeps it for existing ones", () => {
+  // Owner 2026-11-17: «Промежуточный» is hidden from «Новый счёт».
+  expect(NEW_INVOICE_TYPES).toEqual(["advance", "final"]);
+  // Lists and filters still know interim invoices.
+  expect(INVOICE_TYPES).toContain("interim");
+});
 
 it("calls an invoice covered by prepayment only when the credited advance settled it", () => {
   // 1,000 final invoice, 300 advance credited, 700 still open: not covered.

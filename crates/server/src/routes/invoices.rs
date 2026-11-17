@@ -35,6 +35,7 @@ pub(crate) mod advance_application;
 mod advance_rows;
 pub(crate) mod advance_settlement;
 mod concierge_lines;
+mod correction_einvoice;
 mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
@@ -178,6 +179,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/credit-notes/{credit_note_id}/pdf",
             get(credit_note_pdf::download_credit_note_pdf),
+        )
+        .route(
+            "/invoices/{invoice_id}/credit-notes/{credit_note_id}/zugferd.xml",
+            get(credit_note_pdf::download_credit_note_zugferd_xml),
+        )
+        .route(
+            "/invoices/{invoice_id}/storno/zugferd.xml",
+            get(credit_note_pdf::download_storno_zugferd_xml),
         )
         .route(
             "/invoices/{invoice_id}/refunds",
@@ -14965,6 +14974,7 @@ async fn load_einvoice(
         bank_iban: setting("agency_bank_iban"),
         bank_bic: setting("agency_bank_swift"),
         bank_holder: setting("agency_bank_holder"),
+        payment_terms: None,
     }))
 }
 

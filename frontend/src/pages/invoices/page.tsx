@@ -187,6 +187,7 @@ import {
   fetchDunningLetterBlob,
   fetchInvoicePdfBlob,
   fetchInvoiceZugferdXmlBlob,
+  fetchCreditNoteZugferdXmlBlob,
   fetchInvoiceWorkspace,
   fetchInvoices,
   releaseInvoicePrepayment,
@@ -214,6 +215,7 @@ import {
   statusChangeReasonKind,
   canPickInvoiceStatus,
   INVOICE_TYPES,
+  NEW_INVOICE_TYPES,
   blankCreateForm,
   buildInvoicesPath,
   parseCreatedWithinDays,
@@ -471,6 +473,19 @@ async function downloadCreditNotePdf(invoiceId: string, creditNoteId: string, do
   const link = document.createElement("a");
   link.href = url;
   link.download = `RECHNUNGSKORREKTUR-${documentNumber || creditNoteId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** E-invoice XML of a credit note or its reversal (owner 2026-11-17). */
+async function downloadCreditNoteZugferdXml(invoiceId: string, creditNoteId: string, documentNumber: string) {
+  const blob = await fetchCreditNoteZugferdXmlBlob(invoiceId, creditNoteId);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${documentNumber || creditNoteId}-factur-x.xml`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -897,7 +912,8 @@ function useStaffInvoicesPageContent() {
   const initialQuoteId = searchParams.get("quote") ?? "";
   const initialInvoiceId = searchParams.get("invoice") ?? "";
   const requestedInvoiceType = searchParams.get("invoice_type") as InvoiceType | null;
-  const initialInvoiceType = requestedInvoiceType && INVOICE_TYPES.includes(requestedInvoiceType)
+  // `?invoice_type=interim` no longer starts an interim invoice (owner 2026-11-17).
+  const initialInvoiceType = requestedInvoiceType && NEW_INVOICE_TYPES.includes(requestedInvoiceType)
     ? requestedInvoiceType
     : "final";
   const initialCreateOpen = searchParams.get("create") === "1";
@@ -4002,6 +4018,22 @@ function useStaffInvoicesPageContent() {
                                   >
                                     <Download className="size-3.5" />
                                     {t.finance_credit_note_pdf}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="mt-1 h-7 gap-1 px-2 text-xs"
+                                    title="ZUGFeRD / Factur-X (EN 16931, CII)"
+                                    data-testid="credit-note-zugferd-xml"
+                                    onClick={() =>
+                                      void downloadCreditNoteZugferdXml(detail.id, credit.id, credit.document_number).catch((error) =>
+                                        setCreditNoteError(zugferdErrorMessage(error, lang, t.finance_credit_note_pdf_error)),
+                                      )
+                                    }
+                                  >
+                                    <Download className="size-3.5" />
+                                    {lang === "de" ? "E-Rechnung XML" : "E-счёт XML"}
                                   </Button>
                                   {canReverse ? (
                                     <Button type="button" variant="ghost" size="sm" className="mt-1 h-7 px-2 text-xs" onClick={() => { setReversingCreditNoteId(credit.id); setCreditNoteReversalReason(""); }}>

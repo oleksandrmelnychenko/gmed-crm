@@ -10,14 +10,15 @@ import { formatMoneyAmount } from "@/lib/money";
 import {
   clearInvoiceDunningBlock,
   fetchStornoPdfBlob,
+  fetchStornoZugferdXmlBlob,
   setInvoiceDunningBlock,
 } from "../data/invoice-api";
 import { activeDunningBlock, formatDate, formatDateTime, isInvoiceReleased } from "../model/invoice-model";
 import { localizeInvoiceError } from "../model/invoice-errors";
+import { zugferdErrorMessage } from "../model/zugferd";
 import type { InvoiceItem } from "../model/types";
 
-async function downloadStornoPdf(invoiceId: string, fileName: string) {
-  const blob = await fetchStornoPdfBlob(invoiceId);
+function saveBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -26,6 +27,15 @@ async function downloadStornoPdf(invoiceId: string, fileName: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+async function downloadStornoPdf(invoiceId: string, fileName: string) {
+  saveBlob(await fetchStornoPdfBlob(invoiceId), fileName);
+}
+
+/** E-invoice XML (381) of the Stornorechnung (owner 2026-11-17). */
+async function downloadStornoZugferdXml(invoiceId: string, documentNumber: string) {
+  saveBlob(await fetchStornoZugferdXmlBlob(invoiceId), `${documentNumber || "storno"}-factur-x.xml`);
 }
 
 /** The cancellation document (Stornorechnung) of a released, cancelled invoice. */
@@ -51,20 +61,38 @@ export function StornoDocumentCard({ invoice }: { invoice: InvoiceItem }) {
             </span>
           </p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 rounded-lg"
-          onClick={() =>
-            void downloadStornoPdf(invoice.id, fileName).catch((cause) =>
-              setError(localizeInvoiceError(cause, lang, t.common_error)),
-            )
-          }
-        >
-          <Download className="size-3.5" />
-          {t.revenue_invoices_storno_download}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 rounded-lg"
+            onClick={() =>
+              void downloadStornoPdf(invoice.id, fileName).catch((cause) =>
+                setError(localizeInvoiceError(cause, lang, t.common_error)),
+              )
+            }
+          >
+            <Download className="size-3.5" />
+            {t.revenue_invoices_storno_download}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 rounded-lg"
+            title="ZUGFeRD / Factur-X (EN 16931, CII)"
+            data-testid="invoice-storno-zugferd-xml"
+            onClick={() =>
+              void downloadStornoZugferdXml(invoice.id, storno.document_number).catch((cause) =>
+                setError(zugferdErrorMessage(cause, lang, t.common_error)),
+              )
+            }
+          >
+            <Download className="size-3.5" />
+            {lang === "de" ? "E-Rechnung XML" : "E-счёт XML"}
+          </Button>
+        </div>
       </div>
       <p className="text-xs text-foreground">
         {t.revenue_invoices_status_reason}: {storno.reason}

@@ -98,6 +98,8 @@ pub(crate) struct CreditNotePdfContext {
     /// Cancellation document of a final invoice: the advances the final
     /// deducted (released by the Storno), printed below the totals.
     pub(super) deducted_advances: Vec<super::document::DeductedAdvance>,
+    /// GMED's country (ISO 3166-1 alpha-2) for the embedded e-invoice.
+    pub agency_country_code: Option<String>,
 }
 
 fn setting(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
@@ -147,6 +149,7 @@ pub(crate) async fn load_credit_note_pdf_context(
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_country_code') AS agency_country_code,
                   {vat_id} AS agency_vat_id,
                   {tax_number} AS agency_tax_number
            FROM invoice_credit_note_transactions credit
@@ -228,6 +231,7 @@ pub(crate) async fn load_credit_note_pdf_context(
         },
         vat_id: setting(&row, "agency_vat_id"),
         tax_number: setting(&row, "agency_tax_number"),
+        agency_country_code: setting(&row, "agency_country_code").map(|code| code.to_uppercase()),
     }))
 }
 
@@ -294,6 +298,7 @@ pub(crate) async fn load_storno_pdf_context(
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_country_code') AS agency_country_code,
                   {vat_id} AS agency_vat_id,
                   {tax_number} AS agency_tax_number
            FROM invoice_storno_documents storno
@@ -371,10 +376,11 @@ pub(crate) async fn load_storno_pdf_context(
         },
         vat_id: setting(&row, "agency_vat_id"),
         tax_number: setting(&row, "agency_tax_number"),
+        agency_country_code: setting(&row, "agency_country_code").map(|code| code.to_uppercase()),
     }))
 }
 
-fn label(language: &str, key: &'static str) -> &'static str {
+pub(super) fn label(language: &str, key: &'static str) -> &'static str {
     match (language, key) {
         ("uk", "title") => "Коригування рахунку",
         ("ru", "title") => "Корректировка счёта",
@@ -1376,7 +1382,7 @@ async fn store_issued(
     context: &CreditNotePdfContext,
     generated_by: Uuid,
 ) -> Result<IssuedCorrectionDocument, axum::response::Response> {
-    let bytes = build_credit_note_pdf(context)
+    let bytes = super::correction_einvoice::render_correction_pdf(context)
         .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))?;
     let file_name = context_file_name(context);
     let blob = stored_documents::store_rendered(
@@ -1466,7 +1472,7 @@ async fn stored_or_first_download(
         let bytes = stored_documents::read_bytes(&document).await?;
         return Ok((bytes, document.file_name, "stored"));
     }
-    let bytes = build_credit_note_pdf(context)
+    let bytes = super::correction_einvoice::render_correction_pdf(context)
         .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))?;
     let file_name = context_file_name(context);
     let stored = stored_documents::store_rendered(
@@ -1727,6 +1733,172 @@ pub(crate) async fn download_my_storno_pdf(
     pdf_response(bytes, &file_name, source)
 }
 
+/// The e-invoice XML of a correction: the one embedded in its stored PDF, so
+/// it cannot drift from the archived document. A document stored before
+/// corrections carried XML (or not stored yet) gets it built from its data,
+/// like an invoice without a stored document (`live`).
+async fn correction_zugferd_xml(
+    conn: &mut PgConnection,
+    context: &CreditNotePdfContext,
+) -> Result<(String, &'static str), axum::response::Response> {
+    let storno = context.transaction_type == STORNO_DOCUMENT;
+    let (credit_id, storno_id) = if storno {
+        (None, Some(context.credit_note_id))
+    } else {
+        (Some(context.credit_note_id), None)
+    };
+    let stored = stored_documents::load_correction(conn, credit_id, storno_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, document_id = %context.credit_note_id, "load stored correction document for zugferd");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            )
+        })?;
+    if let Some(document) = stored {
+        let bytes = stored_documents::read_bytes(&document).await?;
+        if let Some(xml) = super::zugferd::extract_xml_from_pdf(&bytes) {
+            return Ok((xml, "stored"));
+        }
+    }
+    let invoice = super::correction_einvoice::correction_einvoice(context);
+    let missing = super::correction_einvoice::missing_requirements(context, &invoice);
+    if !missing.is_empty() {
+        return Err(axum::response::IntoResponse::into_response((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            axum::Json(serde_json::json!({
+                "message": format!("E-invoice is missing mandatory data: {}", missing.join(", ")),
+                "missing": missing,
+            })),
+        )));
+    }
+    Ok((super::zugferd::build_cii_xml(&invoice), "live"))
+}
+
+fn xml_response(
+    xml: String,
+    document_number: &str,
+    source: &'static str,
+) -> axum::response::Response {
+    let file_part = document_number
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    match axum::response::Response::builder()
+        .header("content-type", "application/xml; charset=utf-8")
+        .header(
+            "content-disposition",
+            format!(
+                "attachment; filename=\"{file_part}-{}\"",
+                super::zugferd::ZUGFERD_XML_FILENAME
+            ),
+        )
+        .header(INVOICE_DOCUMENT_SOURCE_HEADER, source)
+        .body(Body::from(xml))
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(%error, "build correction zugferd xml response");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            )
+        }
+    }
+}
+
+/// `GET /invoices/{id}/credit-notes/{credit_note_id}/zugferd.xml`: staff
+/// with invoice access, like the invoice's e-invoice (no portal route).
+pub(crate) async fn download_credit_note_zugferd_xml(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, credit_note_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let mut conn = match acquire(&state).await {
+        Ok(conn) => conn,
+        Err(response) => return response,
+    };
+    let context = match load_credit_note_pdf_context(&mut conn, invoice_id, credit_note_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Credit note not found"),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, %credit_note_id, "load credit-note zugferd context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            );
+        }
+    };
+    if let Err(response) = ensure_patient_access(&state, &auth, context.patient_id).await {
+        return response;
+    }
+    let (xml, source) = match correction_zugferd_xml(&mut conn, &context).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    audit_download(
+        &state,
+        auth.user_id,
+        "download_credit_note_zugferd_xml",
+        &context,
+        source,
+        "staff_workspace",
+    );
+    xml_response(xml, &context.document_number, source)
+}
+
+/// `GET /invoices/{id}/storno/zugferd.xml`: the Stornorechnung's e-invoice.
+pub(crate) async fn download_storno_zugferd_xml(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let mut conn = match acquire(&state).await {
+        Ok(conn) => conn,
+        Err(response) => return response,
+    };
+    let context = match load_storno_pdf_context(&mut conn, invoice_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Cancellation document not found"),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load cancellation document zugferd context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            );
+        }
+    };
+    if let Err(response) = ensure_patient_access(&state, &auth, context.patient_id).await {
+        return response;
+    }
+    let (xml, source) = match correction_zugferd_xml(&mut conn, &context).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    audit_download(
+        &state,
+        auth.user_id,
+        "download_storno_zugferd_xml",
+        &context,
+        source,
+        "staff_workspace",
+    );
+    xml_response(xml, &context.document_number, source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1781,6 +1953,7 @@ mod tests {
                 ..Default::default()
             }),
             deducted_advances: Vec::new(),
+            agency_country_code: Some("DE".to_string()),
         }
     }
 

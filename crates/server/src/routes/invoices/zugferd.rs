@@ -52,17 +52,40 @@ pub(super) struct EInvoiceLine {
 }
 
 /// An earlier invoice this one refers to (BG-3): the advance invoices a
-/// settlement invoice deducts.
+/// settlement invoice deducts, or the document a correction corrects.
 #[derive(Debug, Clone)]
 pub(super) struct EInvoiceReference {
     pub number: String,
     pub issue_date: NaiveDate,
 }
 
+/// `invoice_type` of a Rechnungskorrektur (credit note on an invoice).
+pub(super) const CREDIT_NOTE: &str = "credit_note";
+/// `invoice_type` of a Stornorechnung (an invoice cancelled in full).
+pub(super) const STORNO: &str = "storno";
+/// `invoice_type` of the reversal of a credit note (Storno der
+/// Rechnungskorrektur): the credited amount is owed again.
+pub(super) const CREDIT_NOTE_REVERSAL: &str = "credit_note_reversal";
+
+/// Document type (BT-3, UNTDID 1001): 386 prepayment invoice, 380
+/// commercial invoice. A Rechnungskorrektur and a Stornorechnung are both 381
+/// "credit note" with positive amounts — the code carries the direction, and
+/// neither restates the invoice as a whole (that is 384 "corrected
+/// invoice"). The reversal of a credit note charges the amount again: an
+/// invoice (380) that refers to the reversed credit note.
+pub(super) fn type_code(invoice_type: &str) -> &'static str {
+    match invoice_type {
+        "advance" => "386",
+        CREDIT_NOTE | STORNO => "381",
+        _ => "380",
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct EInvoice {
     pub number: String,
-    /// `advance`, `interim` or `final`.
+    /// `advance`, `interim` or `final`; a correction document is
+    /// [`CREDIT_NOTE`], [`STORNO`] or [`CREDIT_NOTE_REVERSAL`].
     pub invoice_type: String,
     pub issue_date: NaiveDate,
     pub due_date: Option<NaiveDate>,
@@ -80,7 +103,8 @@ pub(super) struct EInvoice {
     pub total_gross: Decimal,
     /// Advance payments already applied when the invoice was issued.
     pub prepaid_amount: Decimal,
-    /// The advance invoices behind `prepaid_amount`.
+    /// Preceding invoices (BG-3): the advance invoices behind
+    /// `prepaid_amount`; for a correction first the corrected document.
     pub prepaid_invoices: Vec<EInvoiceReference>,
     /// Net and VAT per rate of the deducted advances (§ 14 Abs. 5 Satz 2
     /// UStG) as text: EN 16931 has no structured field for the VAT of a
@@ -89,6 +113,10 @@ pub(super) struct EInvoice {
     pub bank_iban: Option<String>,
     pub bank_bic: Option<String>,
     pub bank_holder: Option<String>,
+    /// Payment terms (BT-20). A correction has no due date, and EN 16931
+    /// (BR-CO-25) wants terms whenever an amount is stated: the statement the
+    /// printed document makes about the amount.
+    pub payment_terms: Option<String>,
 }
 
 /// Machine-readable gaps that stop a valid EN 16931 invoice from being built.
@@ -160,13 +188,24 @@ fn escape(value: &str) -> String {
     out
 }
 
+/// A zero without a sign: amounts negated from stored negative rows (a
+/// Stornorechnung) can be -0, which EN 16931 reads as a non-zero VAT of an
+/// exempt breakdown (BR-E-09).
+fn unsigned(value: Decimal) -> Decimal {
+    if value.is_zero() {
+        Decimal::ZERO
+    } else {
+        value
+    }
+}
+
 /// Fixed two-decimal amount (BT-106 ff.), commercially rounded.
 fn money(value: Decimal) -> String {
-    cents_string(value)
+    cents_string(unsigned(round_cents(value)))
 }
 
 fn plain(value: Decimal) -> String {
-    value.normalize().to_string()
+    unsigned(value).normalize().to_string()
 }
 
 fn date(value: NaiveDate) -> String {
@@ -369,12 +408,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
     xml.push_str(&format!(
         "<rsm:ExchangedDocumentContext><ram:GuidelineSpecifiedDocumentContextParameter><ram:ID>{EN16931_GUIDELINE}</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter></rsm:ExchangedDocumentContext>"
     ));
-    // 386 = prepayment invoice, 380 = commercial invoice.
-    let type_code = if invoice.invoice_type == "advance" {
-        "386"
-    } else {
-        "380"
-    };
+    let type_code = type_code(&invoice.invoice_type);
     xml.push_str(&format!(
         "<rsm:ExchangedDocument><ram:ID>{}</ram:ID><ram:TypeCode>{type_code}</ram:TypeCode><ram:IssueDateTime>{}</ram:IssueDateTime>",
         escape(invoice.number.trim()),
@@ -458,11 +492,20 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
         }
     };
 
+    // A credit document is not paid to GMED: no remittance reference and no
+    // account to pay into.
+    let credit = type_code == "381";
+    xml.push_str("<ram:ApplicableHeaderTradeSettlement>");
+    if !credit {
+        xml.push_str(&format!(
+            "<ram:PaymentReference>{}</ram:PaymentReference>",
+            escape(invoice.number.trim())
+        ));
+    }
     xml.push_str(&format!(
-        "<ram:ApplicableHeaderTradeSettlement><ram:PaymentReference>{}</ram:PaymentReference><ram:InvoiceCurrencyCode>{currency}</ram:InvoiceCurrencyCode>",
-        escape(invoice.number.trim())
+        "<ram:InvoiceCurrencyCode>{currency}</ram:InvoiceCurrencyCode>"
     ));
-    if let Some(iban) = text(&invoice.bank_iban) {
+    if let Some(iban) = text(&invoice.bank_iban).filter(|_| !credit) {
         // 58 = SEPA credit transfer.
         xml.push_str(&format!(
             "<ram:SpecifiedTradeSettlementPaymentMeans><ram:TypeCode>58</ram:TypeCode><ram:PayeePartyCreditorFinancialAccount><ram:IBANID>{}</ram:IBANID>",
@@ -516,11 +559,22 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
             date(last)
         ));
     }
-    if let Some(due_date) = invoice.due_date {
-        xml.push_str(&format!(
-            "<ram:SpecifiedTradePaymentTerms><ram:DueDateDateTime>{}</ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>",
-            date(due_date)
-        ));
+    let terms = text(&invoice.payment_terms);
+    if invoice.due_date.is_some() || terms.is_some() {
+        xml.push_str("<ram:SpecifiedTradePaymentTerms>");
+        if let Some(terms) = terms {
+            xml.push_str(&format!(
+                "<ram:Description>{}</ram:Description>",
+                escape(terms)
+            ));
+        }
+        if let Some(due_date) = invoice.due_date {
+            xml.push_str(&format!(
+                "<ram:DueDateDateTime>{}</ram:DueDateDateTime>",
+                date(due_date)
+            ));
+        }
+        xml.push_str("</ram:SpecifiedTradePaymentTerms>");
     }
     xml.push_str(&format!(
         "<ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:LineTotalAmount>{line}</ram:LineTotalAmount><ram:TaxBasisTotalAmount>{line}</ram:TaxBasisTotalAmount><ram:TaxTotalAmount currencyID=\"{currency}\">{tax}</ram:TaxTotalAmount>",
@@ -832,6 +886,7 @@ mod tests {
             bank_iban: Some("DE02 1203 0000 0000 2020 51".to_string()),
             bank_bic: Some("BYLADEM1001".to_string()),
             bank_holder: Some("GMed".to_string()),
+            payment_terms: None,
         }
     }
 

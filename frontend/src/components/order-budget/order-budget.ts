@@ -12,11 +12,14 @@ function moneyNumber(value: string | number | null | undefined): number {
  * Contract budget of an order (owner decision 2026-11-17): the signed sum of
  * GMED's own services against what is planned or invoiced. Pass-through costs
  * never count. It only warns — nothing is blocked.
+ *
+ * The concierge receives the totals alone (contract sum, planned, remaining,
+ * over-by, the concierge VAT rate): the fields marked optional are absent.
  */
 export type OrderBudget = {
   order_id: string;
   currency: string;
-  contract: {
+  contract?: {
     source: "order_signature" | "quote";
     signed_at: string | null;
     document_id: string | null;
@@ -28,15 +31,15 @@ export type OrderBudget = {
   contract_own_services_gross: string | null;
   planned_own_services_net: string;
   planned_own_services_gross: string;
-  invoiced_own_services_net: string;
-  invoiced_own_services_gross: string;
+  invoiced_own_services_net?: string;
+  invoiced_own_services_gross?: string;
   remaining_net: string | null;
   remaining_gross: string | null;
   over_by_net: string | null;
   over_by_gross: string | null;
-  free_visit_units: number;
-  visit_fee_net: string | null;
-  visit_fee_gross: string | null;
+  free_visit_units?: number;
+  visit_fee_net?: string | null;
+  visit_fee_gross?: string | null;
   concierge_vat_rate: string;
 };
 
@@ -139,7 +142,7 @@ export function orderBudgetSourceText(budget: OrderBudget, lang: Lang): string |
 export function plannedVisitsDeltaGross(budget: OrderBudget, visits: number): number {
   const fee = moneyNumber(budget.visit_fee_gross);
   if (!fee || visits <= 0) return 0;
-  return roundCents(Math.max(0, visits - Math.max(0, budget.free_visit_units)) * fee);
+  return roundCents(Math.max(0, visits - Math.max(0, budget.free_visit_units ?? 0)) * fee);
 }
 
 /**

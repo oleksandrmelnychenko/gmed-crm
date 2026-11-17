@@ -141,4 +141,38 @@ describe("order budget indicator", () => {
     expect(conciergeSaleGross(budget(), 100)).toBe(119);
     expect(conciergeSaleGross(budget(), Number.NaN)).toBe(0);
   });
+
+  it("works on the totals the concierge receives (owner 2026-11-17)", () => {
+    // The server's allowlist for the concierge: no contract details,
+    // invoiced amounts, visit fee or free units.
+    const totals: OrderBudget = {
+      order_id: "order-1",
+      currency: "EUR",
+      contract_own_services_net: "1680.67",
+      contract_own_services_gross: "2000",
+      planned_own_services_net: "1554.62",
+      planned_own_services_gross: "1850",
+      remaining_net: "126.05",
+      remaining_gross: "150",
+      over_by_net: null,
+      over_by_gross: null,
+      concierge_vat_rate: "19",
+    };
+    // A 200 € concierge sale price (238 € gross) would run over.
+    const html = renderToStaticMarkup(
+      <OrderBudgetLine
+        budget={totals}
+        lang="ru"
+        deltaGross={(loaded) => conciergeSaleGross(loaded, 200)}
+        testId="concierge-service-budget"
+      />,
+    );
+    expect(html).toContain('data-testid="concierge-service-budget"');
+    expect(html).toContain('data-state="over"');
+    expect(text(html)).toContain("1.850,00 € → 2.088,00 €");
+    expect(text(html)).toContain("Превышение на 88,00 €");
+    expect(html).not.toContain("title=");
+    expect(orderBudgetSourceText(totals, "ru")).toBeNull();
+    expect(plannedVisitsDeltaGross(totals, 2)).toBe(0);
+  });
 });

@@ -18,7 +18,7 @@ import { transitLineRebilledWarning } from "@/pages/patients/ui/sections/patient
 import { useOrderRebilledReceipts } from "@/pages/patients/ui/sections/use-order-rebilled-receipts";
 import {
   INVOICE_LINE_COMMENT_MAX_LENGTH,
-  INVOICE_TYPES,
+  NEW_INVOICE_TYPES,
   calculateInvoiceSelectionTotals,
   invoiceSelectionPackageOverage,
   createInvoiceLineSelection,
@@ -286,7 +286,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       }}
                       className={selectClass}
                     >
-                      {INVOICE_TYPES.map((type) => <option key={type} value={type}>{typeLabels[type]}</option>)}
+                      {NEW_INVOICE_TYPES.map((type) => <option key={type} value={type}>{typeLabels[type]}</option>)}
                     </NativeComboboxSelect>
                   </FormField>
                   <FormField label={t.invoices_due_at}>
