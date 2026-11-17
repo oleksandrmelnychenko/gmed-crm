@@ -1136,6 +1136,31 @@ async fn signed_consent_stays_in_force_while_its_new_version_waits() {
     assert_eq!(row["signature_state"], "sent", "{row}");
     assert!(row["signature_sent_at"].is_string(), "{row}");
 
+    // An identity scan confirmed by staff is evidence, not a signed
+    // document: no signature chip (QA verify2 C S3-6).
+    let scan: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (id, version_root_document_id, patient_id, auto_name, art, category,
+                                  status, visibility, is_medical, uploaded_by, compliance_kind,
+                                  signed_at, signed_by)
+           SELECT g, g, $1, 'Ausweisdokument', 'personal_passport', 'personal', 'active', 'internal',
+                  false, $2, 'identity', now(), $2
+           FROM gen_random_uuid() g RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (_, documents) = json_request(&app, "GET", &list_path, &pm, None).await;
+    let row = documents
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!(scan))
+        .unwrap();
+    assert!(row["signature_state"].is_null(), "{row}");
+    assert!(row["signed_at"].is_string(), "{row}");
+
     // Access: a Patient Manager without the patient gets nothing of it.
     let other_pm = bearer(
         seed_user(&pool, &format!("{tag}-other"), "patient_manager").await,

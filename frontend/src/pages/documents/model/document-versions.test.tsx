@@ -50,6 +50,9 @@ describe("document versions (fix-98)", () => {
     expect(signatureStateChip({ id: "scan", signature_state: null }, "ru")).toBeNull();
     expect(previousVersionChip(signedV2, "ru").label).toBe("Подписан 01.11.2026");
     expect(previousVersionChip(draftV1, "ru").label).toBe("Заменён");
+    // Every earlier unsigned version is replaced, whatever its stored status (QA verify2 C S3-1).
+    expect(previousVersionChip({ ...draftV1, status: "draft" }, "ru").label).toBe("Заменён");
+    expect(previousVersionChip({ ...draftV1, status: "active" }, "de").label).toBe("Ersetzt");
   });
 
   it("counts the versions waiting to be sent and filters by the state", () => {

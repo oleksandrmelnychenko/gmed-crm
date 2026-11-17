@@ -382,6 +382,7 @@ function PaginatedDocumentsTable({
         rowBackground={(document) => (isPreviousVersionRow(document) ? "bg-muted/30" : null)}
         rowActions={rowActions ? (document) => (isPreviousVersionRow(document) ? null : rowActions(document)) : undefined}
         rowActionsWidth={rowActionsWidth}
+        rowsGrowWithContent
         selectionEnabled={showSelection}
         selectedIds={pageSelectedIds}
         onSelectedIdsChange={updatePageSelection}
@@ -585,12 +586,14 @@ export function DocumentsGrid({
       accessor: (item) => item.status,
       sortable: true,
       width: 170,
+      // Chips wrap instead of being cut (QA verify2 C S3-6).
+      cellClassName: "min-w-0 py-1",
       render: (item) => isPreviousVersionRow(item) ? (
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
           <DocumentStateChip chip={previousVersionChip(item, lang)} documentId={item.id} />
         </div>
       ) : (
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
           <Badge
             variant="outline"
             className={cn("shrink-0 rounded-full text-[10px]", statusBadge(item.status))}

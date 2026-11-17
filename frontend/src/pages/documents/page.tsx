@@ -233,6 +233,7 @@ import {
   emptyUploadForm,
   formatConfidenceLabel,
   formatBusinessDocumentNumber,
+  formatVersionDocumentNumber,
   formatDocumentStatusLabel,
   formatVisibilityLabel,
   intakeOpenAction,
@@ -4232,6 +4233,9 @@ function StaffDocumentsPage({
         >
           <form
             onSubmit={handleGenerateDocument}
+            // The app shows its own errors under the fields, never the
+            // browser's bubble (QA verify2 C S3-3).
+            noValidate
             className="flex min-h-0 flex-1 flex-col"
           >
             <DialogHeader className="relative shrink-0 border-b border-border px-5 py-4 pr-12">
@@ -8473,7 +8477,7 @@ function DocumentIntakeQueueTable({
         id: "document",
         label: t.documents_filename,
         accessor: (item) =>
-          `${formatBusinessDocumentNumber(item.document_number)} ${localizeDocumentCode(item.auto_name, l)} ${item.original_filename ?? ""}`.trim(),
+          `${formatVersionDocumentNumber(item.document_number)} ${localizeDocumentCode(item.auto_name, l)} ${item.original_filename ?? ""}`.trim(),
         searchable: true,
         sortable: true,
         required: true,
@@ -8486,7 +8490,7 @@ function DocumentIntakeQueueTable({
           >
             {item.document_number ? (
               <span className="shrink-0 font-mono text-xs tabular-nums text-foreground">
-                {formatBusinessDocumentNumber(item.document_number)}
+                {formatVersionDocumentNumber(item.document_number)}
               </span>
             ) : null}
             <span className="truncate text-xs font-medium text-foreground">

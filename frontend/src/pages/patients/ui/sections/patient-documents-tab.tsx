@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
 import {
   documentPartyUpload,
   documentPartyUploadTypeLabel,
-  formatBusinessDocumentNumber,
+  formatVersionDocumentNumber,
   FREE_TEXT_DOCUMENT_TEMPLATE_ID,
 } from "@/pages/documents/model/document-model";
 import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
@@ -605,14 +605,14 @@ export function PatientDocumentsTab({
       {
         id: "document_number",
         label: metaLabel("number", lang),
-        accessor: (doc) => formatBusinessDocumentNumber(doc.document_number),
+        accessor: (doc) => formatVersionDocumentNumber(doc.document_number),
         filterType: "text",
         sortable: true,
         width: 185,
         render: (doc) =>
-          formatBusinessDocumentNumber(doc.document_number) ? (
+          formatVersionDocumentNumber(doc.document_number) ? (
             <span className="inline-flex shrink-0 rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700">
-              {formatBusinessDocumentNumber(doc.document_number)}
+              {formatVersionDocumentNumber(doc.document_number)}
             </span>
           ) : (
             <span className="text-xs text-muted-foreground">

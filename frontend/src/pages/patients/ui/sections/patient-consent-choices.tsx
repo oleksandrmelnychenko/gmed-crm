@@ -204,7 +204,9 @@ export function PatientConsentChoicesDialog({
       <AdminDialogScaffold
         icon={ShieldCheck}
         title={text.change}
-        maxWidthClassName="sm:max-w-3xl"
+        // A fixed height: removing a person never shrinks and re-centres the
+        // dialog under the pointer (QA verify2 C S3-5); the body scrolls.
+        maxWidthClassName="h-[min(46rem,calc(100dvh-2rem))] sm:max-w-3xl"
         testId="patient-consent-dialog"
         footer={(
           <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3" data-testid="patient-consent-footer">

@@ -15,6 +15,7 @@ import {
   emptyGenerateForm,
   emptyUploadForm,
   formatBusinessDocumentNumber,
+  formatVersionDocumentNumber,
   formatDocumentUploadError,
   intakeOpenAction,
   intakeReviewNeedsClassification,
@@ -110,6 +111,11 @@ describe("commercial document context", () => {
       "KV-20260721-0019",
     );
     expect(formatBusinessDocumentNumber("DOC-1001")).toBe("DOC-1001");
+  });
+
+  it("names each version by the number its PDF prints in the version tables", () => {
+    expect(formatVersionDocumentNumber(" EW-20261112-000631-V03 ")).toBe("EW-20261112-000631-V03");
+    expect(formatVersionDocumentNumber(null)).toBe("");
   });
 
   it("requires an order only for order-bound commercial templates", () => {

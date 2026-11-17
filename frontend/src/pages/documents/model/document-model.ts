@@ -135,6 +135,14 @@ export function formatBusinessDocumentNumber(documentNumber?: string | null) {
   return documentNumber?.trim().replace(/-V\d+$/i, "") ?? "";
 }
 
+/**
+ * The number of one version as its PDF prints it («EW-…-000631-V03»): the
+ * version tables show it, so every row names its own version (QA verify2 C S3-2).
+ */
+export function formatVersionDocumentNumber(documentNumber?: string | null) {
+  return documentNumber?.trim() ?? "";
+}
+
 export function canManageDocuments(actor?: Actor) {
   return hasCapability(actor, "documents.manage");
 }

@@ -69,8 +69,8 @@ export function signatureStateChip(document: VersionedDocument, lang: string): D
 export function previousVersionChip(version: VersionedDocument, lang: string): DocumentChip {
   const signed = formatAppDate(version.signed_at ?? "");
   if (version.signed_at && signed) return { label: `${tx(lang, "Подписан", "Unterschrieben")} ${signed}`, tone: "emerald", testId: "version-signed" };
-  if (version.status === "archived") return { label: tx(lang, "Заменён", "Ersetzt"), tone: "muted", testId: "version-replaced" };
-  return { label: tx(lang, "Архивирован", "Archiviert"), tone: "muted", testId: "version-archived" };
+  // Every earlier version has a newer one, whatever status it is stored with.
+  return { label: tx(lang, "Заменён", "Ersetzt"), tone: "muted", testId: "version-replaced" };
 }
 
 export function versionMarkerLabel(document: VersionedDocument): string {
