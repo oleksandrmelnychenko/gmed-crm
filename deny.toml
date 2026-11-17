@@ -37,6 +37,12 @@ ignore = [
     # Re-evaluate: when jsonwebtoken moves to elliptic-curve 0.14 / crypto-bigint
     # 0.7, or if an ES* algorithm is ever introduced.
     "RUSTSEC-2026-0387",
+    # chrono / chrono-tz - flagged unmaintained (2026-11-17), no reported
+    # vulnerability. Every date in the server goes through chrono and sqlx;
+    # moving to jiff is a separate migration.
+    # Re-evaluate: when sqlx supports jiff or a vulnerability is reported.
+    "RUSTSEC-2026-0543",
+    "RUSTSEC-2026-0555",
 ]
 
 [bans]
