@@ -465,6 +465,24 @@ mod tests {
         context
     }
 
+    /// Defensive case: a release larger than the credit (the final asks more
+    /// than before). The PDF prints «Verbleibender Betrag» +500,00; BT-115
+    /// turns negative.
+    fn credit_note_releasing_more_than_it_credits() -> CreditNotePdfContext {
+        let mut context = credit_note_releasing_advances();
+        context.document_number = "CN-20261117-0104".to_string();
+        context.lines = Some(vec![credit_line(
+            "Organisation der Behandlung",
+            None,
+            ("0", false),
+            "500.00",
+            "0.00",
+        )]);
+        context.amount_net = dec("500.00");
+        context.amount_gross = dec("500.00");
+        context
+    }
+
     /// Stornorechnung of a Schlussrechnung with a deducted advance.
     fn storno_of_final() -> CreditNotePdfContext {
         let mut context = credit_note();
@@ -586,6 +604,17 @@ mod tests {
         let pdf = credit_note_pdf::build_credit_note_pdf(&context).unwrap();
         let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
         assert!(text.contains("-1.050,00"), "{text}");
+
+        // A release beyond the credit: the remaining row is positive on the
+        // PDF and BT-115 negative, still EN 16931 arithmetic (BR-CO-16).
+        let more = credit_note_releasing_more_than_it_credits();
+        let more_xml = super::super::zugferd::build_cii_xml(&correction_einvoice(&more));
+        assert!(more_xml.contains("<ram:GrandTotalAmount>500.00</ram:GrandTotalAmount><ram:TotalPrepaidAmount>1000.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>-500.00</ram:DuePayableAmount>"), "{more_xml}");
+        let text = pdf_extract::extract_text_from_mem(
+            &credit_note_pdf::build_credit_note_pdf(&more).unwrap(),
+        )
+        .unwrap();
+        assert!(text.contains("500,00"), "{text}");
     }
 
     #[test]
@@ -687,6 +716,7 @@ mod tests {
         for context in [
             credit_note(),
             credit_note_releasing_advances(),
+            credit_note_releasing_more_than_it_credits(),
             storno_of_final(),
             reversal(),
             credit_note_to_payer(),

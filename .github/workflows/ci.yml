@@ -552,7 +552,10 @@ jobs:
           status=0
           for file in target/einvoice-samples/*.xml target/einvoice-samples/*.pdf; do
             echo "== $file"
-            if ! java -Xmx1G -Dfile.encoding=UTF-8 -jar Mustang-CLI.jar --action validate --source "$file" --no-notices 2>/dev/null | tee "$file.report.xml" | grep -q '<summary status="valid"/>'; then
+            java -Xmx1G -Dfile.encoding=UTF-8 -jar Mustang-CLI.jar --action validate --source "$file" --no-notices > "$file.report.xml" 2>/dev/null || true
+            # A PDF report has several summaries (PDF/A, XML, overall): every
+            # one must be valid, not just any.
+            if ! grep -q '<summary status="valid"/>' "$file.report.xml" || grep -q 'status="invalid"' "$file.report.xml"; then
               grep -oE '\[BR[^]]*\][^<]{0,240}' "$file.report.xml" | sort -u || true
               status=1
             fi
