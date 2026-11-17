@@ -141,3 +141,25 @@ describe("final invoice proposal", () => {
     })).toEqual({ net: 240, vat: 45.6, gross: 285.6 });
   });
 });
+
+describe("a legacy (seed) quote line", () => {
+  it("is totalled with the VAT rate and amounts the quote API fills in (QA verify2 D-O1)", () => {
+    // As GET /quotes returns a seed line stored without vat_rate / line amounts.
+    const seed = {
+      description: "Treatment package",
+      quantity: 1 as unknown as string,
+      unit_price: "1000.00",
+      total_gross: "1000.00",
+      vat_rate: "0",
+      line_net: "1000.00",
+      line_vat: "0.00",
+      line_gross: "1000.00",
+      invoiced_quantity: "0",
+      remaining_quantity: "1",
+      delivery_basis: "estimate",
+      final_quantity: "1",
+    } as InvoiceLineItem;
+    const totals = finalInvoiceTotals([seed], form([seed]));
+    expect(totals).toMatchObject({ net: 1000, vat: 0, gross: 1000 });
+  });
+});
