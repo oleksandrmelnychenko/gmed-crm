@@ -668,10 +668,7 @@ function useDataTableContent<T>({
                     <div
                       role="presentation"
                       className={cn(
-                        "data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-[opacity,background-color]",
-                        rowActionsAlwaysVisible
-                          ? "opacity-100"
-                          : "opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100",
+                        "data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)]",
                       )}
                       style={{
                         gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}`,
@@ -680,7 +677,15 @@ function useDataTableContent<T>({
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => e.stopPropagation()}
                     >
-                      <span className="flex items-center justify-end gap-1">
+                      <span
+                        className={cn(
+                          "flex items-center justify-end gap-1 transition-opacity",
+                          // The cell stays opaque over scrolled content; only the actions fade.
+                          rowActionsAlwaysVisible
+                            ? "opacity-100"
+                            : "opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100",
+                        )}
+                      >
                         {rowActions(row)}
                       </span>
                     </div>

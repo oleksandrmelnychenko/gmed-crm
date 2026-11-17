@@ -724,10 +724,20 @@ html[data-native-platform] {
     }
   }
 
+  /* Frozen and sticky cells sit over scrolled content: the row colour is
+     often translucent, so lay it over an opaque card background. */
   .data-table-cell[data-frozen-opaque="true"],
   .data-table-cell[data-column-id="__actions"],
   .data-table-cell.sticky {
-    background-color: var(--dt-current-row-bg);
+    background-color: var(--card);
+    background-image: linear-gradient(var(--dt-current-row-bg), var(--dt-current-row-bg));
+  }
+
+  .data-table-row:not([data-row-hover="disabled"]):hover .data-table-cell[data-frozen-opaque="true"],
+  .data-table-row:not([data-row-hover="disabled"]):hover .data-table-cell[data-column-id="__actions"],
+  .data-table-row:not([data-row-hover="disabled"]):hover .data-table-cell.sticky {
+    background-color: var(--card);
+    background-image: linear-gradient(var(--dt-row-hover-bg), var(--dt-row-hover-bg));
   }
 }
 
