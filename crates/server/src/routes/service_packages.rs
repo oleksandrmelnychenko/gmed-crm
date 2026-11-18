@@ -370,7 +370,7 @@ async fn tax_profile_rate(
 }
 
 fn compute_price_parts(base_price_net: Decimal, vat_rate: Decimal) -> (Decimal, Decimal, Decimal) {
-    let amounts = money::line_amounts(Decimal::ONE, base_price_net, vat_rate);
+    let amounts = money::line_amounts(Decimal::ONE, base_price_net, vat_rate, Decimal::ZERO);
     (amounts.net, amounts.vat, amounts.gross)
 }
 

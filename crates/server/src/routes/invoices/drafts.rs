@@ -547,6 +547,7 @@ pub(super) async fn get_invoice_draft_editor(
                     "unit": item.get("unit").and_then(Value::as_str),
                     "unit_price": invoice_json_decimal(item, "unit_price").map(decimal_to_string),
                     "vat_rate": invoice_json_decimal(item, "vat_rate").map(decimal_to_string),
+                    "discount_percent": decimal_to_string(crate::money::json_discount_percent(item)),
                     "is_cost_passthrough": item.get("is_cost_passthrough").and_then(Value::as_bool).unwrap_or(false),
                     "quoted_quantity": decimal_to_string(quoted),
                     "open_quantity": decimal_to_string(open),
@@ -981,8 +982,8 @@ pub(super) async fn update_invoice_draft(
                             invoice_id, quote_id, quote_line_index, order_leistung_id,
                             quantity, description_snapshot, unit_price_net_snapshot,
                             vat_rate_snapshot, amount_net_snapshot, amount_vat_snapshot,
-                            amount_gross_snapshot
-                       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+                            amount_gross_snapshot, discount_percent_snapshot
+                       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
                 )
                 .bind(invoice_id)
                 .bind(quote_id)
@@ -995,6 +996,7 @@ pub(super) async fn update_invoice_draft(
                 .bind(allocation.amount_net)
                 .bind(allocation.amount_vat)
                 .bind(allocation.amount_gross)
+                .bind(allocation.discount_percent)
                 .execute(&mut *transaction)
                 .await
                 {

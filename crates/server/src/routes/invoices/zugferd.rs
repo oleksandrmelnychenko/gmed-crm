@@ -49,6 +49,35 @@ pub(super) struct EInvoiceLine {
     pub line_vat: Option<Decimal>,
     pub vat_rate: Decimal,
     pub is_cost_passthrough: bool,
+    /// The line's discount (owner 2026-11-18): a line allowance (BG-27) of
+    /// `amount` (BT-136) at `percent` (BT-138) on the list net (BT-137), so
+    /// that quantity × net price − allowance = line net (BT-131).
+    pub discount: Option<LineDiscount>,
+}
+
+/// Discount of one invoice line, see [`EInvoiceLine::discount`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct LineDiscount {
+    pub percent: Decimal,
+    pub amount: Decimal,
+}
+
+/// The discount a stored invoice line carries (`discount_percent`,
+/// `discount_amount`), the same the printed invoice shows.
+pub(super) fn stored_line_discount(line: &serde_json::Value) -> Option<LineDiscount> {
+    let percent = crate::money::json_discount_percent(line);
+    if percent <= Decimal::ZERO {
+        return None;
+    }
+    let amount = match line.get("discount_amount")? {
+        serde_json::Value::String(text) => text.trim().parse::<Decimal>().ok()?,
+        serde_json::Value::Number(number) => number.to_string().parse::<Decimal>().ok()?,
+        _ => return None,
+    };
+    (amount > Decimal::ZERO).then_some(LineDiscount {
+        percent,
+        amount: round_cents(amount),
+    })
 }
 
 /// An earlier invoice this one refers to (BG-3): the advance invoices a
@@ -275,6 +304,30 @@ fn line_net(line: &EInvoiceLine) -> Decimal {
     round_cents(line.line_net)
 }
 
+/// The line allowance (BG-27) of a discounted line: BT-136 amount, BT-137
+/// base (the list net: line net + allowance), BT-138 percentage, BT-139/140
+/// reason «Rabatt» / UNTDID 5189 code 95 (discount).
+fn line_allowance_xml(line: &EInvoiceLine) -> String {
+    let Some(discount) = line.discount else {
+        return String::new();
+    };
+    format!(
+        concat!(
+            "<ram:SpecifiedTradeAllowanceCharge>",
+            "<ram:ChargeIndicator><udt:Indicator>false</udt:Indicator></ram:ChargeIndicator>",
+            "<ram:CalculationPercent>{percent}</ram:CalculationPercent>",
+            "<ram:BasisAmount>{basis}</ram:BasisAmount>",
+            "<ram:ActualAmount>{amount}</ram:ActualAmount>",
+            "<ram:ReasonCode>95</ram:ReasonCode>",
+            "<ram:Reason>Rabatt</ram:Reason>",
+            "</ram:SpecifiedTradeAllowanceCharge>",
+        ),
+        percent = plain(discount.percent),
+        basis = money(line_net(line) + round_cents(discount.amount)),
+        amount = money(discount.amount),
+    )
+}
+
 fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
     match line_exemption_reason(line.vat_rate, line.is_cost_passthrough) {
         None => ("S", None),
@@ -451,6 +504,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
                 "<ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode=\"C62\">{quantity}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>",
                 "<ram:SpecifiedLineTradeSettlement>",
                 "<ram:ApplicableTradeTax><ram:TypeCode>VAT</ram:TypeCode><ram:CategoryCode>{category}</ram:CategoryCode><ram:RateApplicablePercent>{rate}</ram:RateApplicablePercent></ram:ApplicableTradeTax>",
+                "{allowance}",
                 "<ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>{net}</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation>",
                 "</ram:SpecifiedLineTradeSettlement>",
                 "</ram:IncludedSupplyChainTradeLineItem>",
@@ -462,6 +516,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
             quantity = plain(line.quantity),
             category = category,
             rate = plain(line.vat_rate),
+            allowance = line_allowance_xml(line),
             net = money(line_net(line)),
         ));
     }
@@ -865,6 +920,7 @@ mod tests {
                     line_vat: Some(dec("19")),
                     vat_rate: dec("19"),
                     is_cost_passthrough: false,
+                    discount: None,
                     note: Some("2. & 3. Quartal 2026".to_string()),
                 },
                 EInvoiceLine {
@@ -875,6 +931,7 @@ mod tests {
                     line_vat: Some(Decimal::ZERO),
                     vat_rate: dec("0"),
                     is_cost_passthrough: true,
+                    discount: None,
                     note: None,
                 },
             ],
@@ -957,6 +1014,7 @@ mod tests {
                 line_vat: Some(dec("1.91")),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                discount: None,
             })
             .collect();
         invoice.total_gross = dec("35.82");
@@ -1028,6 +1086,7 @@ mod tests {
             line_vat: Some(dec("45.13")),
             vat_rate: dec("19"),
             is_cost_passthrough: false,
+            discount: None,
             note: None,
         }];
         invoice.total_gross = dec("282.63");
@@ -1160,6 +1219,7 @@ mod tests {
                 line_vat: None,
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                discount: None,
                 note: None,
             },
             EInvoiceLine {
@@ -1170,6 +1230,7 @@ mod tests {
                 line_vat: None,
                 vat_rate: dec("0"),
                 is_cost_passthrough: true,
+                discount: None,
                 note: None,
             },
         ];
@@ -1215,6 +1276,7 @@ mod tests {
                 line_vat: Some(dec("248.90")),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                discount: None,
                 note: None,
             },
             EInvoiceLine {
@@ -1225,6 +1287,7 @@ mod tests {
                 line_vat: Some(Decimal::ZERO),
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                discount: None,
                 note: None,
             },
         ];
@@ -1261,6 +1324,7 @@ mod tests {
                 line_vat: Some(dec("59.85")),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                discount: None,
             },
             EInvoiceLine {
                 name: "Anzahlung Organisation der Behandlung".to_string(),
@@ -1271,6 +1335,7 @@ mod tests {
                 line_vat: Some(Decimal::ZERO),
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                discount: None,
             },
         ];
         invoice.total_gross = dec("1000");

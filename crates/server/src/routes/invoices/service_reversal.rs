@@ -157,7 +157,11 @@ async fn plan(
 ) -> Result<Option<Plan>, sqlx::Error> {
     let sql = format!(
         r#"SELECT service.order_id, service.status, service.description, service.quantity,
-                  round(service.quantity * service.unit_price * (1 + service.vat_rate / 100), 2)
+                  order_line_net(service.quantity, service.unit_price, service.discount_percent)
+                  + CASE WHEN service.is_cost_passthrough THEN 0
+                         ELSE round(order_line_net(service.quantity, service.unit_price,
+                                                   service.discount_percent)
+                                    * service.vat_rate / 100, 2) END
                       AS line_gross,
                   service.currency, orders.patient_id
            FROM order_leistungen service

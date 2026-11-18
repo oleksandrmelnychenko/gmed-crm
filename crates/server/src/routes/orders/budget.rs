@@ -346,7 +346,10 @@ fn own_line_amounts(item: &Value) -> Option<Amounts> {
     let unit_price = decimal("unit_price")?;
     let vat_rate = decimal("vat_rate").unwrap_or(Decimal::ZERO);
     Some(Amounts::of(money::line_amounts(
-        quantity, unit_price, vat_rate,
+        quantity,
+        unit_price,
+        vat_rate,
+        money::json_discount_percent(item),
     )))
 }
 
@@ -522,6 +525,7 @@ async fn get_order_budget(
         r#"SELECT service.id, service.status, service.is_cost_passthrough,
                   UPPER(service.currency) AS currency,
                   service.quantity, service.unit_price_snapshot, service.vat_rate_snapshot,
+                  service.discount_percent,
                   COALESCE(
                       service.quantity > 0
                       AND service.quantity <= 1000000
@@ -576,6 +580,7 @@ async fn get_order_budget(
             } else {
                 row.try_get("vat_rate_snapshot").unwrap_or(Decimal::ZERO)
             },
+            row.try_get("discount_percent").unwrap_or(Decimal::ZERO),
         ));
         line_amounts_by_id.insert(id, (passthrough, amounts));
         if !passthrough {
@@ -743,6 +748,7 @@ async fn get_order_budget(
                     .try_get::<Option<Decimal>, _>("vat_rate")
                     .unwrap_or_default()
                     .unwrap_or(Decimal::ZERO),
+                Decimal::ZERO,
             )))
         }
         _ => None,

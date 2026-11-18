@@ -2411,7 +2411,7 @@ fn readiness_line_signatures(value: &Value) -> Vec<String> {
         .filter_map(Value::as_object)
         .map(|item| {
             format!(
-                "{}|{}|{}|{}",
+                "{}|{}|{}|{}|{}",
                 item.get("description")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
@@ -2419,6 +2419,7 @@ fn readiness_line_signatures(value: &Value) -> Vec<String> {
                 readiness_decimal(item.get("quantity")),
                 readiness_decimal(item.get("unit_price")),
                 readiness_decimal(item.get("vat_rate")),
+                readiness_decimal(item.get("discount_percent")),
             )
         })
         .collect::<Vec<_>>();
@@ -3877,9 +3878,9 @@ async fn load_lead_conversion_readiness(
                       SELECT q.status = 'accepted'
                              AND q.total_gross = COALESCE((
                                  SELECT sum(
-                                     round(ol.quantity * ol.unit_price_snapshot, 2)
+                                     order_line_net(ol.quantity, ol.unit_price_snapshot, ol.discount_percent)
                                      + CASE WHEN ol.is_cost_passthrough THEN 0
-                                            ELSE round(round(ol.quantity * ol.unit_price_snapshot, 2)
+                                            ELSE round(order_line_net(ol.quantity, ol.unit_price_snapshot, ol.discount_percent)
                                                        * ol.vat_rate_snapshot / 100, 2)
                                        END)
                                  FROM order_leistungen ol
@@ -3923,7 +3924,8 @@ async fn load_lead_conversion_readiness(
                               'vat_rate', round(CASE
                                   WHEN ol.is_cost_passthrough THEN 0
                                   ELSE ol.vat_rate_snapshot
-                              END, 2)
+                              END, 2),
+                              'discount_percent', round(ol.discount_percent, 2)
                           )
                           ORDER BY ol.created_at, ol.id
                       )

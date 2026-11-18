@@ -331,7 +331,8 @@ pub(super) async fn append_lines(
         }
         let unit_price = unit_price.unwrap_or(Decimal::ZERO).round_cents();
         let quantity = quantity.round_commercial(2);
-        let (net, vat, gross) = compute_invoice_line_parts(quantity, unit_price, vat_rate);
+        let (net, vat, gross) =
+            compute_invoice_line_parts(quantity, unit_price, vat_rate, Decimal::ZERO);
         let vat_rate_label = decimal_to_string(vat_rate);
         let line_index = line_items.len();
         line_items.push(json!({

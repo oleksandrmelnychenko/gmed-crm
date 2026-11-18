@@ -152,8 +152,18 @@ struct Line {
     quantity: String,
     unit_price: String,
     vat_rate: String,
+    /// Discount in percent (owner 2026-11-18); empty is none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    discount_percent: String,
     agency_service_id: Option<Uuid>,
     agency_service_price_version_id: Option<Uuid>,
+}
+
+/// The discount of an intake line: empty is none, else 0–100 % with two
+/// decimals.
+fn line_discount(line: &Line) -> Result<Decimal, Response> {
+    crate::money::discount_percent_input(Some(&Value::String(line.discount_percent.clone())))
+        .map_err(invalid)
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -474,6 +484,7 @@ fn validate(d: &Draft, complete: bool) -> Result<(), Response> {
         if !line.unit_price.is_empty() {
             money(&line.unit_price)?;
         }
+        line_discount(line)?;
     }
     if !d.prepayment_amount.is_empty() {
         money(&d.prepayment_amount)?;
@@ -816,7 +827,8 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
                 ));
             }
         }
-        total += crate::money::line_amounts(qty, price, vat).gross;
+        let discount = line_discount(l)?;
+        total += crate::money::line_amounts(qty, price, vat, discount).gross;
         let key = format!("order-intake:{id}:{}", l.id);
         let note = d.catalog_snapshot["services"]
             .as_array()
@@ -843,14 +855,14 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
             });
         // vat_source: a catalog line's rate comes from the catalog, any other
         // line was priced in the wizard (not the "legacy" column default).
-        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes,vat_source)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1),$9,CASE WHEN $7::uuid IS NULL THEN 'manual' ELSE 'catalog' END) ON CONFLICT(order_id,client_reference)
-            DO UPDATE SET description=EXCLUDED.description,quantity=EXCLUDED.quantity,unit_price=EXCLUDED.unit_price,vat_rate=EXCLUDED.vat_rate,
+        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes,vat_source,discount_percent)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1),$9,CASE WHEN $7::uuid IS NULL THEN 'manual' ELSE 'catalog' END,$10) ON CONFLICT(order_id,client_reference)
+            DO UPDATE SET description=EXCLUDED.description,quantity=EXCLUDED.quantity,unit_price=EXCLUDED.unit_price,vat_rate=EXCLUDED.vat_rate,discount_percent=EXCLUDED.discount_percent,
                 agency_service_id=EXCLUDED.agency_service_id,agency_service_price_version_id=EXCLUDED.agency_service_price_version_id,notes=EXCLUDED.notes,
                 vat_source=EXCLUDED.vat_source
             RETURNING id")
             .bind(id).bind(l.description.trim()).bind(qty).bind(price).bind(vat).bind(key)
-            .bind(l.agency_service_id).bind(l.agency_service_price_version_id).bind(note)
+            .bind(l.agency_service_id).bind(l.agency_service_price_version_id).bind(note).bind(discount)
             .fetch_one(&mut *conn).await.map_err(db_error)?;
         ids.push(service_id);
     }
@@ -1119,6 +1131,7 @@ fn quote_matches(d: &Draft, value: &Value) -> bool {
                 money(&l.quantity).ok(),
                 money(&l.unit_price).ok(),
                 money(&l.vat_rate).ok(),
+                line_discount(l).ok(),
             )
         })
         .collect();
@@ -1142,6 +1155,7 @@ fn quote_matches(d: &Draft, value: &Value) -> bool {
                 decimal("quantity"),
                 decimal("unit_price"),
                 decimal("vat_rate"),
+                Some(crate::money::json_discount_percent(l)),
             )
         })
         .collect();

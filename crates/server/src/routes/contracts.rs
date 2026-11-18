@@ -153,6 +153,9 @@ struct QuoteLineItemInput {
     unit_price: f64,
     vat_rate: Option<f64>,
     is_cost_passthrough: Option<bool>,
+    /// Discount in percent (0–100, two decimals); none when left out.
+    #[serde(default)]
+    discount_percent: Option<Value>,
     source_order_leistung_id: Option<Uuid>,
     external_document_id: Option<Uuid>,
     provider_id: Option<Uuid>,
@@ -252,6 +255,12 @@ struct QuoteLineItem {
     unit_price: String,
     vat_rate: String,
     is_cost_passthrough: bool,
+    /// The line's discount in percent and its amount, only on a line with a
+    /// discount (owner 2026-11-18); `line_net` is after the discount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    discount_percent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    discount_amount: Option<String>,
     line_net: String,
     line_vat: String,
     line_gross: String,
@@ -260,6 +269,26 @@ struct QuoteLineItem {
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     notes: Option<String>,
+}
+
+/// `discount_percent` and `discount_amount` of a stored line: both only when
+/// the line has a discount, so lines without one keep their stored shape.
+fn line_discount_fields(
+    quantity: Decimal,
+    unit_price: Decimal,
+    discount_percent: Decimal,
+) -> (Option<String>, Option<String>) {
+    if discount_percent <= Decimal::ZERO {
+        return (None, None);
+    }
+    (
+        Some(decimal_to_string(discount_percent)),
+        Some(decimal_to_string(money::line_discount_amount(
+            quantity,
+            unit_price,
+            discount_percent,
+        ))),
+    )
 }
 
 struct OrderAccessContext {
@@ -664,6 +693,7 @@ fn quote_line_signature(
     unit_price: Decimal,
     vat_rate: Decimal,
     is_cost_passthrough: bool,
+    discount_percent: Decimal,
 ) -> String {
     json!([
         description.trim(),
@@ -671,6 +701,7 @@ fn quote_line_signature(
         decimal_to_string(unit_price),
         decimal_to_string(vat_rate),
         is_cost_passthrough,
+        decimal_to_string(discount_percent),
     ])
     .to_string()
 }
@@ -685,6 +716,9 @@ fn normalized_quote_line_signatures(items: &[QuoteLineItem]) -> Vec<String> {
                 item.unit_price.parse::<Decimal>().ok()?,
                 item.vat_rate.parse::<Decimal>().ok()?,
                 item.is_cost_passthrough,
+                item.discount_percent
+                    .as_deref()
+                    .map_or(Some(Decimal::ZERO), |value| value.parse::<Decimal>().ok())?,
             ))
         })
         .collect::<Vec<_>>();
@@ -705,6 +739,7 @@ fn stored_quote_line_signatures(value: &Value) -> Option<Vec<String>> {
             item.get("is_cost_passthrough")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            money::json_discount_percent(&Value::Object(item.clone())),
         ));
     }
     signatures.sort();
@@ -802,7 +837,11 @@ fn complete_legacy_quote_line_amounts(map: &mut serde_json::Map<String, Value>) 
     let quantity = quote_decimal_value(map.get("quantity"));
     let unit_price = quote_decimal_value(map.get("unit_price")).round_cents();
     let vat_rate = quote_decimal_value(map.get("vat_rate")).round_commercial(2);
-    let amounts = crate::money::line_amounts(quantity, unit_price, vat_rate);
+    let discount = map
+        .get("discount_percent")
+        .map(|value| money::json_discount_percent(&json!({ "discount_percent": value })))
+        .unwrap_or(Decimal::ZERO);
+    let amounts = crate::money::line_amounts(quantity, unit_price, vat_rate, discount);
     for (key, value) in [
         ("line_net", amounts.net),
         ("line_vat", amounts.vat),
@@ -4248,11 +4287,17 @@ fn normalize_custom_line_items(
         if vat_rate < Decimal::ZERO || vat_rate > Decimal::new(100, 0) {
             return Err("Line item vat_rate must be between 0 and 100");
         }
+        let discount_percent = money::discount_percent_input(item.discount_percent.as_ref())?;
+        if is_cost_passthrough && discount_percent > Decimal::ZERO {
+            return Err("A pass-through cost cannot have a discount");
+        }
         let money::LineAmounts {
             net: line_net,
             vat: line_vat,
             gross: line_gross,
-        } = money::line_amounts(quantity, unit_price, vat_rate);
+        } = money::line_amounts(quantity, unit_price, vat_rate, discount_percent);
+        let (discount_percent, discount_amount) =
+            line_discount_fields(quantity, unit_price, discount_percent);
 
         normalized.push(QuoteLineItem {
             description_items: item
@@ -4266,6 +4311,8 @@ fn normalize_custom_line_items(
             unit_price: decimal_to_string(unit_price),
             vat_rate: decimal_to_string(vat_rate),
             is_cost_passthrough,
+            discount_percent,
+            discount_amount,
             line_net: decimal_to_string(line_net),
             line_vat: decimal_to_string(line_vat),
             line_gross: decimal_to_string(line_gross),
@@ -4299,11 +4346,19 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
             row.try_get::<Decimal, _>("vat_rate")
                 .unwrap_or(Decimal::ZERO)
         };
+        let discount_percent = if is_cost_passthrough {
+            Decimal::ZERO
+        } else {
+            row.try_get::<Decimal, _>("discount_percent")
+                .unwrap_or(Decimal::ZERO)
+        };
         let money::LineAmounts {
             net: line_net,
             vat: line_vat,
             gross: line_gross,
-        } = money::line_amounts(quantity, unit_price, vat_rate);
+        } = money::line_amounts(quantity, unit_price, vat_rate, discount_percent);
+        let (discount_percent, discount_amount) =
+            line_discount_fields(quantity, unit_price, discount_percent);
 
         let catalog_description = row
             .try_get::<Option<String>, _>("agency_service_description_snapshot")
@@ -4332,6 +4387,8 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
             unit_price: decimal_to_string(unit_price),
             vat_rate: decimal_to_string(vat_rate),
             is_cost_passthrough,
+            discount_percent,
+            discount_amount,
             line_net: decimal_to_string(line_net),
             line_vat: decimal_to_string(line_vat),
             line_gross: decimal_to_string(line_gross),
@@ -4359,7 +4416,7 @@ async fn load_quote_line_items_from_order_tx(
     let rows = sqlx::query(
         r#"SELECT id, description, agency_service_description_snapshot, agency_service_description_items_snapshot,
                   quantity, unit_price_snapshot AS unit_price,
-                  vat_rate_snapshot AS vat_rate, is_cost_passthrough,
+                  vat_rate_snapshot AS vat_rate, is_cost_passthrough, discount_percent,
                   external_document_id, provider_id, doctor_id, notes
            FROM order_leistungen
            WHERE order_id = $1
@@ -6350,10 +6407,11 @@ mod priceless_catalog_tests {
 mod tests {
     use super::{
         QuoteLineItemInput, compute_quote_totals, contract_number_on, normalize_custom_line_items,
-        patient_contract_status, quote_number_on,
+        patient_contract_status, quote_lines_match_persisted, quote_number_on,
     };
     use chrono::{TimeZone, Utc};
     use rust_decimal::Decimal;
+    use serde_json::json;
 
     #[test]
     fn contract_and_quote_numbers_carry_the_german_date() {
@@ -6497,12 +6555,37 @@ mod tests {
             unit_price,
             vat_rate: Some(vat_rate),
             is_cost_passthrough: None,
+            discount_percent: None,
             source_order_leistung_id: None,
             external_document_id: None,
             provider_id: None,
             doctor_id: None,
             notes: None,
         }
+    }
+
+    #[test]
+    fn a_discounted_quote_line_takes_the_vat_from_the_discounted_net() {
+        // 2 × 180,00 at 10 %: 360,00 − 36,00 = 324,00 net, 61,56 VAT.
+        let mut line = quote_line(2.0, 180.0, 19.0);
+        line.discount_percent = Some(json!("10"));
+        let items = normalize_custom_line_items(&[line]).expect("valid quote line");
+        assert_eq!(items[0].discount_percent.as_deref(), Some("10"));
+        assert_eq!(items[0].discount_amount.as_deref(), Some("36"));
+        assert_eq!(items[0].line_net, "324");
+        assert_eq!(items[0].line_vat, "61.56");
+        assert_eq!(items[0].line_gross, "385.56");
+        let stored = serde_json::to_value(&items).expect("stored lines");
+        assert!(quote_lines_match_persisted(&stored, &items));
+        // A line without a discount keeps its stored shape.
+        let plain = normalize_custom_line_items(&[quote_line(2.0, 180.0, 19.0)]).expect("valid");
+        let plain_json = serde_json::to_value(&plain[0]).expect("json");
+        assert!(plain_json.get("discount_percent").is_none());
+        // The discount is part of the line: a changed discount is another line.
+        assert!(!quote_lines_match_persisted(&stored, &plain));
+        let mut invalid = quote_line(1.0, 10.0, 19.0);
+        invalid.discount_percent = Some(json!(100.5));
+        assert!(normalize_custom_line_items(&[invalid]).is_err());
     }
 
     #[test]

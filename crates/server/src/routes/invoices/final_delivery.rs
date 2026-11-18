@@ -45,6 +45,8 @@ pub(crate) struct OrderServiceFact {
     pub unit: Option<String>,
     pub unit_price: Decimal,
     pub vat_rate: Decimal,
+    /// The line's discount in percent (owner 2026-11-18).
+    pub discount_percent: Decimal,
     pub is_cost_passthrough: bool,
     /// Active settlement invoices that bill the service (allocation or line).
     pub billing_invoice_ids: Vec<Uuid>,
@@ -126,6 +128,7 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                 vat_rate: json_decimal(item.get("vat_rate"))
                     .unwrap_or(Decimal::ZERO)
                     .round_commercial(2),
+                discount_percent: money::json_discount_percent(item),
                 is_cost_passthrough: item
                     .get("is_cost_passthrough")
                     .and_then(Value::as_bool)
@@ -288,6 +291,7 @@ pub(crate) fn extra_service_json(extra: &ExtraService) -> Value {
         "quantity": money::money_string(fact.quantity.round_commercial(2)),
         "unit_price": money::money_string(fact.unit_price),
         "vat_rate": money::money_string(fact.vat_rate),
+        "discount_percent": money::money_string(fact.discount_percent),
         "is_cost_passthrough": fact.is_cost_passthrough,
         "quote_line_index": extra.quote_line_index,
     })
@@ -307,7 +311,12 @@ pub(crate) fn extra_service_line(
     quantity: Decimal,
     comment: Option<String>,
 ) -> (Value, money::LineAmounts) {
-    let amounts = money::line_amounts(quantity, fact.unit_price, fact.vat_rate);
+    let amounts = money::line_amounts(
+        quantity,
+        fact.unit_price,
+        fact.vat_rate,
+        fact.discount_percent,
+    );
     let mut line = json!({
         "description": fact.description,
         "quantity": money::money_string(quantity),
@@ -322,6 +331,15 @@ pub(crate) fn extra_service_line(
         "source_order_leistung_id": fact.id,
         "quoted_quantity": "0",
     });
+    if fact.discount_percent > Decimal::ZERO
+        && let Some(map) = line.as_object_mut()
+    {
+        map.insert(
+            "discount_percent".to_string(),
+            json!(money::money_string(fact.discount_percent)),
+        );
+    }
+    money::store_line_discount_amount(&mut line, quantity, fact.unit_price, amounts.net);
     if let Some(comment) = comment {
         super::line_comments::set_line_comment(&mut line, Some(comment));
     }
@@ -659,6 +677,7 @@ mod tests {
             unit: None,
             unit_price: Decimal::from(60),
             vat_rate: Decimal::from(19),
+            discount_percent: Decimal::ZERO,
             is_cost_passthrough: false,
             billing_invoice_ids: Vec::new(),
             credited_invoice_ids: Vec::new(),

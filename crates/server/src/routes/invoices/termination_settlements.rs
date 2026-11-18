@@ -131,6 +131,8 @@ pub(crate) struct SettlementLine {
     quantity: Decimal,
     unit_price: Decimal,
     vat_rate: Decimal,
+    /// The order line's discount in percent (owner 2026-11-18); 0 elsewhere.
+    discount_percent: Decimal,
     net: Decimal,
     vat: Decimal,
     gross: Decimal,
@@ -157,6 +159,7 @@ impl SettlementLine {
             "quantity": decimal_to_string(self.quantity),
             "unit_price": decimal_to_string(self.unit_price),
             "vat_rate": decimal_to_string(self.vat_rate),
+            "discount_percent": decimal_to_string(self.discount_percent),
             "net": decimal_to_string(self.net),
             "vat": decimal_to_string(self.vat),
             "gross": decimal_to_string(self.gross),
@@ -227,8 +230,13 @@ impl OrderSettlement {
                     && line.uninvoiced_quantity > Decimal::ZERO
             })
             .map(|line| {
-                compute_invoice_line_parts(line.uninvoiced_quantity, line.unit_price, line.vat_rate)
-                    .2
+                compute_invoice_line_parts(
+                    line.uninvoiced_quantity,
+                    line.unit_price,
+                    line.vat_rate,
+                    line.discount_percent,
+                )
+                .2
             })
             .sum::<Decimal>()
             .round_cents()
@@ -360,6 +368,7 @@ pub(crate) async fn compute_order_settlement(
                       AS approved_stage,
                   service.unit_price_snapshot AS unit_price,
                   service.vat_rate_snapshot AS vat_rate,
+                  service.discount_percent,
                   service.is_cost_passthrough,
                   UPPER(service.currency) AS currency,
                   COALESCE(catalog.due_in_full_on_termination, false) AS due_in_full
@@ -533,7 +542,14 @@ pub(crate) async fn compute_order_settlement(
             warnings.push("order_service_currency_mismatch");
             continue;
         }
-        let (net, vat, gross) = compute_invoice_line_parts(quantity, unit_price, vat_rate);
+        let discount_percent = if is_cost_passthrough {
+            Decimal::ZERO
+        } else {
+            row.try_get::<Decimal, _>("discount_percent")
+                .unwrap_or(Decimal::ZERO)
+        };
+        let (net, vat, gross) =
+            compute_invoice_line_parts(quantity, unit_price, vat_rate, discount_percent);
         let allocated = row
             .try_get::<Uuid, _>("id")
             .ok()
@@ -550,6 +566,7 @@ pub(crate) async fn compute_order_settlement(
             quantity,
             unit_price,
             vat_rate,
+            discount_percent,
             net,
             vat,
             gross,
@@ -676,6 +693,7 @@ pub(crate) async fn compute_order_settlement(
             quantity: Decimal::ONE,
             unit_price: gross,
             vat_rate: Decimal::ZERO,
+            discount_percent: Decimal::ZERO,
             net: gross,
             vat: Decimal::ZERO,
             gross,
@@ -749,7 +767,8 @@ pub(crate) async fn compute_order_settlement(
             .try_get::<Decimal, _>("vat_rate")
             .unwrap_or(Decimal::ZERO)
             .round_commercial(2);
-        let (net, vat, gross) = compute_invoice_line_parts(quantity, unit_price, vat_rate);
+        let (net, vat, gross) =
+            compute_invoice_line_parts(quantity, unit_price, vat_rate, Decimal::ZERO);
         accrued_net += net;
         accrued_gross += gross;
         lines.push(SettlementLine {
@@ -767,6 +786,7 @@ pub(crate) async fn compute_order_settlement(
             quantity,
             unit_price,
             vat_rate,
+            discount_percent: Decimal::ZERO,
             net,
             vat,
             gross,
@@ -1880,9 +1900,13 @@ async fn create_termination_final_invoice(
                     if quantity <= Decimal::ZERO {
                         continue;
                     }
-                    let (line_net, line_vat, line_gross) =
-                        compute_invoice_line_parts(quantity, line.unit_price, line.vat_rate);
-                    line_items.push(json!({
+                    let (line_net, line_vat, line_gross) = compute_invoice_line_parts(
+                        quantity,
+                        line.unit_price,
+                        line.vat_rate,
+                        line.discount_percent,
+                    );
+                    let mut item = json!({
                         "description": line.description,
                         "quantity": decimal_to_string(quantity),
                         "unit": line.unit_label.clone().unwrap_or_else(|| "unit".to_string()),
@@ -1894,7 +1918,22 @@ async fn create_termination_final_invoice(
                         "is_cost_passthrough": line.is_cost_passthrough,
                         "source": TERMINATION_ORDER_SERVICE_SOURCE,
                         "source_order_leistung_id": service_id,
-                    }));
+                    });
+                    if line.discount_percent > Decimal::ZERO
+                        && let Some(map) = item.as_object_mut()
+                    {
+                        map.insert(
+                            "discount_percent".to_string(),
+                            json!(decimal_to_string(line.discount_percent)),
+                        );
+                    }
+                    crate::money::store_line_discount_amount(
+                        &mut item,
+                        quantity,
+                        line.unit_price,
+                        line_net,
+                    );
+                    line_items.push(item);
                     snapshot.total_net = (snapshot.total_net + line_net).round_cents();
                     snapshot.total_vat = (snapshot.total_vat + line_vat).round_cents();
                     snapshot.total_gross = (snapshot.total_gross + line_gross).round_cents();
@@ -2035,8 +2074,9 @@ async fn create_termination_final_invoice(
                 r#"INSERT INTO invoice_order_line_allocations (
                        invoice_id, quote_id, quote_line_index, order_leistung_id, quantity,
                        description_snapshot, unit_price_net_snapshot, vat_rate_snapshot,
-                       amount_net_snapshot, amount_vat_snapshot, amount_gross_snapshot)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+                       amount_net_snapshot, amount_vat_snapshot, amount_gross_snapshot,
+                       discount_percent_snapshot)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
             )
             .bind(invoice_id)
             .bind(quote_id)
@@ -2049,6 +2089,7 @@ async fn create_termination_final_invoice(
             .bind(allocation.amount_net)
             .bind(allocation.amount_vat)
             .bind(allocation.amount_gross)
+            .bind(allocation.discount_percent)
             .execute(&mut *transaction)
             .await
             {

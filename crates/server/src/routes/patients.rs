@@ -10228,7 +10228,7 @@ async fn get_patient_service_report(
                   ) AS approved_count,
                   -- Pass-through lines are re-billed at 0 %.
                   COALESCE(
-                      SUM(ol.quantity * ol.unit_price * (1 + (
+                      SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (
                           CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
                       ))),
                       0
@@ -10261,11 +10261,12 @@ async fn get_patient_service_report(
                   ol.currency,
                   -- The billed rate: pass-through lines are re-billed at 0 %.
                   CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END AS vat_rate,
-                  (ol.quantity * ol.unit_price) AS line_net,
-                  ((ol.quantity * ol.unit_price)
+                  ol.discount_percent,
+                  order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) AS line_net,
+                  (order_line_net(ol.quantity, ol.unit_price, ol.discount_percent)
                       * (CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100))
                       AS line_vat,
-                  (ol.quantity * ol.unit_price * (1 + (
+                  (order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (
                       CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
                   ))) AS line_gross,
                   ol.provider_id,

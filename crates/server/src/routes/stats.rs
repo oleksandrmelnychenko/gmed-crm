@@ -1503,7 +1503,7 @@ async fn load_ceo_service_mix(state: &AppState) -> Result<Vec<Value>, sqlx::Erro
                 COUNT(*)::bigint AS item_count,
                 -- Pass-through lines are re-billed at 0 %.
                 COALESCE(
-                    SUM(ol.quantity * ol.unit_price * (1 + (
+                    SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (
                         CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
                     ))),
                     0
@@ -2059,7 +2059,7 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                 -- their purchase carried.
                 SELECT
                     COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (
+                        SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (
                             CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
                         ))),
                         0
@@ -2068,7 +2068,7 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                         SUM(
                             CASE
                                 WHEN ol.is_cost_passthrough
-                                    THEN ol.quantity * ol.unit_price
+                                    THEN order_line_net(ol.quantity, ol.unit_price, ol.discount_percent)
                                 ELSE 0
                             END
                         ),
@@ -2437,7 +2437,7 @@ async fn load_provider_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error>
                 ) AS appointments_90d,
                 (
                     SELECT COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (ol.vat_rate / 100))),
                         0
                     )
                     FROM order_leistungen ol
@@ -2569,7 +2569,7 @@ async fn load_reports_summary(
                 ) AS delivered_service_items,
                 (
                     SELECT COALESCE(
-                        SUM(quantity * unit_price * (1 + (vat_rate / 100))),
+                        SUM(order_line_net(quantity, unit_price, discount_percent) * (1 + (vat_rate / 100))),
                         0
                     )
                     FROM order_leistungen
@@ -2641,7 +2641,7 @@ async fn load_report_clinics(
                 ) AS doctor_count,
                 (
                     SELECT COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (ol.vat_rate / 100))),
                         0
                     )
                     FROM order_leistungen ol
@@ -3051,7 +3051,7 @@ async fn load_report_service_types(
                 COUNT(DISTINCT o.patient_id)::bigint AS patient_count,
                 COUNT(DISTINCT ol.order_id)::bigint AS order_count,
                 COALESCE(
-                    SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                    SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (ol.vat_rate / 100))),
                     0
                 ) AS gross_total
            FROM order_leistungen ol
@@ -3148,7 +3148,7 @@ async fn load_report_medical_providers(
                 ) AS doctor_count,
                 (
                     SELECT COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (ol.vat_rate / 100))),
                         0
                     )
                     FROM order_leistungen ol
@@ -3781,7 +3781,7 @@ async fn load_report_doctors(
                 ) AS findings_sample_count,
                 (
                     SELECT COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (ol.vat_rate / 100))),
                         0
                     )
                     FROM order_leistungen ol
@@ -4058,7 +4058,7 @@ async fn load_report_non_medical_providers(
                 ) AS feedback_count,
                 (
                     SELECT COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (ol.vat_rate / 100))),
                         0
                     )
                     FROM order_leistungen ol
@@ -5541,7 +5541,7 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
                 SELECT
                     ol.order_id,
                     COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent) * (1 + (ol.vat_rate / 100))),
                         0
                     ) AS service_gross
                 FROM order_leistungen ol

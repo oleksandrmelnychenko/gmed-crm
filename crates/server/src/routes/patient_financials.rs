@@ -1624,6 +1624,7 @@ async fn load_patient_account_statement(
                       service.quantity,
                       COALESCE(service.unit_price_snapshot, service.unit_price) AS unit_price,
                       COALESCE(service.vat_rate_snapshot, service.vat_rate) AS vat_rate,
+                      service.discount_percent,
                       COALESCE(service.currency_snapshot, service.currency) AS currency,
                       service.status, orders.order_number,
                       COALESCE(SUM(allocation.quantity) FILTER (
@@ -1684,7 +1685,14 @@ async fn load_patient_account_statement(
                 .try_get::<Decimal, _>("vat_rate")
                 .unwrap_or(Decimal::ZERO);
             // Same per-line rounding as the quote and invoice of this service.
-            let gross = crate::money::line_amounts(quantity, unit_price, vat_rate).gross;
+            let gross = crate::money::line_amounts(
+                quantity,
+                unit_price,
+                vat_rate,
+                row.try_get::<Decimal, _>("discount_percent")
+                    .unwrap_or(Decimal::ZERO),
+            )
+            .gross;
             let financial_state = if invoiced_quantity <= Decimal::ZERO {
                 "not_invoiced"
             } else if invoiced_quantity < quantity {

@@ -1239,7 +1239,7 @@ async fn load_interpreter_operations_payload(
                    FROM order_leistungen ol
                    JOIN interpreter_reports ir ON ir.id = ol.source_interpreter_report_id
                   WHERE ir.interpreter_id = $1) AS synced_billing_lines,
-                (SELECT ROUND(COALESCE(SUM(ol.quantity * ol.unit_price), 0)::numeric, 2)
+                (SELECT COALESCE(SUM(order_line_net(ol.quantity, ol.unit_price, ol.discount_percent)), 0)
                    FROM order_leistungen ol
                    JOIN interpreter_reports ir ON ir.id = ol.source_interpreter_report_id
                   WHERE ir.interpreter_id = $1) AS synced_billing_net,

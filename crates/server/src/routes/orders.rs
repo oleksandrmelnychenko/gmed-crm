@@ -346,6 +346,10 @@ struct AddLeistungRequest {
     quantity: f64,
     unit_price: f64,
     vat_rate: Option<f64>,
+    /// Discount in percent, 0–100 with two decimals (owner 2026-11-18); none
+    /// when left out. A pass-through cost has none.
+    #[serde(default)]
+    discount_percent: Option<serde_json::Value>,
     is_cost_passthrough: Option<bool>,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
@@ -1978,6 +1982,10 @@ async fn load_estimate_outdated(
                       ROUND(CASE WHEN line.value ->> 'vat_rate' IS NULL THEN 0
                                  WHEN line.value ->> 'vat_rate' ~ '^-?[0-9]+(\.[0-9]+)?$'
                                  THEN (line.value ->> 'vat_rate')::numeric END, 2) AS vat_rate,
+                      -- A changed discount counts like a changed price (owner 2026-11-18).
+                      ROUND(CASE WHEN line.value ->> 'discount_percent' ~ '^[0-9]+([.][0-9]+)?$'
+                                 THEN (line.value ->> 'discount_percent')::numeric
+                                 ELSE 0 END, 2) AS discount,
                       line.value ->> 'source_order_leistung_id' AS source_id
                FROM current_quote q
                CROSS JOIN LATERAL jsonb_array_elements(
@@ -1986,7 +1994,8 @@ async fn load_estimate_outdated(
            ), order_lines AS (
                SELECT ROUND(s.quantity::numeric, 4) AS quantity,
                       ROUND(s.unit_price_snapshot::numeric, 2) AS unit_price,
-                      ROUND(s.vat_rate_snapshot::numeric, 2) AS vat_rate
+                      ROUND(s.vat_rate_snapshot::numeric, 2) AS vat_rate,
+                      ROUND(s.discount_percent::numeric, 2) AS discount
                FROM order_leistungen s
                WHERE s.order_id = $1
                  AND s.status <> 'cancelled'
@@ -1994,22 +2003,22 @@ async fn load_estimate_outdated(
                       OR s.id::text IN (SELECT source_id FROM quoted
                                         WHERE source_id IS NOT NULL))
            ), all_lines AS (
-               SELECT unit_price, vat_rate, COALESCE(quantity, 0) AS order_quantity,
+               SELECT unit_price, vat_rate, discount, COALESCE(quantity, 0) AS order_quantity,
                       0::numeric AS quoted_quantity
                FROM order_lines
                UNION ALL
-               SELECT unit_price, vat_rate, 0::numeric, COALESCE(quantity, 0)
+               SELECT unit_price, vat_rate, discount, 0::numeric, COALESCE(quantity, 0)
                FROM quoted
            ), money_buckets AS (
                SELECT unit_price, SUM(order_quantity) AS order_quantity,
                       SUM(quoted_quantity) AS quoted_quantity
                FROM all_lines
-               GROUP BY unit_price, vat_rate
+               GROUP BY unit_price, vat_rate, discount
            ), price_buckets AS (
                SELECT unit_price, SUM(order_quantity) AS order_quantity,
                       SUM(quoted_quantity) AS quoted_quantity
                FROM all_lines
-               GROUP BY unit_price
+               GROUP BY unit_price, discount
            ), estimate AS (
                SELECT COALESCE(
                           (SELECT original.created_at FROM documents original
@@ -4346,6 +4355,7 @@ async fn get_order(
 
     let leistungen = match sqlx::query(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
+                  ol.discount_percent,
                   ol.is_cost_passthrough, ol.status, ol.delivered_at, ol.approved_at, ol.notes,
                   ol.cancelled_at, ol.cancellation_reason,
                   ol.client_reference,
@@ -4562,6 +4572,7 @@ async fn get_order(
             "unit_price": l.try_get::<rust_decimal::Decimal, _>("unit_price").unwrap_or(rust_decimal::Decimal::ZERO),
             "currency": l.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
             "vat_rate": l.try_get::<rust_decimal::Decimal, _>("vat_rate").unwrap_or(rust_decimal::Decimal::ZERO),
+            "discount_percent": l.try_get::<rust_decimal::Decimal, _>("discount_percent").unwrap_or(rust_decimal::Decimal::ZERO),
             "is_cost_passthrough": l.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
             "status": l.try_get::<String, _>("status").unwrap_or_default(),
             "delivered_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|v| v.to_rfc3339()),
@@ -5484,6 +5495,7 @@ async fn get_order_economics(
                        THEN service.unit_price_snapshot ELSE 0 END AS unit_price_snapshot,
                   CASE WHEN service.vat_rate_snapshot BETWEEN 0 AND 100
                        THEN service.vat_rate_snapshot ELSE 0 END AS vat_rate_snapshot,
+                  service.discount_percent,
                   COALESCE(
                       service.quantity > 0
                       AND service.quantity <= 1000000
@@ -5798,7 +5810,13 @@ async fn get_order_economics(
                 net: service_planned_net,
                 vat: service_planned_vat,
                 gross: service_planned_gross,
-            } = money::line_amounts(quantity, unit_price, vat_rate);
+            } = money::line_amounts(
+                quantity,
+                unit_price,
+                vat_rate,
+                row.try_get::<rust_decimal::Decimal, _>("discount_percent")
+                    .unwrap_or(rust_decimal::Decimal::ZERO),
+            );
             let service_planned_cost_net = row
                 .try_get::<rust_decimal::Decimal, _>("planned_partner_cost_net")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -7066,7 +7084,7 @@ async fn cancel_order_in_tx(
            RETURNING id,
                      COALESCE(NULLIF(BTRIM(agency_service_name_snapshot), ''), description) AS description,
                      quantity, unit_price_snapshot, vat_rate_snapshot, is_cost_passthrough,
-                     UPPER(currency) AS currency"#,
+                     discount_percent, UPPER(currency) AS currency"#,
     )
     .bind(order_id)
     .bind(actor_id)
@@ -7095,6 +7113,8 @@ async fn cancel_order_in_tx(
             row.try_get::<rust_decimal::Decimal, _>("unit_price_snapshot")
                 .unwrap_or_default(),
             vat_rate,
+            row.try_get::<rust_decimal::Decimal, _>("discount_percent")
+                .unwrap_or_default(),
         );
         cancelled_service_ids.push(id);
         cancelled_services.push(serde_json::json!({
@@ -10772,6 +10792,7 @@ async fn list_leistungen(
 
     match sqlx::query(
         r#"SELECT ol.id, ol.patient_id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
+                  ol.discount_percent,
                   ol.is_cost_passthrough, ol.status, ol.notes, ol.client_reference,
                   ol.cancelled_at, ol.cancellation_reason,
                   ol.provider_id, ol.doctor_id,
@@ -10837,6 +10858,7 @@ async fn list_leistungen(
                     "unit_price": r.try_get::<rust_decimal::Decimal, _>("unit_price").unwrap_or(rust_decimal::Decimal::ZERO),
                     "currency": r.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "vat_rate": r.try_get::<rust_decimal::Decimal, _>("vat_rate").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "discount_percent": r.try_get::<rust_decimal::Decimal, _>("discount_percent").unwrap_or(rust_decimal::Decimal::ZERO),
                     "is_cost_passthrough": r.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
                     "cancelled_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default(),
@@ -11178,6 +11200,16 @@ async fn add_leistung(
         );
     }
     let passthrough = body.is_cost_passthrough.unwrap_or(false);
+    let discount_percent = match money::discount_percent_input(body.discount_percent.as_ref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if passthrough && discount_percent > rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A pass-through cost cannot have a discount",
+        );
+    }
     let client_reference = normalize_optional_text(body.client_reference);
     if let Err(resp) =
         validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
@@ -11262,10 +11294,10 @@ async fn add_leistung(
              is_cost_passthrough, provider_id, doctor_id, external_document_id,
              notes, client_reference,
              planned_partner_cost_net, planned_partner_cost_vat,
-             planned_partner_cost_gross, tax_profile_id, vat_source
+             planned_partner_cost_gross, tax_profile_id, vat_source, discount_percent
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                 $16, $17, $18, $19, $20)
+                 $16, $17, $18, $19, $20, $21)
          ON CONFLICT (order_id, client_reference) DO UPDATE SET
              patient_id = EXCLUDED.patient_id,
              agency_service_id = EXCLUDED.agency_service_id,
@@ -11275,6 +11307,7 @@ async fn add_leistung(
              unit_price = EXCLUDED.unit_price,
              currency = EXCLUDED.currency,
              vat_rate = EXCLUDED.vat_rate,
+             discount_percent = EXCLUDED.discount_percent,
              tax_profile_id = EXCLUDED.tax_profile_id,
              vat_source = EXCLUDED.vat_source,
              is_cost_passthrough = EXCLUDED.is_cost_passthrough,
@@ -11313,6 +11346,7 @@ async fn add_leistung(
     .bind(planned_cost_gross)
     .bind(tax_profile_id)
     .bind(vat_source)
+    .bind(discount_percent)
     .fetch_optional(&mut *transaction)
     .await;
     match upserted {
@@ -11385,7 +11419,7 @@ async fn add_leistung(
                 r#"SELECT id, planned_partner_cost_net, planned_partner_cost_vat,
                           planned_partner_cost_gross, status,
                           (quantity = $3 AND unit_price = $4 AND vat_rate = $5
-                           AND is_cost_passthrough = $6) AS same_terms
+                           AND is_cost_passthrough = $6 AND discount_percent = $7) AS same_terms
                    FROM order_leistungen
                    WHERE order_id = $1 AND client_reference = $2"#,
             )
@@ -11395,6 +11429,7 @@ async fn add_leistung(
             .bind(price)
             .bind(vat)
             .bind(passthrough)
+            .bind(discount_percent)
             .fetch_optional(&state.db)
             .await
             {

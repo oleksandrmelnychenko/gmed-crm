@@ -771,6 +771,7 @@ struct InvoiceLineAllocationSnapshot {
     description: String,
     unit_price_net: Decimal,
     vat_rate: Decimal,
+    discount_percent: Decimal,
     amount_net: Decimal,
     amount_vat: Decimal,
     amount_gross: Decimal,
@@ -1354,8 +1355,9 @@ fn compute_invoice_line_parts(
     quantity: Decimal,
     unit_price_net: Decimal,
     vat_rate: Decimal,
+    discount_percent: Decimal,
 ) -> (Decimal, Decimal, Decimal) {
-    let amounts = money::line_amounts(quantity, unit_price_net, vat_rate);
+    let amounts = money::line_amounts(quantity, unit_price_net, vat_rate, discount_percent);
     (amounts.net, amounts.vat, amounts.gross)
 }
 
@@ -3486,6 +3488,7 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
                 invoice_json_decimal(item, "quantity").unwrap_or(Decimal::ONE),
                 invoice_json_decimal(item, "unit_price").unwrap_or(Decimal::ZERO),
                 vat_rate_value,
+                money::json_discount_percent(item),
             );
             let line_net = invoice_json_decimal(item, "line_net").unwrap_or(net);
             let line_vat = invoice_json_decimal(item, "line_vat").unwrap_or(vat);
@@ -4187,7 +4190,12 @@ pub(super) fn quote_line_amounts(line: &Value) -> money::LineAmounts {
     let vat_rate = invoice_json_decimal(line, "vat_rate")
         .unwrap_or(Decimal::ZERO)
         .round_commercial(2);
-    let computed = money::line_amounts(quantity, unit_price, vat_rate);
+    let computed = money::line_amounts(
+        quantity,
+        unit_price,
+        vat_rate,
+        money::json_discount_percent(line),
+    );
     match (
         invoice_json_decimal(line, "line_net"),
         invoice_json_decimal(line, "line_gross"),
@@ -4573,12 +4581,14 @@ async fn build_selected_invoice_snapshot(
                 ));
             }
             let billed = billed_amounts.get(&line_index).copied().unwrap_or_default();
+            let discount_percent = money::json_discount_percent(source_item);
             let part = money::final_line_part_amounts(
                 selected_quantity,
                 already_allocated,
                 quoted_quantity,
                 unit_price,
                 vat_rate,
+                discount_percent,
                 quote_line_amounts(source_item),
                 money::LineAmounts {
                     net: billed.net,
@@ -4599,6 +4609,12 @@ async fn build_selected_invoice_snapshot(
                 }
                 map.insert("quote_line_index".to_string(), json!(line_index));
             }
+            money::store_line_discount_amount(
+                &mut selected_item,
+                selected_quantity,
+                unit_price,
+                part.net,
+            );
             if let Some(comment) = requested_comments.remove(&line_index) {
                 line_comments::set_line_comment(&mut selected_item, Some(comment));
             }
@@ -4620,6 +4636,7 @@ async fn build_selected_invoice_snapshot(
                     .to_string(),
                 unit_price_net: unit_price,
                 vat_rate,
+                discount_percent,
                 amount_net: part.net,
                 amount_vat: part.vat,
                 amount_gross: part.gross,
@@ -4671,12 +4688,14 @@ async fn build_selected_invoice_snapshot(
         // The part completing the line bills exactly what is left of the line
         // total; no split bills more than the quote line (QA 2026-11-15, A-1).
         let billed = billed_amounts.get(&line_index).copied().unwrap_or_default();
+        let discount_percent = money::json_discount_percent(source_item);
         let part = money::line_part_amounts(
             selected_quantity,
             already_allocated,
             quoted_quantity,
             unit_price,
             vat_rate,
+            discount_percent,
             quote_line_amounts(source_item),
             money::LineAmounts {
                 net: billed.net,
@@ -4712,6 +4731,12 @@ async fn build_selected_invoice_snapshot(
                 Value::String(decimal_to_string(quoted_quantity)),
             );
         }
+        money::store_line_discount_amount(
+            &mut selected_item,
+            selected_quantity,
+            unit_price,
+            line_net,
+        );
         if let Some(comment) = requested_comments.remove(&line_index) {
             line_comments::set_line_comment(&mut selected_item, Some(comment));
         }
@@ -4736,6 +4761,7 @@ async fn build_selected_invoice_snapshot(
                     .to_string(),
                 unit_price_net: unit_price,
                 vat_rate,
+                discount_percent,
                 amount_net: line_net,
                 amount_vat: line_vat,
                 amount_gross: line_gross,
@@ -5308,7 +5334,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
             .unwrap_or(Decimal::ZERO)
             .round_commercial(2);
         let (line_net, line_vat, line_gross) =
-            compute_invoice_line_parts(quantity, unit_price_net, vat_rate);
+            compute_invoice_line_parts(quantity, unit_price_net, vat_rate, Decimal::ZERO);
         let package_name = row.try_get::<String, _>("package_name").unwrap_or_default();
         let item_description = row
             .try_get::<String, _>("item_description")
@@ -9383,8 +9409,9 @@ async fn create_patient_billing_invoice(
                 r#"INSERT INTO invoice_order_line_allocations (
                        invoice_id, quote_id, quote_line_index, order_leistung_id, quantity,
                        description_snapshot, unit_price_net_snapshot, vat_rate_snapshot,
-                       amount_net_snapshot, amount_vat_snapshot, amount_gross_snapshot)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+                       amount_net_snapshot, amount_vat_snapshot, amount_gross_snapshot,
+                       discount_percent_snapshot)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
             )
             .bind(invoice_id)
             .bind(context.quote_id)
@@ -9397,6 +9424,7 @@ async fn create_patient_billing_invoice(
             .bind(allocation.amount_net)
             .bind(allocation.amount_vat)
             .bind(allocation.amount_gross)
+            .bind(allocation.discount_percent)
             .execute(&mut *transaction)
             .await
             {
@@ -9827,8 +9855,8 @@ async fn create_invoice_from_quote(
                             invoice_id, quote_id, quote_line_index, order_leistung_id,
                             quantity, description_snapshot, unit_price_net_snapshot,
                             vat_rate_snapshot, amount_net_snapshot, amount_vat_snapshot,
-                            amount_gross_snapshot
-                       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+                            amount_gross_snapshot, discount_percent_snapshot
+                       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
                 )
                 .bind(invoice_id)
                 .bind(ctx.quote_id)
@@ -9841,6 +9869,7 @@ async fn create_invoice_from_quote(
                 .bind(allocation.amount_net)
                 .bind(allocation.amount_vat)
                 .bind(allocation.amount_gross)
+                .bind(allocation.discount_percent)
                 .execute(&mut *transaction)
                 .await
                 {
@@ -15149,7 +15178,12 @@ async fn load_einvoice(
                 .unwrap_or_default();
             // The amounts the printed invoice shows: stored, or derived per
             // line for legacy lines (`invoice_pdf_line_items`).
-            let (net, vat, _) = compute_invoice_line_parts(quantity, unit_net, vat_rate);
+            let (net, vat, _) = compute_invoice_line_parts(
+                quantity,
+                unit_net,
+                vat_rate,
+                money::json_discount_percent(line),
+            );
             zugferd::EInvoiceLine {
                 name: if third_party_payer {
                     crate::routes::documents::payer_invoice_line_label(
@@ -15168,6 +15202,8 @@ async fn load_einvoice(
                 line_vat: Some(decimal(line.get("line_vat")).unwrap_or(vat)),
                 vat_rate,
                 is_cost_passthrough,
+                // The printed position's «Rabatt» line (XML = PDF, fix-99).
+                discount: zugferd::stored_line_discount(line),
             }
         })
         .collect();
@@ -18914,6 +18950,7 @@ mod invoice_line_rounding_tests {
             Decimal::new(25, 1),
             Decimal::new(95, 0),
             Decimal::new(19, 0),
+            Decimal::ZERO,
         );
         assert_eq!(net, Decimal::new(23750, 2));
         assert_eq!(vat, Decimal::new(4513, 2));

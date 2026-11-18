@@ -633,7 +633,7 @@ fn money(value: &Value) -> Decimal {
 }
 
 fn gross_of(quantity: Decimal, unit_price: Decimal) -> Decimal {
-    gmed_server::money::line_amounts(quantity, unit_price, Decimal::from(19)).gross
+    gmed_server::money::line_amounts(quantity, unit_price, Decimal::from(19), Decimal::ZERO).gross
 }
 
 struct InterpreterCase {
