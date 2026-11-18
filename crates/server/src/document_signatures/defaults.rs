@@ -359,6 +359,100 @@ pub(crate) fn narrow_minor_signers<T>(
     }
 }
 
+/// A minor lead's document signed by one parent ([`MinorSigners::FormParent`])
+/// whose PDF names another parent than the one who signs it now: the
+/// signature line and frame print the parent with access to the form when it
+/// was made (owner 2026-11-18), and a login issued or revoked since, a
+/// custody or contact change moved the signature to the other parent. Like a
+/// contract whose Auftraggeber changed, a new version is made and sent
+/// (`SIGNER_CHANGED`). Documents without recorded frame persons are not
+/// judged.
+pub(crate) async fn form_signer_changed(
+    conn: &mut sqlx::PgConnection,
+    row: &PgRow,
+) -> Result<bool, sqlx::Error> {
+    let template = row
+        .try_get::<Option<String>, _>("generated_template_id")
+        .unwrap_or_default();
+    let art = row.try_get::<String, _>("art").unwrap_or_default();
+    if minor_signers(template.as_deref(), &art) != MinorSigners::FormParent {
+        return Ok(false);
+    }
+    let Some(lead_id) = row
+        .try_get::<Option<Uuid>, _>("lead_id")
+        .unwrap_or_default()
+    else {
+        return Ok(false);
+    };
+    let printed = printed_guardians(&super::package::recorded_anchors(row));
+    if printed.is_empty() {
+        return Ok(false);
+    }
+    let Some(loaded) = crate::routes::lead_representatives::load(conn, lead_id).await? else {
+        return Ok(false);
+    };
+    let representation = &loaded.representation;
+    if !parents_represent(representation) {
+        return Ok(false);
+    }
+    let paying_parent = crate::routes::documents::paying_parent_contact(conn, lead_id).await?;
+    let bindings = row
+        .try_get::<Option<Value>, _>("generated_bindings")
+        .ok()
+        .flatten();
+    let preference = form_parent_preference(
+        representation,
+        &chooser_emails(bindings.as_ref()),
+        paying_parent,
+    );
+    let signing = narrow_minor_signers(
+        representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+            .collect::<Vec<_>>(),
+        MinorSigners::FormParent,
+        true,
+        &preference,
+        None,
+        |person| Some(person.id),
+        |person| person.email.as_deref(),
+    );
+    Ok(signer_differs(
+        &printed,
+        signing.iter().filter_map(|person| person.email.as_deref()),
+    ))
+}
+
+/// The persons the numbered frames of a document record, in lower case.
+fn printed_guardians(anchors: &[crate::routes::documents::SignatureAnchor]) -> Vec<String> {
+    let mut printed: Vec<String> = anchors
+        .iter()
+        .filter(|anchor| anchor.role.starts_with("guardian_"))
+        .filter_map(|anchor| anchor.email.as_deref())
+        .map(normalized_email)
+        .filter(|email| !email.is_empty())
+        .collect();
+    printed.sort();
+    printed.dedup();
+    printed
+}
+
+/// Whether the persons printed in the frames are not exactly the signers.
+fn signer_differs<'a>(printed: &[String], signers: impl IntoIterator<Item = &'a str>) -> bool {
+    let mut signers: Vec<String> = signers
+        .into_iter()
+        .map(normalized_email)
+        .filter(|email| !email.is_empty())
+        .collect();
+    signers.sort();
+    signers.dedup();
+    printed != signers.as_slice()
+}
+
+/// The reason a document whose printed signer changed is not sent.
+pub(crate) const SIGNER_CHANGED: &str = "document_signer_changed";
+
 /// The consent choice's chooser addresses a generated document recorded.
 pub(crate) fn chooser_emails(bindings: Option<&Value>) -> Vec<String> {
     crate::consent_choices::OwnConsentChoice::from_bindings(bindings)
@@ -930,6 +1024,35 @@ mod tests {
             emails(lead_contracting_signers(&contract_only)),
             vec!["maria@example.org"]
         );
+    }
+
+    #[test]
+    fn a_document_printed_for_another_parent_is_outdated() {
+        let anchor = |role: &str, email: Option<&str>| crate::routes::documents::SignatureAnchor {
+            role: role.into(),
+            page: 0,
+            x_mm: 0.0,
+            y_mm: 0.0,
+            width_mm: 1.0,
+            height_mm: 1.0,
+            email: email.map(str::to_string),
+        };
+        // The Patientenformular printed for Berta, the login now Carl's.
+        let printed = printed_guardians(&[
+            anchor("guardian_1", Some(" Berta@Example.org ")),
+            anchor("agency", Some("staff@example.org")),
+        ]);
+        assert_eq!(printed, ["berta@example.org"]);
+        assert!(!signer_differs(&printed, ["berta@example.org"]));
+        assert!(signer_differs(&printed, ["carl@example.org"]));
+        // A form of before the rule, printed for both parents.
+        let both = printed_guardians(&[
+            anchor("guardian_1", Some("berta@example.org")),
+            anchor("guardian_2", Some("carl@example.org")),
+        ]);
+        assert!(signer_differs(&both, ["berta@example.org"]));
+        // Frames without a recorded person are not judged.
+        assert!(printed_guardians(&[anchor("guardian_1", None)]).is_empty());
     }
 
     #[test]

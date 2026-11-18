@@ -214,6 +214,31 @@ async fn current_eligibility_with_paper(
         }
         return Ok(Some(reason));
     }
+    if !paper_resign && let Ok(id) = row.try_get::<Uuid, _>("id") {
+        // An order document, estimate or Rahmenvertrag older than the last
+        // change of what it prints, and a one-parent document that names
+        // another parent than the one who signs it now (owner 2026-11-18):
+        // a new version is sent, so neither is offered nor preset.
+        let mut conn = state.db.acquire().await.map_err(db_error)?;
+        let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
+            .bind(id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(db_error)?;
+        if current == Some(false) {
+            return Ok(Some(match template_of(row).as_deref() {
+                Some("order_cost_estimate") => "estimate_document_outdated",
+                Some("framework_contract") => "framework_document_outdated",
+                _ => "order_document_outdated",
+            }));
+        }
+        if defaults::form_signer_changed(&mut conn, row)
+            .await
+            .map_err(db_error)?
+        {
+            return Ok(Some(defaults::SIGNER_CHANGED));
+        }
+    }
     crate::consent_choices::changed_since_generation(
         &state.db,
         template_of(row).as_deref(),

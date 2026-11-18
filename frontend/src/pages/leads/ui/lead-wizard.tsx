@@ -2765,8 +2765,8 @@ function outdatedDocumentSignErrorText(error: unknown, tx: Tx): string | null {
   }
   if (code === "framework_document_outdated") {
     return tx(
-      "Рамочный договор устарел: платящий родитель изменился после его создания. Создайте новую версию договора и подпишите её.",
-      "Der Rahmenvertrag ist veraltet: Der zahlende Elternteil wurde nach seiner Erstellung geändert. Erstellen Sie eine neue Version und lassen Sie diese unterschreiben.",
+      "Рамочный договор устарел: заказчик изменился после его создания. Создайте новую версию договора и подпишите её.",
+      "Der Rahmenvertrag ist veraltet: Der Auftraggeber wurde nach seiner Erstellung geändert. Erstellen Sie eine neue Version und lassen Sie diese unterschreiben.",
     );
   }
   return null;

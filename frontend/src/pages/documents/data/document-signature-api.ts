@@ -352,7 +352,9 @@ export function signatureErrorText(
     case "estimate_document_outdated":
       return tx("Смета старше последнего изменения заказа. Создайте новую версию и отправьте её.", "Der Kostenvoranschlag ist älter als die letzte Änderung des Auftrags. Erstellen Sie eine neue Version und senden Sie diese.");
     case "framework_document_outdated":
-      return tx("Рамочный договор называет другого заказчика: платящий родитель изменился. Создайте новую версию и отправьте её.", "Der Rahmenvertrag nennt einen anderen Auftraggeber: Der zahlende Elternteil wurde geändert. Erstellen Sie eine neue Version und senden Sie diese.");
+      return tx("Рамочный договор называет другого заказчика. Создайте новую версию и отправьте её.", "Der Rahmenvertrag nennt einen anderen Auftraggeber. Erstellen Sie eine neue Version und senden Sie diese.");
+    case "document_signer_changed":
+      return tx("Документ называет другого подписывающего родителя. Создайте новую версию и отправьте её.", "Das Dokument nennt einen anderen unterschreibenden Elternteil. Erstellen Sie eine neue Version und senden Sie diese.");
     case "signature_already_pending":
       return tx("Один из документов уже отправлен на подпись в другом запросе.", "Eines der Dokumente ist bereits in einer anderen Anfrage zur Unterschrift versendet.");
     case "onboarding_package_incomplete":

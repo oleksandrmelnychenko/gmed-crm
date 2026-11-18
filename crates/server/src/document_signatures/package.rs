@@ -1114,7 +1114,7 @@ pub(super) async fn assign_visual_positions(
 }
 
 /// The anchors the generator recorded with the document.
-fn recorded_anchors(row: &PgRow) -> Vec<SignatureAnchor> {
+pub(super) fn recorded_anchors(row: &PgRow) -> Vec<SignatureAnchor> {
     row.try_get::<Option<Value>, _>("generated_bindings")
         .ok()
         .flatten()
