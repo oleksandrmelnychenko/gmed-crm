@@ -12002,6 +12002,7 @@ ${serviceCommentLines.join("\n")}`
                     aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
                     name="agency_service"
                     value=""
+                    hidePlaceholderOption
                     onChange={(event) => addAgencyService(event.target.value)}
                     className={cn(selectClass, "w-full md:max-w-2xl")}
                   >
@@ -12015,11 +12016,13 @@ ${serviceCommentLines.join("\n")}`
                         (line) => line.agencyServiceId === service.id,
                       );
                       return (
-                        <optgroup key={service.id} label={agencyCatalogItemName(service, t, lang)}>
+                        <optgroup key={service.id} label={agencyCatalogItemName(service, t, lang)} data-variant="pill">
                           {priceChoices.map((price) => (
                             <option
                               key={price.id || `${service.id}-catalog-price`}
                               value={servicePriceOptionValue(service.id, price.id)}
+                              data-variant="catalog-price"
+                              data-picked={alreadySelected}
                               disabled={
                                 alreadySelected
                                 || (!price.id && !price.is_effective)

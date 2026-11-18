@@ -18,6 +18,9 @@ type ComboboxSelectOption = {
   disabled?: boolean
   disabledPresentation?: "group"
   searchText?: string
+  /** A catalog price under its service pill: indented, soft highlight, a green check when already picked. */
+  variant?: "catalog-price"
+  picked?: boolean
 }
 
 type ComboboxSelectProps = {
@@ -116,13 +119,18 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
       if (child.type === "optgroup") {
         const props = child.props as React.OptgroupHTMLAttributes<HTMLOptGroupElement> & {
           children?: React.ReactNode
+          "data-variant"?: "pill"
         }
         const groupLabel = textFromNode(props.label)
 
         if (groupLabel) {
           options.push({
             value: `__combobox_group_${options.length}_${groupLabel}`,
-            label: (
+            label: props["data-variant"] === "pill" ? (
+              <span className="inline-flex max-w-full items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-sm font-semibold text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-200">
+                <span className="truncate">{props.label}</span>
+              </span>
+            ) : (
               <span className="text-[11px] font-semibold text-muted-foreground">
                 {props.label}
               </span>
@@ -145,6 +153,8 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
         children?: React.ReactNode
         "data-search-text"?: string
         "data-disabled-presentation"?: "group"
+        "data-variant"?: "catalog-price"
+        "data-picked"?: boolean
       }
       const labelText = textFromNode(props.children)
       const value = props.value == null ? labelText : String(props.value)
@@ -154,6 +164,8 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
         label: props.children ?? value,
         disabled: props.disabled,
         disabledPresentation: props["data-disabled-presentation"],
+        variant: props["data-variant"],
+        picked: props["data-picked"],
         searchText: props["data-search-text"] ?? `${value} ${labelText} ${groupSearchText}`,
       })
     })
@@ -379,8 +391,10 @@ function ComboboxSelect({
                 const isChecked =
                   selectedValueSet.has(option.value) ||
                   (showValueIndicator && option.value === selectedValue)
+                const { variant, picked } = option as ComboboxSelectOption
+                const catalogPrice = variant === "catalog-price"
                 const disabledClassName = option.disabled
-                  ? option.disabledPresentation === "group"
+                  ? option.disabledPresentation === "group" || (catalogPrice && picked)
                     ? "data-disabled:pointer-events-none data-disabled:cursor-default"
                     : "data-disabled:pointer-events-none data-disabled:opacity-50"
                   : undefined
@@ -391,13 +405,16 @@ function ComboboxSelect({
                     value={option.value}
                     disabled={option.disabled}
                     className={cn(
-                      "relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground",
+                      "relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none",
+                      catalogPrice
+                        ? "pl-5 text-foreground data-highlighted:bg-muted/60"
+                        : "data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground",
                       disabledClassName,
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">{option.label}</span>
                     <span className="absolute right-2 flex size-4 items-center justify-center">
-                      {isChecked ? <CheckIcon className="size-4" /> : null}
+                      {catalogPrice && picked ? <CheckIcon aria-hidden="true" className="size-4 text-emerald-600 dark:text-emerald-400" /> : isChecked ? <CheckIcon className="size-4" /> : null}
                     </span>
                   </ComboboxPrimitive.Item>
                 )

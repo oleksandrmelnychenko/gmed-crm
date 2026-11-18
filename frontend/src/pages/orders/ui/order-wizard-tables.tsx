@@ -66,7 +66,7 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
   return <Section icon={ListOrdered} title={tx("Позиции заказа", "Auftragspositionen")} className="rounded-xl border border-border/70 bg-card p-4" accessory={<Badge variant="secondary">{lines.length}</Badge>}>
     {children}
     <Field label={tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}>
-      <NativeComboboxSelect aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")} className="w-full md:max-w-2xl" value="" disabled={busy} onChange={event => {
+      <NativeComboboxSelect aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")} className="w-full md:max-w-2xl" value="" hidePlaceholderOption disabled={busy} onChange={event => {
         const selection = parseServicePriceOptionValue(event.target.value);
         const service = catalogById.get(selection?.serviceId ?? "");
         const price = service && listAgencyServicePriceChoices(service, effectiveOn ?? undefined).find(item => item.id === selection?.priceVersionId);
@@ -74,8 +74,8 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
         onChange([...lines, { id: crypto.randomUUID(), description: service.service_name, quantity: "1", unit_price: String(price.unit_price), vat_rate: String(price.vat_rate), agency_service_id: service.id, agency_service_price_version_id: price.id || null }]);
       }}>
         <option value="">{tx("Выберите услугу и цену", "Leistung und Preis auswählen")}</option>
-        {catalog.map(service => <optgroup key={service.id} label={service.service_name}>
-          {listAgencyServicePriceChoices(service, effectiveOn ?? undefined).map(price => <option key={price.id || 'catalog'} value={servicePriceOptionValue(service.id, price.id)} disabled={lines.some(line => line.agency_service_id === service.id) || price.currency.toUpperCase() !== "EUR"}>
+        {catalog.map(service => <optgroup key={service.id} label={service.service_name} data-variant="pill">
+          {listAgencyServicePriceChoices(service, effectiveOn ?? undefined).map(price => <option key={price.id || 'catalog'} value={servicePriceOptionValue(service.id, price.id)} data-variant="catalog-price" data-picked={lines.some(line => line.agency_service_id === service.id)} disabled={lines.some(line => line.agency_service_id === service.id) || price.currency.toUpperCase() !== "EUR"}>
             {formatMoneyLabel(money(price.unit_price), price.currency)} / {serviceBillingUnitLabel(service.unit_label, tx)} · {price.name || germanDateLabel(price.valid_from)}{price.is_effective ? ` · ${tx("Рекомендуемая", "Empfohlen")}` : ""}
           </option>)}
         </optgroup>)}
