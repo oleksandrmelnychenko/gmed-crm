@@ -17,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { transitLineRebilledWarning } from "@/pages/patients/ui/sections/patient-billing-double-billing";
 import { useOrderRebilledReceipts } from "@/pages/patients/ui/sections/use-order-rebilled-receipts";
 import {
-  INVOICE_LINE_COMMENT_MAX_LENGTH,
   NEW_INVOICE_TYPES,
   calculateInvoiceSelectionTotals,
   invoiceSelectionPackageOverage,
@@ -38,7 +37,9 @@ import { ownServicesGrossOfSelection } from "@/components/order-budget/order-bud
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import { finalInvoiceTotals, finalOwnExtrasGross } from "../model/final-invoice";
-import { FinalInvoiceLines, FinalInvoiceSettlement } from "./final-invoice-lines";
+import { FinalInvoiceLines, FinalInvoiceSettlement, InvoiceLinePills, InvoiceLineRemark } from "./final-invoice-lines";
+import { StatusChip } from "@/components/ui/status-chip";
+import { formatAppDate } from "@/lib/app-time-zone";
 import type { CreateForm, InvoiceType, PrepaymentAdvancePreview, QuoteOption } from "../model/types";
 import { appDateKey } from "@/lib/app-time-zone";
 import { INVOICE_PAYMENT_METHODS } from "../model/payment-correction";
@@ -167,12 +168,12 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   // (owner 2026-11-17); the release records the payment with its day.
   const canRecordPayment = hasCapability(user, "invoices.finance");
   const [receivedDateRefused, setReceivedDateRefused] = useState(false);
-  // A final proposes the period its issued invoice prints for these lines
-  // (the dates of the services, from the preview); else the order's planned
-  // one (verify2-A S2-4).
-  const [finalPeriod, setFinalPeriod] = useState<ServicePeriodForm | null>(null);
-  const periodDefaults = final && finalPeriod ? finalPeriod : quotePeriodDefaults(selectedQuote);
-  const period = form.servicePeriod ?? periodDefaults;
+  // Not prefilled (owner 2026-11-18): empty fields, the programme dates of
+  // the order offered as pills under them; left empty, the server prints the
+  // period of the lines or the order as before.
+  const emptyPeriod: ServicePeriodForm = { from: "", to: "" };
+  const period = form.servicePeriod ?? emptyPeriod;
+  const programPeriod = quotePeriodDefaults(selectedQuote);
   const periodProblem = servicePeriodProblem(period);
   const received = form.receivedPayment;
   // Left empty, the amount is what the invoice leaves to pay at its release:
@@ -216,8 +217,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const quantityLabel = de ? "Menge" : "Количество";
   const availableLabel = de ? "Verfügbar" : "Доступно";
   const descriptionLabel = de ? "Leistungsbeschreibung" : "Описание услуги";
-  const commentLabel = de ? "Anmerkung auf der Rechnung" : "Примечание в счёте";
-  const commentPlaceholder = de ? "z. B. 2. und 3. Quartal 2026" : "например: за 2 и 3 квартал 2026";
   const availableCount = final
     ? lines.length + extras.length
     : lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
@@ -307,16 +306,38 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       : (de ? "Leistungszeitraum" : "Период оказания услуг")}
                   </AdminSectionTitle>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <FormField label={de ? "Von" : "С"}>
-                      <Input type="date" aria-label={de ? "Leistungszeitraum von" : "Период услуг с"} disabled={formBusy} value={period.from}
-                        className={cn(inputClass, "w-full min-w-0")}
-                        onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? periodDefaults), from: event.target.value } }))} />
-                    </FormField>
-                    <FormField label={de ? "Bis" : "По"}>
-                      <Input type="date" aria-label={de ? "Leistungszeitraum bis" : "Период услуг по"} disabled={formBusy} value={period.to}
-                        className={cn(inputClass, "w-full min-w-0")}
-                        onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? periodDefaults), to: event.target.value } }))} />
-                    </FormField>
+                    <div className="min-w-0 space-y-1.5">
+                      <FormField label={de ? "Von" : "С"}>
+                        <Input type="date" aria-label={de ? "Leistungszeitraum von" : "Период услуг с"} disabled={formBusy} value={period.from}
+                          className={cn(inputClass, "w-full min-w-0")}
+                          onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), from: event.target.value } }))} />
+                      </FormField>
+                      {programPeriod.from ? (
+                        <button type="button" disabled={formBusy} data-testid="invoice-period-program-start"
+                          onClick={() => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), from: programPeriod.from } }))}
+                          className="rounded-full focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
+                          <StatusChip tone="info" className="cursor-pointer px-2 py-0 text-[11px] tabular-nums hover:bg-sky-100">
+                            {de ? "Programmbeginn" : "Начало программы"} {formatAppDate(programPeriod.from)}
+                          </StatusChip>
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 space-y-1.5">
+                      <FormField label={de ? "Bis" : "По"}>
+                        <Input type="date" aria-label={de ? "Leistungszeitraum bis" : "Период услуг по"} disabled={formBusy} value={period.to}
+                          className={cn(inputClass, "w-full min-w-0")}
+                          onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), to: event.target.value } }))} />
+                      </FormField>
+                      {programPeriod.to ? (
+                        <button type="button" disabled={formBusy} data-testid="invoice-period-program-end"
+                          onClick={() => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), to: programPeriod.to } }))}
+                          className="rounded-full focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
+                          <StatusChip tone="info" className="cursor-pointer px-2 py-0 text-[11px] tabular-nums hover:bg-sky-100">
+                            {de ? "Programmende" : "Окончание"} {formatAppDate(programPeriod.to)}
+                          </StatusChip>
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </section>
 
@@ -469,7 +490,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                               }} />
                             <div className="min-w-0">
                               <p className="break-words text-sm font-medium">{name}</p>
-                              <p className="mt-1 text-xs leading-5 text-muted-foreground">{de ? "Preis netto" : "Цена без НДС"}: {money(line.unit_price)} · {t.invoices_vat}: {line.vat_rate}%</p>
+                              <InvoiceLinePills unitPrice={line.unit_price} vatRate={line.vat_rate} discountPercent={line.discount_percent}
+                                origin={{ kind: "estimate", quantity: Number(line.quantity).toLocaleString("de-DE", { maximumFractionDigits: 4 }) }} money={money} />
                               {hasNotes && notes !== line.description.trim() ? (
                                 <details className="mt-1 text-xs text-muted-foreground">
                                   <summary className="w-fit cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">{descriptionLabel}</summary>
@@ -494,14 +516,9 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                               </div>
                             </div>
                             {selected ? (
-                              <label className="col-start-2 block min-w-0 space-y-1 text-xs text-muted-foreground sm:col-span-3">
-                                <span>{commentLabel}</span>
-                                <Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={busy}
-                                  aria-label={`${commentLabel}: ${name}`} placeholder={commentPlaceholder}
-                                  value={form.lineComments[String(index)] ?? ""}
-                                  className={cn(inputClass, "h-8 w-full min-w-0")}
-                                  onChange={(event) => onFormChange((current) => ({ ...current, lineComments: { ...current.lineComments, [String(index)]: event.target.value } }))} />
-                              </label>
+                              <InvoiceLineRemark className="col-start-2 min-w-0 sm:col-span-3" name={name} busy={busy}
+                                value={form.lineComments[String(index)] ?? ""}
+                                onChange={(value) => onFormChange((current) => ({ ...current, lineComments: { ...current.lineComments, [String(index)]: value } }))} />
                             ) : null}
                             {available <= 0 ? <p className="col-start-2 text-xs text-muted-foreground sm:col-span-3">{de ? "Bereits vollständig abgerechnet" : "Уже выставлено полностью"}</p> : null}
                             {invalid ? <p role="alert" className="col-start-2 text-xs text-destructive sm:col-span-3">{de ? `Menge muss größer als 0 und höchstens ${availableText} sein.` : `Количество должно быть больше 0 и не больше ${availableText}.`}</p> : null}
@@ -547,8 +564,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t.invoices_vat}</dt><dd>{money(totals.vat)}</dd></div>
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
-                  {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross) + (final ? finalOwnExtrasGross(form, extras) : 0)} testId="invoice-create-budget" /> : null}
-                  {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} onDueChange={setFinalDue} onServicePeriod={setFinalPeriod} /> : null}
+                  {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" variant="pill" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross) + (final ? finalOwnExtrasGross(form, extras) : 0)} testId="invoice-create-budget" /> : null}
+                  {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} onDueChange={setFinalDue} /> : null}
                   {selectedQuote && !prepaymentMode && !final && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>

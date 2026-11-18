@@ -1,7 +1,9 @@
 import { useEffect, useState, type SetStateAction } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { inputClass } from "@/components/ui-shell";
 import { agencyServiceNameLabel, agencyServiceUnitCount } from "@/lib/agency-service-labels";
 import { useLang } from "@/lib/i18n";
@@ -34,7 +36,89 @@ type LinesProps = {
   onFormChange: (value: SetStateAction<CreateForm>) => void;
 };
 
-const markerClass = "rounded-sm px-1.5 py-0.5 text-[11px] font-medium leading-4";
+const pillClass = "px-1.5 py-0 text-[11px] leading-4";
+
+/** Where a position comes from: the cost estimate, or added while the order ran. */
+export type InvoiceLineOrigin = { kind: "estimate"; quantity: string } | { kind: "added" };
+
+/**
+ * The facts of one invoice position as pills (owner 2026-11-18): net price,
+ * VAT, discount, origin (by the estimate / added during the order) and how
+ * the billed quantity deviates from the estimate.
+ */
+export function InvoiceLinePills({ unitPrice, vatRate, discountPercent, origin, deviation, money }: {
+  unitPrice: unknown;
+  vatRate: unknown;
+  discountPercent?: unknown;
+  origin: InvoiceLineOrigin;
+  deviation?: "above" | "below" | "not_delivered" | null;
+  money: (value: unknown) => string;
+}) {
+  const { lang } = useLang();
+  const de = lang === "de";
+  const discount = Number(discountPercent ?? 0);
+  const percent = (value: unknown) => Number(value ?? 0).toLocaleString("de-DE", { maximumFractionDigits: 2 });
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1" data-testid="invoice-line-pills">
+      <StatusChip tone="neutral" className={cn(pillClass, "font-mono tabular-nums")}>{money(unitPrice)} {de ? "netto" : "нетто"}</StatusChip>
+      <StatusChip tone="neutral" className={cn(pillClass, "tabular-nums")}>{de ? "MwSt." : "НДС"} {percent(vatRate)} %</StatusChip>
+      {Number.isFinite(discount) && discount > 0 ? (
+        <StatusChip tone="success" className={cn(pillClass, "tabular-nums")} data-testid="invoice-line-discount">{de ? "Rabatt" : "Скидка"} {percent(discount)} %</StatusChip>
+      ) : null}
+      {origin.kind === "estimate" ? (
+        <StatusChip tone="info" className={pillClass} data-testid="invoice-line-origin-estimate">{de ? "laut Angebot" : "по смете"} {origin.quantity}</StatusChip>
+      ) : (
+        <StatusChip tone="neutral" className={cn(pillClass, "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200")} data-testid="invoice-line-origin-added">{de ? "im Auftrag hinzugefügt" : "добавлено в ходе заказа"}</StatusChip>
+      )}
+      {deviation === "above" ? (
+        <StatusChip tone="warning" className={pillClass} data-testid="final-line-above-estimate">{de ? "über Angebot" : "больше сметы"}</StatusChip>
+      ) : deviation === "below" ? (
+        <StatusChip tone="neutral" className={pillClass} data-testid="final-line-below-estimate">{de ? "unter Angebot" : "меньше сметы"}</StatusChip>
+      ) : deviation === "not_delivered" ? (
+        <StatusChip tone="neutral" className={pillClass} data-testid="final-line-not-delivered">{de ? "nicht erbracht" : "не оказано"}</StatusChip>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The remark printed under a position: a compact «+ Примечание» button that
+ * opens the field; open from the start when a remark exists.
+ */
+export function InvoiceLineRemark({ name, value, busy, onChange, className }: {
+  name: string;
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const { lang } = useLang();
+  const de = lang === "de";
+  const [open, setOpen] = useState(value.trim() !== "");
+  const label = de ? "Anmerkung auf der Rechnung" : "Примечание в счёте";
+  if (!open && value.trim() === "") {
+    return (
+      <div className={className}>
+        <Button type="button" variant="ghost" size="sm" disabled={busy}
+          aria-label={`${de ? "Anmerkung hinzufügen" : "Добавить примечание"}: ${name}`}
+          className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+          onClick={() => setOpen(true)}>
+          <Plus className="size-3" aria-hidden />{de ? "Anmerkung" : "Примечание"}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className={className}>
+      <Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={busy} autoFocus={value === ""}
+        aria-label={`${label}: ${name}`}
+        placeholder={de ? "z. B. 2. und 3. Quartal 2026" : "например: за 2 и 3 квартал 2026"}
+        value={value}
+        className={cn(inputClass, "h-7 w-full min-w-0 text-xs")}
+        onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
 
 /**
  * Final invoice positions (owner 2026-11-17): every estimate line with the
@@ -50,17 +134,8 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
   const outside = extras.filter((extra) => extra.quote_line_index == null || !lines[extra.quote_line_index]);
   // The remark printed under a position (e.g. «за 2 и 3 квартал 2026»), on
   // every final line as before fix-96.
-  const commentLabel = de ? "Anmerkung auf der Rechnung" : "Примечание в счёте";
-  const commentPlaceholder = de ? "z. B. 2. und 3. Quartal 2026" : "например: за 2 и 3 квартал 2026";
   const remarkField = (name: string, value: string, onChange: (value: string) => void) => (
-    <label className="col-span-3 block min-w-0 space-y-1 text-xs text-muted-foreground">
-      <span>{commentLabel}</span>
-      <Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={busy}
-        aria-label={`${commentLabel}: ${name}`} placeholder={commentPlaceholder}
-        value={value}
-        className={cn(inputClass, "h-8 w-full min-w-0")}
-        onChange={(event) => onChange(event.target.value)} />
-    </label>
+    <InvoiceLineRemark className="col-span-3" name={name} value={value} busy={busy} onChange={onChange} />
   );
 
   const serviceRow = (extra: DeliveredOrderService, nested: boolean) => {
@@ -71,11 +146,8 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
       <div key={extra.order_leistung_id} data-testid="final-order-service"
         className={cn("grid grid-cols-[minmax(0,1fr)_6rem_6.5rem] gap-x-2.5 gap-y-1 p-3", nested && "border-l-2 border-amber-300 bg-muted/20 pl-4")}>
         <div className="min-w-0">
-          <p className="break-words text-sm">{name}</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {de ? "Preis netto" : "Цена без НДС"}: {money(extra.unit_price)} · {t.invoices_vat}: {extra.vat_rate}%
-            {" · "}<span className={cn(markerClass, "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300")}>{de ? "nicht im Angebot" : "вне сметы"}</span>
-          </p>
+          <p className="break-words text-sm font-medium">{name}</p>
+          <InvoiceLinePills unitPrice={extra.unit_price} vatRate={extra.vat_rate} discountPercent={extra.discount_percent} origin={{ kind: "added" }} money={money} />
         </div>
         <label className="space-y-1 text-xs text-muted-foreground">
           <span>{quantityLabel}</span>
@@ -111,20 +183,13 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
             <div className={cn("grid grid-cols-[minmax(0,1fr)_6rem_6.5rem] gap-x-2.5 gap-y-1 p-3", comparison.notDelivered && "bg-muted/30")}>
               <div className="min-w-0">
                 <p className="break-words text-sm font-medium">{name}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{de ? "Preis netto" : "Цена без НДС"}: {money(line.unit_price)} · {t.invoices_vat}: {line.vat_rate}%</p>
+                <InvoiceLinePills unitPrice={line.unit_price} vatRate={line.vat_rate} discountPercent={line.discount_percent}
+                  origin={{ kind: "estimate", quantity: unitCount(formatQuantity(comparison.estimate), line.unit) }}
+                  deviation={comparison.notDelivered ? "not_delivered" : comparison.aboveEstimate ? "above" : comparison.recorded && comparison.difference < 0 ? "below" : null}
+                  money={money} />
                 <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs leading-5" data-testid="final-line-comparison">
-                  <span className="text-muted-foreground">
-                    {de ? "laut Angebot" : "по смете"} {unitCount(formatQuantity(comparison.estimate), line.unit)}
-                    {comparison.recorded ? ` · ${de ? "erbracht" : "фактически"} ${unitCount(formatQuantity(comparison.actual), line.unit)}` : ""}
-                  </span>
-                  {!comparison.recorded ? (
-                    <span className={cn(markerClass, "bg-muted text-muted-foreground")}>{de ? "laut Angebot" : "по смете"}</span>
-                  ) : null}
-                  {comparison.notDelivered ? (
-                    <span className={cn(markerClass, "bg-muted text-muted-foreground")} data-testid="final-line-not-delivered">{de ? "nicht erbracht" : "не оказано"}</span>
-                  ) : null}
-                  {comparison.aboveEstimate ? (
-                    <span className={cn(markerClass, "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300")} data-testid="final-line-above-estimate">{de ? "über Angebot" : "больше сметы"}</span>
+                  {comparison.recorded ? (
+                    <span className="text-muted-foreground">{de ? "erbracht" : "фактически"} {unitCount(formatQuantity(comparison.actual), line.unit)}</span>
                   ) : null}
                   {comparison.difference !== 0 ? (
                     <span className={cn("font-mono tabular-nums", comparison.difference > 0 ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")} data-testid="final-line-difference">

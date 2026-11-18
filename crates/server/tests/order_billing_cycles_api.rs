@@ -2174,3 +2174,90 @@ async fn order_line_discounts_are_validated_and_change_the_order_terms() {
             .any(|line| line.get("discount_percent").is_none())
     );
 }
+
+/// Owner 2026-11-18 (interim invoices offered again): an advance, then an
+/// interim invoice for part of a discounted line, then the final for the
+/// rest. The interim and the final bill the discounted line to the cent and
+/// the paid advance is set off exactly once across them.
+#[tokio::test]
+async fn advance_interim_and_final_of_a_discounted_line_settle_to_the_cent() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let price = Decimal::from(60);
+    let discount = Decimal::from(10);
+    let case = interpreter_case_with_tariff(&ctx, &ceo, 3, Some(price), discount).await;
+    // 3 × 60,00 − 10 % = 162,00 net, 192,78 gross.
+    let whole = discounted(Decimal::from(3), price, discount);
+    assert_eq!(whole.gross, Decimal::new(19278, 2));
+    let advance_paid = Decimal::from(100);
+    paid_prepayment_advance(&ctx, &ceo, &case, advance_paid, advance_paid).await;
+    report_hours(&ctx, &ceo, &case, 3.0, 1).await;
+
+    let (status, interim) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({ "invoice_type": "interim", "line_items": [{ "line_index": 0, "quantity": 1 }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{interim:?}");
+    let one_hour = discounted(Decimal::ONE, price, discount);
+    assert_eq!(money(&interim["total_gross"]), one_hour.gross);
+    assert_eq!(interim["line_items"][0]["discount_percent"], "10");
+    let interim = release_invoice(&ctx, &ceo, interim["id"].as_str().unwrap()).await;
+
+    let (status, preview) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/final-preview", case.quote_id),
+        &ceo,
+        Some(json!({ "line_items": [{ "line_index": 0, "quantity": 2 }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview:?}");
+    let rest_gross = whole.gross - one_hour.gross;
+    assert_eq!(money(&preview["total_gross"]), rest_gross, "{preview:?}");
+    assert_eq!(
+        preview["interim_invoices"].as_array().map(Vec::len),
+        Some(1),
+        "{preview:?}"
+    );
+
+    let (status, final_invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(
+            json!({ "invoice_type": "final", "line_items": [{ "line_index": 0, "quantity": 2 }] }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice:?}");
+    assert_eq!(money(&final_invoice["total_gross"]), rest_gross);
+    let released = release_invoice(&ctx, &ceo, final_invoice["id"].as_str().unwrap()).await;
+    assert_eq!(
+        money(&released["balance_due"]),
+        money(&preview["due_gross"]),
+        "{released:?}"
+    );
+    // Interim + final bill the whole discounted line; the advance is set off
+    // once: what stays open on both is the line less the advance.
+    assert_eq!(
+        money(&interim["total_gross"]) + money(&released["total_gross"]),
+        whole.gross
+    );
+    assert_eq!(
+        money(&interim["prepayment_applied_amount"])
+            + money(&released["prepayment_applied_amount"]),
+        advance_paid,
+        "{interim:?} {released:?}"
+    );
+    assert_eq!(
+        money(&interim["balance_due"]) + money(&released["balance_due"]),
+        whole.gross - advance_paid
+    );
+}

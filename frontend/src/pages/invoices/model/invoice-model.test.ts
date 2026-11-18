@@ -45,9 +45,9 @@ import {
 } from "./invoice-model";
 import type { InvoiceItem, InvoiceLineItem, QuoteOption } from "./types";
 
-it("offers no interim type for a new invoice but keeps it for existing ones", () => {
-  // Owner 2026-11-17: «Промежуточный» is hidden from «Новый счёт».
-  expect(NEW_INVOICE_TYPES).toEqual(["advance", "final"]);
+it("offers the interim type for a new invoice again", () => {
+  // Owner 2026-11-18: «Промежуточный» is back in «Новый счёт».
+  expect(NEW_INVOICE_TYPES).toEqual(["advance", "interim", "final"]);
   // Lists and filters still know interim invoices.
   expect(INVOICE_TYPES).toContain("interim");
 });

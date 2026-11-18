@@ -38,11 +38,10 @@ import type {
 export const INVOICE_TYPES: InvoiceType[] = ["advance", "interim", "final"];
 
 /**
- * Types a new invoice can be started as. «Промежуточный» (interim) is no
- * longer offered (owner 2026-11-17); existing interim invoices keep working,
- * and the overage-only invoice still goes out as interim on its own.
+ * Types a new invoice can be started as. «Промежуточный» (interim) is offered
+ * again (owner 2026-11-18, reversing 2026-11-17).
  */
-export const NEW_INVOICE_TYPES: InvoiceType[] = ["advance", "final"];
+export const NEW_INVOICE_TYPES: InvoiceType[] = ["advance", "interim", "final"];
 
 export const INVOICE_STATUSES: InvoiceStatus[] = [
   "draft",

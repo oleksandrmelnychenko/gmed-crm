@@ -912,7 +912,7 @@ function useStaffInvoicesPageContent() {
   const initialQuoteId = searchParams.get("quote") ?? "";
   const initialInvoiceId = searchParams.get("invoice") ?? "";
   const requestedInvoiceType = searchParams.get("invoice_type") as InvoiceType | null;
-  // `?invoice_type=interim` no longer starts an interim invoice (owner 2026-11-17).
+  // `?invoice_type=interim` starts an interim invoice again (owner 2026-11-18).
   const initialInvoiceType = requestedInvoiceType && NEW_INVOICE_TYPES.includes(requestedInvoiceType)
     ? requestedInvoiceType
     : "final";

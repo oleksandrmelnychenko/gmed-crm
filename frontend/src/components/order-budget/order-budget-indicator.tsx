@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 
+import { CircleAlert } from "lucide-react";
+
+import { StatusChip } from "@/components/ui/status-chip";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +63,8 @@ type ViewProps = {
   deltaGross?: number | ((budget: OrderBudget) => number);
   className?: string;
   testId?: string;
+  /** `pill`: a status chip (the new-invoice summary), else a text line. */
+  variant?: "line" | "pill";
 };
 
 /**
@@ -67,10 +72,26 @@ type ViewProps = {
  * Amber above 90 % of the contract, red «Превышение на X €» when over, muted
  * «Договорная сумма не задана» without a signed contract. Never blocks.
  */
-export function OrderBudgetLine({ budget, lang, basis, deltaGross, className, testId = "order-budget-indicator" }: ViewProps) {
+export function OrderBudgetLine({ budget, lang, basis, deltaGross, className, testId = "order-budget-indicator", variant = "line" }: ViewProps) {
   if (!budget) return null;
   const delta = typeof deltaGross === "function" ? deltaGross(budget) : deltaGross;
   const state = orderBudgetState(budget, { basis, deltaGross: delta });
+  if (variant === "pill") {
+    const tone = state.kind === "over" ? "error" : state.kind === "near" ? "warning" : "neutral";
+    return (
+      <StatusChip
+        tone={tone}
+        data-testid={testId}
+        data-state={state.kind}
+        role={state.kind === "over" ? "status" : undefined}
+        title={orderBudgetSourceText(budget, lang) ?? undefined}
+        className={cn("items-start whitespace-normal rounded-lg text-[11px] leading-4 tabular-nums", className)}
+      >
+        {state.kind === "over" || state.kind === "near" ? <CircleAlert aria-hidden className="mt-px" /> : null}
+        <span className="min-w-0">{orderBudgetText(state, lang)}</span>
+      </StatusChip>
+    );
+  }
   return (
     <div
       data-testid={testId}

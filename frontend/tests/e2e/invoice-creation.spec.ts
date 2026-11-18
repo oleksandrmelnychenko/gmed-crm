@@ -202,18 +202,18 @@ test("an advance invoice bills the order's required prepayment unless positions 
   expect(fixture.errors).toEqual([]);
 });
 
-test("a new invoice is no longer offered as interim", async ({ page }) => {
-  // Owner 2026-11-17: «Промежуточный» is gone from the type choice, also
-  // when a link asks for it; existing interim invoices stay in the filters.
+test("a new invoice can be interim again", async ({ page }) => {
+  // Owner 2026-11-18 (reversing 2026-11-17): «Промежуточный» is a type of a
+  // new invoice again, also when a link asks for it.
   await prepare(page);
   await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=interim&create=1`);
   const dialog = page.getByRole("dialog", { name: "Новый счёт", exact: true });
   const type = dialog.getByRole("combobox", { name: "Тип счёта", exact: true });
-  await expect(type).toContainText("Финальный");
+  await expect(type).toContainText("Промежуточный");
   await type.click();
   const listbox = page.locator('[role="listbox"]');
-  await expect(listbox.getByRole("option", { name: "Промежуточный", exact: true })).toHaveCount(0);
-  await expect(listbox.getByRole("option")).toHaveCount(2);
+  await expect(listbox.getByRole("option", { name: "Промежуточный", exact: true })).toHaveCount(1);
+  await expect(listbox.getByRole("option")).toHaveCount(3);
 });
 
 test("a position remark is sent with the invoice and can be changed on the draft", async ({ page }) => {
@@ -223,7 +223,9 @@ test("a position remark is sent with the invoice and can be changed on the draft
   // (interim is no longer offered — owner 2026-11-17); every final line has
   // its remark field again (lost with fix-96).
   await expect(dialog.getByTestId("final-invoice-lines")).toBeVisible();
-  await expect(dialog.getByRole("textbox", { name: "Примечание в счёте: Service 2", exact: true })).toHaveCount(1);
+  // The remark opens from a compact «+ Примечание» button (owner 2026-11-18).
+  await expect(dialog.getByRole("button", { name: "Добавить примечание: Service 2", exact: true })).toHaveCount(1);
+  await dialog.getByRole("button", { name: "Добавить примечание: Service 1", exact: true }).click();
   await dialog.getByRole("textbox", { name: "Примечание в счёте: Service 1", exact: true }).fill("  за 2 и 3 квартал 2026 ");
   await page.screenshot({ path: "../artifacts/design-qa/invoice-create-remark-ru.png", animations: "disabled" });
   await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
@@ -350,13 +352,15 @@ test("a final invoice proposes the delivered quantities, services outside the es
   });
   const dialog = await openCreate(page);
   const lines = dialog.getByTestId("final-invoice-line");
-  await expect(lines.nth(0).getByTestId("final-line-comparison")).toContainText("по смете 3");
+  await expect(lines.nth(0).getByTestId("invoice-line-origin-estimate")).toHaveText("по смете 3");
   await expect(lines.nth(0).getByTestId("final-line-comparison")).toContainText("фактически 5");
   await expect(lines.nth(0).getByTestId("final-line-above-estimate")).toHaveText("больше сметы");
   await expect(lines.nth(0).getByTestId("final-line-difference")).toContainText("+2");
   await expect(lines.nth(0).getByTestId("final-line-difference")).toContainText("142,80");
   // No delivery record: the estimate quantity, marked as such.
-  await expect(lines.nth(1).getByTestId("final-line-comparison")).toContainText("по смете");
+  await expect(lines.nth(1).getByTestId("invoice-line-origin-estimate")).toContainText("по смете");
+  // A service outside the estimate is marked as added during the order (owner 2026-11-18).
+  await expect(dialog.getByTestId("final-order-service").first().getByTestId("invoice-line-origin-added")).toHaveText("добавлено в ходе заказа");
   await dialog.getByRole("spinbutton", { name: "Количество: Transfer", exact: true }).fill("0");
   await expect(lines.nth(1).getByTestId("final-line-not-delivered")).toHaveText("не оказано");
   await expect(dialog.getByTestId("final-order-service")).toContainText("Zusatztransfer Klinik");
@@ -475,8 +479,11 @@ test("a payment received before the invoice is sent with the new invoice", async
   Object.assign(fixture.quote, { order_period_from: "2026-10-20", order_period_to: "2026-10-25", payment_term_days: 14 });
   await startClockAt(page);
   const dialog = await openCreate(page);
-  await expect(dialog.getByTestId("release-due-date-default")).toHaveText("+14 дней от выставления (26.10.2026)");
+  await expect(dialog.getByTestId("release-due-date-default")).toHaveText("+14 дней · 26.10.2026");
   await expect(dialog.getByTestId("invoice-service-period")).toContainText("Период оказания услуг");
+  // Not prefilled: the programme dates are offered as pills (owner 2026-11-18).
+  await expect(dialog.getByTestId("invoice-period-program-start")).toHaveText("Начало программы 20.10.2026");
+  await expect(dialog.getByTestId("invoice-period-program-end")).toHaveText("Окончание 25.10.2026");
   await dialog.getByRole("checkbox", { name: "Оплата уже поступила", exact: true }).check();
   const received = dialog.getByRole("group", { name: "Дата поступления" });
   await received.getByRole("spinbutton", { name: pickerSection.day }).fill("10");

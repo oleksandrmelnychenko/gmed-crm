@@ -1,4 +1,7 @@
+import { CircleAlert } from "lucide-react";
+
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -37,13 +40,14 @@ export function ReleaseDueDateField({ value, onChange, termDays, ariaLabel, disa
         onChange={(event) => onChange(event.target.value)}
       />
       {state.empty ? (
-        <span className="block text-xs text-muted-foreground" data-testid="release-due-date-default">
-          {de ? `+${state.termDays} Tage ab Ausstellung (${shown})` : `+${state.termDays} дней от выставления (${shown})`}
-        </span>
+        <StatusChip tone="neutral" className="mt-1 font-mono text-[11px] tabular-nums" data-testid="release-due-date-default">
+          {de ? `+${state.termDays} Tage · ${shown}` : `+${state.termDays} дней · ${shown}`}
+        </StatusChip>
       ) : state.shorterThanTerm ? (
-        <span className="block text-xs text-amber-700 dark:text-amber-300" data-testid="release-due-date-short">
-          {de ? `Kürzer als +${state.termDays} Tage ab Ausstellung (${shown})` : `Меньше +${state.termDays} дней от выставления (${shown})`}
-        </span>
+        <StatusChip tone="warning" className="mt-1 text-[11px] tabular-nums" data-testid="release-due-date-short">
+          <CircleAlert aria-hidden />
+          {de ? `Unter ${state.termDays} Tagen · ${shown}` : `Меньше ${state.termDays} дней · ${shown}`}
+        </StatusChip>
       ) : null}
     </>
   );

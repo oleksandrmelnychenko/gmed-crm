@@ -157,7 +157,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const [proposedOrderId, setProposedOrderId] = useState<string | null>(null);
   const [billingCurrency, setBillingCurrency] = useState("EUR");
   const [quoteId, setQuoteId] = useState("");
-  // A new invoice is final; interim is no longer offered (owner 2026-11-17).
+  // A new invoice starts as final; interim is offered again (owner 2026-11-18).
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("final");
   const [dueDate, setDueDate] = useState("");
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
@@ -597,7 +597,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); setProposedOrderId(null); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setSelectedConcierge([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : copy.orderStatus[item.status] ?? item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.currency}><NativeComboboxSelect value={activeCurrency} disabled={Boolean(order) || busy || saving} onChange={event => { setBillingCurrency(event.target.value); setSelectedExpenses([]); setCreated(null); }}>{currencyOptions.map(currency => <option key={currency} value={currency}>{currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.quote}><NativeComboboxSelect value={quoteId || "__empty__"} disabled={!order || busy || saving} onChange={event => selectQuote(event.target.value === "__empty__" ? "" : event.target.value)}><option value="__empty__">{copy.noQuote}</option>{orderQuotes.map(item => <option key={item.id} value={item.id}>{item.quote_number}</option>)}</NativeComboboxSelect></Field>
-          <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line, value) > 0 ? index : -1).filter(index => index >= 0)); }}>{/* No new interim invoices (owner 2026-11-17). */}<option value="final">{copy.final}</option></NativeComboboxSelect></Field>
+          <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line, value) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
           <Field label={copy.due}><ReleaseDueDateField ariaLabel={copy.due} disabled={saving} value={dueDate} onChange={setDueDate} /></Field>
         </div>
         {error ? <Banner tone="error">{error}</Banner> : null}
