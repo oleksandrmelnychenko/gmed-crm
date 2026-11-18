@@ -144,6 +144,8 @@ export type Leistung = {
   unit_price_snapshot?: unknown;
   currency_snapshot?: string | null;
   vat_rate_snapshot?: unknown;
+  /** Discount in percent of the line (owner 2026-11-18). */
+  discount_percent?: unknown;
   planned_partner_cost_net?: unknown;
   planned_partner_cost_vat?: unknown;
   planned_partner_cost_gross?: unknown;
@@ -907,6 +909,8 @@ export type LeistungFormState = {
   unitPrice: string;
   currency: string;
   vatRate: string;
+  /** Discount in percent (owner 2026-11-18); empty is none. */
+  discountPercent: string;
   plannedPartnerCost: PartnerCostAmounts;
   providerId: string;
   doctorId: string;

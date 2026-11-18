@@ -124,18 +124,40 @@ export function moneyInputPayload(value: string): string | null {
 export type MoneyLineAmounts = { net: number; vat: number; gross: number };
 
 /**
+ * The discount of a line, rounded like the server (`money::line_discount_amount`):
+ * round(round(quantity × unit price) × discount % / 100); 0 % is none, 100 %
+ * takes the whole list net (owner 2026-11-18).
+ */
+export function moneyLineDiscount(quantity: number, unitPriceNet: number, discountPercent = 0): number {
+  const listNet = roundCents(quantity * unitPriceNet);
+  if (!Number.isFinite(discountPercent) || discountPercent <= 0) return 0;
+  if (discountPercent >= 100) return listNet;
+  return roundCents((listNet * discountPercent) / 100);
+}
+
+/**
  * Amounts of one quote/order/invoice line, rounded like the server:
- * net = round(quantity × unit price), VAT = round(net × rate / 100),
+ * net = round(quantity × unit price) − discount, VAT = round(net × rate / 100),
  * gross = net + VAT. Document totals are sums of these rounded lines.
  */
 export function moneyLineAmounts(
   quantity: number,
   unitPriceNet: number,
   vatRatePercent: number,
+  discountPercent = 0,
 ): MoneyLineAmounts {
-  const net = roundCents(quantity * unitPriceNet);
+  const net = roundCents(roundCents(quantity * unitPriceNet) - moneyLineDiscount(quantity, unitPriceNet, discountPercent));
   const vat = roundCents((net * vatRatePercent) / 100);
   return { net, vat, gross: roundCents(net + vat) };
+}
+
+/** A typed discount ("10", "12,5") as a number 0–100 with two decimals, or null. */
+export function parseDiscountPercent(value: unknown): number | null {
+  const text = String(value ?? "").trim().replace(",", ".");
+  if (text === "") return 0;
+  if (!/^[0-9]{1,3}([.][0-9]{1,2})?$/.test(text)) return null;
+  const numeric = Number(text);
+  return numeric >= 0 && numeric <= 100 ? numeric : null;
 }
 
 /**
@@ -155,8 +177,10 @@ export function moneyLinePartAmounts(part: {
   lineGross: number;
   billedNet: number;
   billedGross: number;
+  /** The line's discount in percent (owner 2026-11-18). */
+  discountPercent?: number;
 }): MoneyLineAmounts {
-  const own = moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent);
+  const own = moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0);
   if (![part.lineNet, part.lineGross, part.lineQuantity].every(Number.isFinite)) return own;
   const billedNet = Number.isFinite(part.billedNet) ? part.billedNet : 0;
   const billedGross = Number.isFinite(part.billedGross) ? part.billedGross : 0;
@@ -178,12 +202,12 @@ export function moneyFinalLinePartAmounts(part: Parameters<typeof moneyLinePartA
   const billedQuantity = Number.isFinite(part.billedQuantity) ? part.billedQuantity : 0;
   const total = toCents(billedQuantity + part.quantity);
   if (!Number.isFinite(part.lineQuantity) || total <= toCents(part.lineQuantity)) return moneyLinePartAmounts(part);
-  if (billedQuantity <= 0) return moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent);
+  if (billedQuantity <= 0) return moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0);
   const within = Math.max(0, roundCents(part.lineQuantity - billedQuantity));
   const rest = within > 0
     ? moneyLinePartAmounts({ ...part, quantity: within })
     : { net: 0, vat: 0, gross: 0 };
-  const excess = moneyLineAmounts(roundCents(part.quantity - within), part.unitPriceNet, part.vatRatePercent);
+  const excess = moneyLineAmounts(roundCents(part.quantity - within), part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0);
   return {
     net: roundCents(rest.net + excess.net),
     vat: roundCents(rest.vat + excess.vat),

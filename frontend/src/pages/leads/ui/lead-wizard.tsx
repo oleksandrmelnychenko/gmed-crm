@@ -35,7 +35,7 @@ import { PreviousRequestsPanel } from "./previous-requests-panel";
 import { orderPeriodWarnings } from "../model/order-period-warnings";
 import { createNewestLoadGuard, type NewestLoadGuard } from "../model/newest-load-guard";
 import { repeatConsentNote, requestConsentStatus } from "../model/request-consents";
-import { OrderCatalogServicesTable } from "@/pages/orders/ui/order-catalog-services-table";
+import { OrderCatalogServicesTable, serviceLineDiscount } from "@/pages/orders/ui/order-catalog-services-table";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
 import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeLabel, serviceBillingUnitBadgeClass, formatMoneyValue, priceVersionDisplayName, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 export { resolveServiceDescriptionTemplate, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
@@ -2484,6 +2484,7 @@ export function calculateServiceLineEstimate(serviceLines: ServiceLine[]) {
       money(line.quantity),
       money(line.price),
       line.isCostPassthrough ? 0 : money(line.vat),
+      serviceLineDiscount(line),
     );
     net += amounts.net;
     vat += amounts.vat;
@@ -2506,6 +2507,7 @@ function quoteLineSignature(
   unitPrice: unknown,
   vatRate: unknown,
   isCostPassthrough: unknown,
+  discountPercent: unknown = 0,
 ) {
   return JSON.stringify([
     description.trim(),
@@ -2513,6 +2515,7 @@ function quoteLineSignature(
     money(unitPrice).toFixed(4),
     money(vatRate).toFixed(4),
     isCostPassthrough === true,
+    money(discountPercent).toFixed(2),
   ]);
 }
 
@@ -2526,6 +2529,7 @@ function quoteMatchesServiceLines(quote: QuoteItem, lines: ServiceLine[]) {
       line.price,
       line.vat,
       line.isCostPassthrough,
+      serviceLineDiscount(line),
     ))
     .sort();
   const quotedLines = quote.line_items
@@ -2535,6 +2539,7 @@ function quoteMatchesServiceLines(quote: QuoteItem, lines: ServiceLine[]) {
       line.unit_price,
       line.vat_rate,
       line.is_cost_passthrough,
+      (line as { discount_percent?: unknown }).discount_percent ?? 0,
     ))
     .sort();
   return currentLines.length === quotedLines.length
@@ -2582,6 +2587,7 @@ export function orderLinesDifferFromOrder(lines: ServiceLine[], orderLeistungen:
     line.price,
     line.isCostPassthrough ? 0 : line.vat,
     line.isCostPassthrough,
+    serviceLineDiscount(line),
   );
   const stored = orderLeistungen.map(lineFromOrderLeistung).filter(validLine).map(signature).sort();
   const current = lines.filter(validLine).map(signature).sort();
@@ -2612,6 +2618,7 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
     currency: item.currency_snapshot ?? item.currency ?? "EUR",
     quantity: String(item.quantity ?? "1"),
     price: String(item.unit_price_snapshot ?? item.unit_price ?? ""),
+    discount: money(item.discount_percent) > 0 ? String(money(item.discount_percent)) : "",
     vat: String(
       item.is_cost_passthrough
         ? 0
@@ -7883,6 +7890,7 @@ ${serviceCommentLines.join("\n")}`
               quantity: money(line.quantity),
               unit_price: money(line.price),
               vat_rate: money(line.vat),
+              discount_percent: serviceLineDiscount(line),
               is_cost_passthrough: line.isCostPassthrough === true,
               client_reference: clientReference,
               confirm_signature_reset: confirmSignatureReset,
@@ -12094,6 +12102,7 @@ ${serviceCommentLines.join("\n")}`
                   <OrderCatalogServicesTable lines={orderServiceLines} catalogById={agencyServiceById} effectiveOn={draft.programDateFrom || undefined} lang={lang} tx={tx} disabled={isBusy}
                     describe={resolvedServiceCatalogDescription} selectedPriceId={selectedAgencyServicePriceId}
                     onQuantityChange={(line, quantity) => { setCommercialSaveFeedback(null); updateLine(line.id, { quantity }); }}
+                    onDiscountChange={(line, discount) => { setCommercialSaveFeedback(null); updateLine(line.id, { discount }); }}
                     onPriceChange={(line, service, priceId) => applyAgencyServicePrice(line.id, service, priceId)}
                     onDelete={setDeleteServiceLine} totals={orderServicesEstimate}
                     lineLocked={(line) => line.managedByWizard === false} />
@@ -13765,6 +13774,7 @@ ${serviceCommentLines.join("\n")}`
                       money(line.quantity),
                       money(line.price),
                       line.isCostPassthrough ? 0 : money(line.vat),
+                      serviceLineDiscount(line),
                     );
                     return (
                       <article

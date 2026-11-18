@@ -8,8 +8,12 @@ import {
   moneyInputPayload,
   moneyInputProblem,
   moneyInputText,
+  moneyFinalLinePartAmounts,
   moneyLineAmounts,
+  moneyLineDiscount,
+  moneyLinePartAmounts,
   normalizeMoneyInput,
+  parseDiscountPercent,
   parseMoneyInput,
   roundCents,
   sameCents,
@@ -121,6 +125,40 @@ describe("commercial money rounding", () => {
   it("rounds the 0.5 h and 4.5 h VAT midpoints up as well", () => {
     expect(moneyLineAmounts(0.5, 95, 19)).toEqual({ net: 47.5, vat: 9.03, gross: 56.53 });
     expect(moneyLineAmounts(4.5, 95, 19)).toEqual({ net: 427.5, vat: 81.23, gross: 508.73 });
+  });
+
+  it("takes the VAT from the discounted net, like the server (owner 2026-11-18)", () => {
+    expect(moneyLineDiscount(2, 180, 10)).toBe(36);
+    expect(moneyLineAmounts(2, 180, 19, 10)).toEqual({ net: 324, vat: 61.56, gross: 385.56 });
+    expect(moneyLineAmounts(3, 33.33, 19, 33.33)).toEqual({ net: 66.66, vat: 12.67, gross: 79.33 });
+    expect(moneyLineAmounts(2.5, 95, 19, 15)).toEqual({ net: 201.87, vat: 38.36, gross: 240.23 });
+    expect(moneyLineAmounts(2.5, 95, 19, 0)).toEqual(moneyLineAmounts(2.5, 95, 19));
+    expect(moneyLineAmounts(2.5, 95, 19, 100)).toEqual({ net: 0, vat: 0, gross: 0 });
+  });
+
+  it("prices parts of a discounted line like the server", () => {
+    const line = moneyLineAmounts(3, 33.33, 19, 33.33);
+    const first = moneyLinePartAmounts({ quantity: 1, unitPriceNet: 33.33, vatRatePercent: 19, discountPercent: 33.33,
+      lineQuantity: 3, billedQuantity: 0, lineNet: line.net, lineGross: line.gross, billedNet: 0, billedGross: 0 });
+    expect(first).toEqual({ net: 22.22, vat: 4.22, gross: 26.44 });
+    const last = moneyLinePartAmounts({ quantity: 2, unitPriceNet: 33.33, vatRatePercent: 19, discountPercent: 33.33,
+      lineQuantity: 3, billedQuantity: 1, lineNet: line.net, lineGross: line.gross, billedNet: first.net, billedGross: first.gross });
+    expect(roundCents(first.gross + last.gross)).toBe(line.gross);
+    const quoted = moneyLineAmounts(3, 60, 19, 10);
+    expect(moneyFinalLinePartAmounts({ quantity: 5, unitPriceNet: 60, vatRatePercent: 19, discountPercent: 10,
+      lineQuantity: 3, billedQuantity: 0, lineNet: quoted.net, lineGross: quoted.gross, billedNet: 0, billedGross: 0 }))
+      .toEqual({ net: 270, vat: 51.3, gross: 321.3 });
+  });
+
+  it("reads a discount of 0 to 100 % with two decimals", () => {
+    expect(parseDiscountPercent("")).toBe(0);
+    expect(parseDiscountPercent("10")).toBe(10);
+    expect(parseDiscountPercent("12,5")).toBe(12.5);
+    expect(parseDiscountPercent("100")).toBe(100);
+    expect(parseDiscountPercent("100.01")).toBeNull();
+    expect(parseDiscountPercent("-1")).toBeNull();
+    expect(parseDiscountPercent("33.333")).toBeNull();
+    expect(parseDiscountPercent("abc")).toBeNull();
   });
 
   it("mirrors negative (credit) lines", () => {

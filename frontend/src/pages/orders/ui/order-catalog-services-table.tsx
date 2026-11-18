@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Trash2 } from "lucide-react";
-import { formatMoneyLabel, roundCents } from "@/lib/money";
+import { formatMoneyLabel, moneyLineAmounts, moneyLineDiscount, parseDiscountPercent, roundCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { t as translationsFor, type Lang } from "@/lib/i18n";
 import { agencyServiceLineDisplayDescription, agencyServiceLineDisplayName } from "@/lib/agency-service-labels";
@@ -15,12 +15,25 @@ import type { ServiceLine } from "../model/order-service-line";
 import { money, germanDateLabel, formatMoneyValue, priceVersionDisplayName, serviceBillingUnitLabel, serviceBillingUnitBadgeLabel, serviceBillingUnitBadgeClass } from "../model/order-service-presentation";
 type Tx = (ru: string, de: string) => string;
 const inputString = (value: unknown) => String(value ?? "");
-export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDelete, totals, lineLocked }: {
+/** The discount of a line as a number (an unreadable entry counts as none until fixed). */
+export function serviceLineDiscount(line: ServiceLine): number {
+  if (line.isCostPassthrough) return 0;
+  return parseDiscountPercent(line.discount ?? "") ?? 0;
+}
+
+/** Net of a line after its discount, as the server prices it. */
+function serviceLineNet(line: ServiceLine): number {
+  return moneyLineAmounts(money(line.quantity), money(line.price), 0, serviceLineDiscount(line)).net;
+}
+
+export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDiscountChange, onDelete, totals, lineLocked }: {
   lines: ServiceLine[]; catalogById: ReadonlyMap<string, AgencyServiceItem>; effectiveOn?: string; lang: Lang; tx: Tx; disabled: boolean;
   describe: (line: ServiceLine) => string;
   selectedPriceId: (line: ServiceLine, service: AgencyServiceItem) => string;
   onQuantityChange: (line: ServiceLine, value: string) => void;
   onPriceChange: (line: ServiceLine, service: AgencyServiceItem, priceId: string) => void;
+  /** Without it the discount is shown, not edited. */
+  onDiscountChange?: (line: ServiceLine, value: string) => void;
   onDelete: (line: ServiceLine) => void;
   totals: { net: number; vat: number; gross: number };
   /** A line this table shows but does not change (the lead wizard: one the order workspace added). */
@@ -219,6 +232,35 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
       },
     },
     {
+      id: "discount",
+      label: tx("Скидка, %", "Rabatt, %"),
+      accessor: (line) => serviceLineDiscount(line),
+      sortable: false,
+      align: "right",
+      width: 92,
+      render: (line) => {
+        const value = line.isCostPassthrough ? "" : (line.discount ?? "");
+        const invalid = parseDiscountPercent(value) === null;
+        return (
+          <Input
+            name={`service_discount_${line.id}`}
+            autoComplete="off"
+            inputMode="decimal"
+            aria-label={`${tx("Скидка, %", "Rabatt, %")}: ${line.description}`}
+            aria-invalid={invalid || undefined}
+            placeholder="0"
+            className={cn(
+              "h-7 w-16 rounded-md bg-field px-2 text-right font-mono text-xs tabular-nums",
+              invalid && "border-destructive",
+            )}
+            value={value}
+            disabled={disabled || locked(line) || line.isCostPassthrough === true || !onDiscountChange}
+            onChange={(event) => onDiscountChange?.(line, event.target.value)}
+          />
+        );
+      },
+    },
+    {
       id: "vat",
       label: tx("НДС", "MwSt."),
       accessor: (line) => money(line.vat),
@@ -230,7 +272,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
     {
       id: "total",
       label: tx("Сумма", "Gesamt"),
-      accessor: (line) => roundCents(money(line.quantity) * money(line.price)),
+      accessor: (line) => serviceLineNet(line),
       sortable: false,
       align: "right",
       width: 150,
@@ -242,13 +284,20 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
           line.catalogUnitLabel || catalogService?.unit_label,
           tx,
         );
-        const total = roundCents(money(line.quantity) * money(line.price));
+        const listTotal = roundCents(money(line.quantity) * money(line.price));
+        const discount = moneyLineDiscount(money(line.quantity), money(line.price), serviceLineDiscount(line));
+        const total = roundCents(listTotal - discount);
         return (
           <span
-            className="whitespace-nowrap font-semibold"
-            title={`${line.quantity || "0"} ${unit} × ${formatMoneyLabel(money(line.price), line.currency)} = ${formatMoneyLabel(total, line.currency)}`}
+            className="flex flex-col items-end whitespace-nowrap"
+            title={`${line.quantity || "0"} ${unit} × ${formatMoneyLabel(money(line.price), line.currency)} = ${formatMoneyLabel(listTotal, line.currency)}`}
           >
-            {formatMoneyLabel(total, line.currency)}
+            <span className="font-mono font-semibold tabular-nums">{formatMoneyLabel(total, line.currency)}</span>
+            {discount > 0 ? (
+              <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                −{formatMoneyLabel(discount, line.currency)}
+              </span>
+            ) : null}
           </span>
         );
       },
@@ -261,10 +310,10 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                     rowId={(line) => line.id}
                     density="comfortable"
                     rowHeightOverrides={{ comfortable: 46 }}
-                    storageKey="wizard-order-lines-v3"
+                    storageKey="wizard-order-lines-v4"
                     className="[&_article_dl>div:has([role=combobox])]:col-span-2"
                     mobilePrimaryColumnId="service"
-                    mobileDetailColumnIds={["quantity", "description", "unit_price", "vat", "total"]}
+                    mobileDetailColumnIds={["quantity", "description", "unit_price", "discount", "vat", "total"]}
                     disableRowHover
                     rowActionsAlwaysVisible
                     rowActionsWidth={36}

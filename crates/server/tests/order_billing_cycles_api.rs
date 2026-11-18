@@ -653,14 +653,27 @@ async fn interpreter_case(
     token: &str,
     planned: i64,
 ) -> InterpreterCase {
+    interpreter_case_with_tariff(ctx, token, planned, None, Decimal::ZERO).await
+}
+
+/// [`interpreter_case`] with the order's own tariff: a unit price other than
+/// the catalogue's (`None`: the catalogue's) and a discount in percent.
+async fn interpreter_case_with_tariff(
+    ctx: &support::TestSuiteContext,
+    token: &str,
+    planned: i64,
+    tariff_price: Option<Decimal>,
+    discount_percent: Decimal,
+) -> InterpreterCase {
     seed_issuer(&ctx.pool, ctx.admin_id).await;
-    let (catalog_id, unit_price): (Uuid, Decimal) = sqlx::query_as(
+    let (catalog_id, catalog_price): (Uuid, Decimal) = sqlx::query_as(
         r#"SELECT id, unit_price FROM agency_service_catalog
            WHERE service_key = 'interpreter_hours' ORDER BY created_at LIMIT 1"#,
     )
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
+    let unit_price = tariff_price.unwrap_or(catalog_price);
     let patient_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, email, created_by,
                                  address_street, address_zip, address_city, address_country)
@@ -692,8 +705,8 @@ async fn interpreter_case(
     let service_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO order_leistungen (
                order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
-               agency_service_id
-           ) VALUES ($1, $2, 'Dolmetscherbetreuung', $3, $4, 'EUR', 19, $5)
+               agency_service_id, discount_percent
+           ) VALUES ($1, $2, 'Dolmetscherbetreuung', $3, $4, 'EUR', 19, $5, $6)
            RETURNING id"#,
     )
     .bind(order_id)
@@ -701,6 +714,7 @@ async fn interpreter_case(
     .bind(Decimal::from(planned))
     .bind(unit_price)
     .bind(catalog_id)
+    .bind(discount_percent)
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
@@ -1890,5 +1904,273 @@ async fn interpreter_hours_are_dated_by_the_visit_not_by_the_approval() {
     assert!(
         delivery.contains(&visit.format("%Y%m%d").to_string()),
         "{delivery}"
+    );
+}
+
+fn discounted(
+    quantity: Decimal,
+    unit_price: Decimal,
+    discount: Decimal,
+) -> gmed_server::money::LineAmounts {
+    gmed_server::money::line_amounts(quantity, unit_price, Decimal::from(19), discount)
+}
+
+/// Owner 2026-11-18: the order's tariff for a service is its price and its
+/// discount. The quote, an hour reported later on a line of its own and the
+/// final invoice from the actual quantities all bill 60,00 € less 10 %, not
+/// the catalogue price; the final prints the discount per line and its
+/// Storno reverses exactly what it billed.
+#[tokio::test]
+async fn a_discounted_tariff_is_kept_by_later_lines_and_the_final_invoice() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let price = Decimal::from(60);
+    let discount = Decimal::from(10);
+    let case = interpreter_case_with_tariff(&ctx, &ceo, 3, Some(price), discount).await;
+
+    // The quote: 3 × 60,00 = 180,00 − 18,00 = 162,00 net, 30,78 VAT.
+    let quote = get_quote(&ctx, &ceo, &case.quote_id).await;
+    let line = &quote["line_items"][0];
+    assert_eq!(line["discount_percent"], "10", "{line:?}");
+    assert_eq!(line["discount_amount"], "18", "{line:?}");
+    assert_eq!(money(&line["line_net"]), Decimal::from(162));
+    assert_eq!(money(&quote["total_gross"]), Decimal::new(19278, 2));
+    let order_total: Decimal = sqlx::query_scalar("SELECT order_service_total_gross($1)")
+        .bind(case.order_id)
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(order_total, Decimal::new(19278, 2));
+
+    // 3 h take the planned line; 1,5 h more come as a line of their own,
+    // priced with the order's tariff, not the catalogue's.
+    report_hours(&ctx, &ceo, &case, 3.0, 2).await;
+    report_hours(&ctx, &ceo, &case, 1.5, 1).await;
+    let (extra_id, extra_price, extra_discount): (Uuid, Decimal, Decimal) = sqlx::query_as(
+        r#"SELECT id, unit_price_snapshot, discount_percent FROM order_leistungen
+           WHERE order_id = $1 AND agency_service_id = $2 AND id <> $3"#,
+    )
+    .bind(case.order_id)
+    .bind(case.catalog_id)
+    .bind(case.service_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!((extra_price, extra_discount), (price, discount));
+
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [{ "line_index": 0, "quantity": 3 }],
+            "order_services": [{ "order_leistung_id": extra_id, "quantity": 1.5 }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    let lines = invoice["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    // 1,5 × 60,00 = 90,00 − 9,00 = 81,00 net, 15,39 VAT.
+    assert_eq!(lines[1]["discount_percent"], "10", "{lines:?}");
+    assert_eq!(lines[1]["discount_amount"], "9", "{lines:?}");
+    assert_eq!(money(&lines[1]["line_net"]), Decimal::from(81));
+    let first = discounted(Decimal::from(3), price, discount);
+    let second = discounted(Decimal::new(15, 1), price, discount);
+    assert_eq!(money(&invoice["total_net"]), first.net + second.net);
+    assert_eq!(money(&invoice["total_vat"]), first.vat + second.vat);
+    assert_eq!(money(&invoice["total_gross"]), first.gross + second.gross);
+    assert_eq!(first.gross + second.gross, Decimal::new(28917, 2));
+    let invoice_id = invoice["id"].as_str().unwrap().to_string();
+    release_invoice(&ctx, &ceo, &invoice_id).await;
+    let allocated: Decimal = sqlx::query_scalar(
+        "SELECT discount_percent_snapshot FROM invoice_order_line_allocations WHERE invoice_id = $1::uuid",
+    )
+    .bind(&invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(allocated, discount);
+
+    // The PDF prints the discount under each discounted position.
+    let (status, pdf) = raw_get(
+        &ctx.app,
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
+    assert!(text.contains("Rabatt 10 %: -18,00 € netto"), "{text}");
+    assert!(text.contains("Rabatt 10 %: -9,00 € netto"), "{text}");
+
+    // The Storno reverses exactly the discounted amounts.
+    let cancelled = cancel_invoice(&ctx, &ceo, &invoice_id).await;
+    assert_eq!(cancelled["status"], "cancelled", "{cancelled:?}");
+    let storno_gross: Decimal = sqlx::query_scalar(
+        "SELECT amount_gross FROM invoice_storno_documents WHERE invoice_id = $1::uuid",
+    )
+    .bind(&invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(storno_gross.abs(), Decimal::new(28917, 2));
+}
+
+/// An advance of the whole discounted quote, then the final: the final bills
+/// the discounted amount and the advance covers it to the cent; a credit note
+/// on the discounted line takes back its discounted gross.
+#[tokio::test]
+async fn an_advance_and_the_final_of_a_discounted_order_settle_to_the_cent() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let price = Decimal::new(3333, 2);
+    let discount = Decimal::new(3333, 2);
+    let case = interpreter_case_with_tariff(&ctx, &ceo, 3, Some(price), discount).await;
+    // 3 × 33,33 = 99,99 − 33,33 = 66,66 net, 12,67 VAT, 79,33 gross.
+    let whole = discounted(Decimal::from(3), price, discount);
+    assert_eq!(whole.gross, Decimal::new(7933, 2));
+    let quote = get_quote(&ctx, &ceo, &case.quote_id).await;
+    assert_eq!(money(&quote["total_gross"]), whole.gross);
+
+    let advance_id = paid_prepayment_advance(&ctx, &ceo, &case, whole.gross, whole.gross).await;
+    report_hours(&ctx, &ceo, &case, 3.0, 1).await;
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(
+            json!({ "invoice_type": "final", "line_items": [{ "line_index": 0, "quantity": 3 }] }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    assert_eq!(money(&invoice["total_net"]), whole.net);
+    assert_eq!(money(&invoice["total_gross"]), whole.gross);
+    let invoice_id = invoice["id"].as_str().unwrap().to_string();
+    let released = release_invoice(&ctx, &ceo, &invoice_id).await;
+    assert_eq!(money(&released["prepayment_applied_amount"]), whole.gross);
+    assert_eq!(money(&released["balance_due"]), Decimal::ZERO);
+    let (status, advance) = call(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{advance_id}"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{advance:?}");
+    assert_eq!(
+        money(&advance["advance_settlement"]["open_rest"]),
+        Decimal::ZERO,
+        "{advance:?}"
+    );
+
+    // A credit note of the whole discounted line credits its gross.
+    let (status, credit) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 0 }],
+            "reason": "Leistung nicht erbracht",
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
+    assert_eq!(money(&credit["amount_gross"]), whole.gross, "{credit:?}");
+}
+
+/// A discount is 0–100 % with two decimals, never on a pass-through cost, and
+/// a changed discount is a change of the order's services.
+#[tokio::test]
+async fn order_line_discounts_are_validated_and_change_the_order_terms() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let (_, order_id, _, _) = seed_quoted_order(&ctx.app, &ctx.pool, ctx.admin_id, &ceo).await;
+    let path = format!("/api/v1/orders/{order_id}/leistungen");
+    for (discount, passthrough) in [
+        (json!(100.5), false),
+        (json!(-1), false),
+        (json!("33.333"), false),
+        (json!(10), true),
+    ] {
+        let (status, body) = call(
+            &ctx.app,
+            "POST",
+            &path,
+            &ceo,
+            Some(json!({
+                "description": "Beratung",
+                "quantity": 2,
+                "unit_price": 180,
+                "vat_rate": 19,
+                "discount_percent": discount,
+                "is_cost_passthrough": passthrough,
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{discount} {body:?}"
+        );
+    }
+    let reference = format!("discount-{}", Uuid::new_v4().simple());
+    let add = |discount: Value| {
+        json!({
+            "description": "Beratung",
+            "quantity": 2,
+            "unit_price": 180,
+            "vat_rate": 19,
+            "discount_percent": discount,
+            "client_reference": reference,
+        })
+    };
+    let (status, created) = call(&ctx.app, "POST", &path, &ceo, Some(add(json!("10")))).await;
+    assert_eq!(status, StatusCode::CREATED, "{created:?}");
+    let total = || async {
+        sqlx::query_scalar::<_, Decimal>("SELECT order_service_total_gross($1)")
+            .bind(order_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap()
+    };
+    // 4 h × 95,00 (452,20) + 2 × 180,00 − 10 % (385,56).
+    assert_eq!(total().await, Decimal::new(83776, 2));
+
+    // The same line again with another discount is a change (upsert):
+    // 2 × 180,00 − 25 % = 270,00 net, 321,30 gross.
+    let (status, changed) = call(&ctx.app, "POST", &path, &ceo, Some(add(json!(25)))).await;
+    assert!(status.is_success(), "{changed:?}");
+    assert_eq!(total().await, Decimal::new(77350, 2));
+    let terms: Value = sqlx::query_scalar("SELECT order_client_terms($1)")
+        .bind(order_id)
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    let lines = terms["lines"].as_array().unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.get("discount_percent").is_some())
+    );
+    // A line without a discount keeps the shape it was signed with.
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.get("discount_percent").is_none())
     );
 }

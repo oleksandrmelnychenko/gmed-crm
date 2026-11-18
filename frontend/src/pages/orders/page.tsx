@@ -8,7 +8,7 @@ import {
 import { StaffLink } from "@/components/staff-link";
 import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-indicator";
 import { serviceLineDeltaGross } from "@/components/order-budget/order-budget";
-import { parseMoneyInput } from "@/lib/money";
+import { moneyLineDiscount, parseDiscountPercent, parseMoneyInput } from "@/lib/money";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   startTransition,
@@ -275,6 +275,7 @@ import {
   blankCreateOrderForm,
   blankExternalInvoiceForm,
   blankLeistungForm,
+  orderServiceTariff,
   blankOrderExecutionForm,
   blankOrderFollowupForm,
   blankOrderPlanningForm,
@@ -2492,18 +2493,21 @@ function useOrdersPageContent() {
     }
 
     setLeistungError(null);
+    // A service the order already has keeps the order's tariff (owner 2026-11-18).
+    const tariff = orderServiceTariff(orderDetail.leistungen, service.id);
     setLeistungForm({
       ...blankLeistungForm(),
       agencyServiceId: service.id,
-      agencyServicePriceVersionId: selectedPrice.id,
+      agencyServicePriceVersionId: tariff?.priceVersionId ?? selectedPrice.id,
       description: agencyServiceStoredName(
         service.service_key,
         service.service_name,
         t,
       ),
-      unitPrice: String(selectedPrice.unit_price ?? ""),
+      unitPrice: tariff?.unitPrice ?? String(selectedPrice.unit_price ?? ""),
       currency: selectedPrice.currency || orderDetail.currency || "EUR",
-      vatRate: String(selectedPrice.vat_rate ?? "0"),
+      vatRate: tariff?.vatRate ?? String(selectedPrice.vat_rate ?? "0"),
+      discountPercent: tariff?.discountPercent ?? "",
     });
     setLeistungOpen(true);
   }, [
@@ -3132,6 +3136,13 @@ function useOrdersPageContent() {
       setLeistungError(partnerCostAmountsError(lang));
       return;
     }
+    const discountPercent = parseDiscountPercent(leistungForm.discountPercent);
+    if (discountPercent === null) {
+      setLeistungError(lang === "de"
+        ? "Rabatt: 0 bis 100 % mit höchstens zwei Nachkommastellen."
+        : "Скидка: от 0 до 100 % с не более чем двумя знаками после запятой.");
+      return;
+    }
 
     setLeistungSaving(true);
     setLeistungError(null);
@@ -3148,6 +3159,7 @@ function useOrdersPageContent() {
         quantity,
         unit_price: unitPrice,
         vat_rate: vatRate,
+        discount_percent: leistungForm.isCostPassthrough ? 0 : discountPercent,
         planned_partner_cost_net: plannedCost.net,
         planned_partner_cost_vat: plannedCost.vat,
         planned_partner_cost_gross: plannedCost.gross,
@@ -7560,6 +7572,17 @@ function useOrdersPageContent() {
                                       leistung.currency,
                                     )}
                                   />
+                                  {Number(leistung.discount_percent ?? 0) > 0 ? <MiniMetric
+                                    label={lang === "de" ? "Rabatt" : "Скидка"}
+                                    value={`${formatNumber(leistung.discount_percent, locale)} % · −${formatMoney(
+                                      moneyLineDiscount(
+                                        Number(leistung.quantity ?? 0),
+                                        Number(leistung.unit_price_snapshot ?? leistung.unit_price ?? 0),
+                                        Number(leistung.discount_percent ?? 0),
+                                      ),
+                                      leistung.currency,
+                                    )}`}
+                                  /> : null}
                                   <MiniMetric
                                     label={l("orders_mwst")}
                                     value={leistungVatLabel(leistung, locale, lang)}
@@ -9397,6 +9420,23 @@ function useOrdersPageContent() {
                           )
                         : null;
                       setLeistungError(null);
+                      // The order's tariff of a service it already has (owner 2026-11-18).
+                      const tariff = service ? orderServiceTariff(orderDetail?.leistungen, service.id) : null;
+                      if (tariff) {
+                        setLeistungForm((current) => ({
+                          ...current,
+                          agencyServiceId,
+                          agencyServicePriceVersionId: tariff.priceVersionId,
+                          description: service
+                            ? agencyServiceStoredName(service.service_key, service.service_name, t)
+                            : current.description,
+                          unitPrice: tariff.unitPrice,
+                          currency: orderDetail?.currency || current.currency,
+                          vatRate: tariff.vatRate,
+                          discountPercent: tariff.discountPercent,
+                        }));
+                        return;
+                      }
                       setLeistungForm((current) => ({
                         ...current,
                         agencyServiceId,
@@ -9607,6 +9647,22 @@ function useOrdersPageContent() {
                       setLeistungForm((current) => ({
                         ...current,
                         unitPrice: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field htmlFor="order-service-discount" label={lang === "de" ? "Rabatt, %" : "Скидка, %"}>
+                  <Input
+                    id="order-service-discount"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={leistungForm.isCostPassthrough ? "" : leistungForm.discountPercent}
+                    disabled={leistungForm.isCostPassthrough}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        discountPercent: event.target.value,
                       }))
                     }
                     className={inputClassName}

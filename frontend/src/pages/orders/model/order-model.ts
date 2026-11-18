@@ -212,6 +212,31 @@ export function blankCreateOrderForm(): CreateOrderFormState {
   };
 }
 
+/**
+ * The tariff the order already has for a catalogue service (owner 2026-11-18):
+ * the price version, price, VAT and discount of its first line that is not
+ * cancelled. A later line of the same service takes it, not the catalogue's
+ * current price. `null` when the order has no line of the service.
+ */
+export function orderServiceTariff(
+  leistungen: readonly Leistung[] | undefined,
+  agencyServiceId: string,
+): { priceVersionId: string; unitPrice: string; vatRate: string; discountPercent: string } | null {
+  const line = (leistungen ?? []).find((item) => (
+    item.agency_service_id === agencyServiceId
+    && item.status !== "cancelled"
+    && item.is_cost_passthrough !== true
+  ));
+  if (!line) return null;
+  const discount = Number(line.discount_percent ?? 0);
+  return {
+    priceVersionId: line.agency_service_price_version_id ?? "",
+    unitPrice: String(line.unit_price_snapshot ?? line.unit_price ?? ""),
+    vatRate: String(line.vat_rate_snapshot ?? line.vat_rate ?? "0"),
+    discountPercent: Number.isFinite(discount) && discount > 0 ? String(discount) : "",
+  };
+}
+
 export function blankLeistungForm(): LeistungFormState {
   return {
     agencyServiceId: "",
@@ -221,6 +246,7 @@ export function blankLeistungForm(): LeistungFormState {
     unitPrice: "",
     currency: "EUR",
     vatRate: "19",
+    discountPercent: "",
     plannedPartnerCost: blankPartnerCostAmounts(),
     providerId: "",
     doctorId: "",
@@ -539,9 +565,7 @@ export function nextPhase(current: string) {
 export function sumLeistungTotals(items: Leistung[]) {
   return items.reduce((sum, item) => {
     if (item.status === "cancelled") return sum;
-    const quantity = numberFromUnknown(item.quantity) ?? 0;
-    const unitPrice = numberFromUnknown(item.unit_price) ?? 0;
-    return sum + quantity * unitPrice;
+    return sum + leistungLineAmounts(item).net;
   }, 0);
 }
 
@@ -557,7 +581,8 @@ export function leistungLineAmounts(item: Leistung): MoneyLineAmounts {
   const vatRate = item.is_cost_passthrough
     ? 0
     : numberFromUnknown(item.vat_rate_snapshot) ?? numberFromUnknown(item.vat_rate) ?? 0;
-  return moneyLineAmounts(quantity, unitPrice, vatRate);
+  const discount = item.is_cost_passthrough ? 0 : numberFromUnknown(item.discount_percent) ?? 0;
+  return moneyLineAmounts(quantity, unitPrice, vatRate, discount);
 }
 
 /**

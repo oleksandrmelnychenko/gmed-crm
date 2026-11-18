@@ -97,6 +97,7 @@ export function finalLineAmounts(line: InvoiceLineItem, quantity: number) {
     quantity,
     unitPriceNet: numberOf(line.unit_price),
     vatRatePercent: numberOf(line.vat_rate),
+    discountPercent: numberOf(line.discount_percent),
     lineQuantity: numberOf(line.quantity),
     billedQuantity: numberOf(line.invoiced_quantity),
     lineNet: billedKnown ? numberOf(line.line_net) : Number.NaN,
@@ -108,7 +109,7 @@ export function finalLineAmounts(line: InvoiceLineItem, quantity: number) {
 
 export function finalServiceAmounts(service: DeliveredOrderService, quantity: number) {
   if (!(quantity > 0)) return { net: 0, vat: 0, gross: 0 };
-  return moneyLineAmounts(quantity, numberOf(service.unit_price), numberOf(service.vat_rate));
+  return moneyLineAmounts(quantity, numberOf(service.unit_price), numberOf(service.vat_rate), numberOf(service.discount_percent));
 }
 
 /**
@@ -132,7 +133,7 @@ export function finalLineComparison(
     }, 0);
   const actual = roundCents(numberOf(line.invoiced_quantity) + (Number.isFinite(own) ? own : 0) + siblings);
   const difference = roundCents(actual - estimate);
-  const unitGross = moneyLineAmounts(1, numberOf(line.unit_price), numberOf(line.vat_rate)).gross;
+  const unitGross = moneyLineAmounts(1, numberOf(line.unit_price), numberOf(line.vat_rate), numberOf(line.discount_percent)).gross;
   const sign = difference < 0 ? -1 : 1;
   return {
     estimate,

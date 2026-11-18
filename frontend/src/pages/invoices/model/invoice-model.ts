@@ -505,6 +505,7 @@ export function calculateInvoiceSelectionTotals(
         quantity,
         unitPriceNet: unitPrice,
         vatRatePercent: vatRate,
+        discountPercent: Number(line.discount_percent ?? 0),
         lineQuantity: Number(line.quantity),
         billedQuantity: Number(line.invoiced_quantity ?? 0),
         lineNet: billedKnown ? Number(line.line_net) : Number.NaN,

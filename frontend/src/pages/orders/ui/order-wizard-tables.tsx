@@ -1,4 +1,4 @@
-import { OrderCatalogServicesTable } from "./order-catalog-services-table";
+import { OrderCatalogServicesTable, serviceLineDiscount } from "./order-catalog-services-table";
 import type { ServiceLine } from "../model/order-service-line";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
@@ -53,10 +53,10 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
     return { id: line.id, agencyServiceId: line.agency_service_id, agencyServicePriceVersionId: line.agency_service_price_version_id,
       clientReference: null, description: line.description, catalogDescription: service?.description ?? "",
       catalogDescriptionItems: serviceDescriptionItems(service?.description_items, service?.description), catalogUnitLabel: service?.unit_label ?? "",
-      currency: "EUR", quantity: line.quantity, price: line.unit_price, vat: line.vat_rate };
+      currency: "EUR", quantity: line.quantity, price: line.unit_price, vat: line.vat_rate, discount: line.discount_percent ?? "" };
   });
   const totals = rows.reduce((result, line) => {
-    const { net, vat, gross } = moneyLineAmounts(money(line.quantity), money(line.price), money(line.vat));
+    const { net, vat, gross } = moneyLineAmounts(money(line.quantity), money(line.price), money(line.vat), serviceLineDiscount(line));
     return { net: roundCents(result.net + net), vat: roundCents(result.vat + vat), gross: roundCents(result.gross + gross) };
   }, { net: 0, vat: 0, gross: 0 });
   const updateLine = (id: string, patch: Partial<IntakeLine>) => onChange(lines.map(line => line.id === id ? { ...line, ...patch } : line));
@@ -84,6 +84,7 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
     {lines.length ? <OrderCatalogServicesTable lines={rows} catalogById={catalogById} effectiveOn={effectiveOn ?? undefined} lang={lang} tx={tx} disabled={busy} totals={totals} describe={describe}
       selectedPriceId={(line, service) => line.agencyServicePriceVersionId ?? listAgencyServicePriceChoices(service, effectiveOn ?? undefined).find(price => money(price.unit_price) === money(line.price) && money(price.vat_rate) === money(line.vat))?.id ?? ""}
       onQuantityChange={(line, quantity) => updateLine(line.id, { quantity })}
+      onDiscountChange={(line, discount) => updateLine(line.id, { discount_percent: discount })}
       onPriceChange={(line, service, priceId) => { const price = listAgencyServicePriceChoices(service, effectiveOn ?? undefined).find(item => item.id === priceId); if (price && price.currency.toUpperCase() === "EUR") updateLine(line.id, { agency_service_price_version_id: price.id || null, unit_price: String(price.unit_price), vat_rate: String(price.vat_rate) }); }}
       onDelete={setDeleteLine} /> : <p className="py-3 text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>}
     <Dialog open={Boolean(deleteLine)} onOpenChange={open => { if (!open) setDeleteLine(null); }}>

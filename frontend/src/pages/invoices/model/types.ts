@@ -53,6 +53,9 @@ export type InvoiceLineItem = {
   quantity: string;
   unit_price: string;
   vat_rate: string;
+  /** Discount in percent and its net amount (owner 2026-11-18); absent: none. */
+  discount_percent?: string | null;
+  discount_amount?: string | null;
   vat_source?: string | null;
   vat_source_explanation?: string | null;
   tax_profile_id?: string | null;
@@ -95,6 +98,7 @@ export type DeliveredOrderService = {
   unit?: string | null;
   quantity: string;
   unit_price: string;
+  discount_percent?: string | null;
   vat_rate: string;
   is_cost_passthrough: boolean;
   /** The quote line of the same catalogue service, if any. */

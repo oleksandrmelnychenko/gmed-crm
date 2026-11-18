@@ -1,6 +1,6 @@
 import { money } from "./order-service-presentation";
 import { appDateKeyOf } from "@/lib/app-time-zone";
-import { moneyLineAmounts, roundCents } from "@/lib/money";
+import { moneyLineAmounts, parseDiscountPercent, roundCents } from "@/lib/money";
 import type { ContractItem } from "@/pages/contracts/model/types";
 
 export type IntakeFacts = {
@@ -14,6 +14,8 @@ export type IntakeFacts = {
 export type IntakeLine = {
   id: string; description: string; quantity: string; unit_price: string; vat_rate: string;
   agency_service_id: string | null; agency_service_price_version_id: string | null;
+  /** Discount in percent (owner 2026-11-18); empty or absent is none. */
+  discount_percent?: string;
 };
 export type IntakeDraft = {
   step: number; facts: IntakeFacts; needs_description: string;
@@ -57,7 +59,7 @@ export function formatIntakeDate(value: string | null | undefined) {
 /** Gross order total, rounded per line like the server (`order_intakes::sync_services`). */
 export function intakeTotal(lines: IntakeLine[]) {
   return roundCents(lines.reduce((sum, line) => {
-    const { gross } = moneyLineAmounts(money(line.quantity), money(line.unit_price), money(line.vat_rate));
+    const { gross } = moneyLineAmounts(money(line.quantity), money(line.unit_price), money(line.vat_rate), parseDiscountPercent(line.discount_percent ?? "") ?? 0);
     return sum + (Number.isFinite(gross) ? gross : 0);
   }, 0));
 }

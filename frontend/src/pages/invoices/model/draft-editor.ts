@@ -27,6 +27,8 @@ export type DraftEditorQuoteLine = {
   unit: string | null;
   unit_price: string | null;
   vat_rate: string | null;
+  /** Discount in percent of the quote line (owner 2026-11-18). */
+  discount_percent?: string | null;
   is_cost_passthrough: boolean;
   quoted_quantity: string;
   open_quantity: string;
@@ -71,6 +73,7 @@ export type DraftEditorPayload = {
   order_service_lines?: {
     order_leistung_id: string;
     selected_quantity: string | null;
+    discount_percent?: string | null;
     description?: string;
     unit_price?: string;
     vat_rate?: string;
@@ -198,6 +201,7 @@ export function linePartAmounts(line: DraftEditorQuoteLine, quantity: number): S
     quantity,
     unitPriceNet: Number(line.unit_price ?? 0),
     vatRatePercent: Number(line.vat_rate ?? 0),
+    discountPercent: Number(line.discount_percent ?? 0),
     lineQuantity: Number(line.quoted_quantity),
     billedQuantity: Number(line.billed_quantity ?? 0),
     lineNet: Number(line.line_net ?? Number.NaN),
@@ -242,7 +246,7 @@ export function draftKeptServices(payload: DraftEditorPayload) {
     .map((service) => ({
       ...service,
       quantity: Number(service.selected_quantity),
-      amounts: moneyLineAmounts(Number(service.selected_quantity), Number(service.unit_price ?? 0), Number(service.vat_rate ?? 0)),
+      amounts: moneyLineAmounts(Number(service.selected_quantity), Number(service.unit_price ?? 0), Number(service.vat_rate ?? 0), Number(service.discount_percent ?? 0)),
     }));
 }
 
@@ -398,7 +402,7 @@ export function draftFinalLineComparison(payload: DraftEditorPayload, line: Draf
   const estimate = Number(line.quoted_quantity);
   const actual = roundCents(Number(line.billed_quantity ?? 0) + (Number.isFinite(own) ? own : 0) + keptServiceQuantity(payload, line.line_index));
   const difference = roundCents(actual - estimate);
-  const unitGross = moneyLineAmounts(1, Number(line.unit_price ?? 0), line.is_cost_passthrough ? 0 : Number(line.vat_rate ?? 0)).gross;
+  const unitGross = moneyLineAmounts(1, Number(line.unit_price ?? 0), line.is_cost_passthrough ? 0 : Number(line.vat_rate ?? 0), Number(line.discount_percent ?? 0)).gross;
   return {
     estimate,
     actual,
