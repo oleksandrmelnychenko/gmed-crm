@@ -628,6 +628,21 @@ pub fn clean_persons(
     Ok(cleaned)
 }
 
+/// The name of a trusted person as one person is matched (owner
+/// 2026-11-18): «Kurz, Inga» and «inga  KURZ» are the same person — case,
+/// commas and the order of the name parts do not count. The wizard matches
+/// by the same rule (`personNameKey` in `frontend/…/lead-people.ts`).
+pub fn person_name_key(name: &str) -> String {
+    let mut parts: Vec<String> = name
+        .to_lowercase()
+        .replace([',', ';', '.'], " ")
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    parts.sort();
+    parts.join(" ")
+}
+
 /// Whether a trusted person of this relation is an institution (the family
 /// doctor's practice, a clinic): it gets no date of birth.
 pub fn is_institution(relation: &str) -> bool {
@@ -1054,6 +1069,17 @@ pub fn chooser_missing_from_signers<'a>(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn a_trusted_person_is_matched_by_the_name_in_any_order_and_case() {
+        assert_eq!(
+            person_name_key("Kurz, Inga"),
+            person_name_key(" inga  KURZ ")
+        );
+        assert_eq!(person_name_key("Kurz, Inga"), "inga kurz");
+        assert_ne!(person_name_key("Inga Kurz"), person_name_key("Inge Kurz"));
+        assert_eq!(person_name_key("  "), "");
+    }
 
     #[test]
     fn a_trusted_persons_contact_is_a_phone_number_or_an_email_address() {

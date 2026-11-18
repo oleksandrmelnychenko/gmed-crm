@@ -477,9 +477,10 @@ pub fn router() -> Router<AppState> {
             "/leads/{lead_id}/trusted-contacts/{representative_id}",
             delete(lead_representatives::remove_lead_trusted_contact),
         )
+        .route("/leads/{lead_id}/trusted-persons", post(add_trusted_person))
         .route(
             "/leads/{lead_id}/trusted-persons/{index}",
-            post(correct_trusted_person),
+            post(correct_trusted_person).put(edit_trusted_person),
         )
 }
 
@@ -5856,10 +5857,162 @@ async fn save_trusted_persons(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<TrustedPersonsRequest>,
 ) -> axum::response::Response {
+    write_trusted_persons(state, auth, lead_id, body, None).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AddTrustedPersonRequest {
+    person: consent_choices::ConsentRecipient,
+    version: String,
+    language: String,
+    #[serde(default)]
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
+}
+
+/// Refusal of [`add_trusted_person`]: a person of the same name (in any
+/// order of its parts) is named already.
+pub const TRUSTED_PERSON_EXISTS: &str = "trusted_person_exists";
+
+/// `POST /leads/{lead_id}/trusted-persons`: staff add one trusted person the
+/// client named to them (owner 2026-11-18): the same record and fields as a
+/// person the client names in the cabinet, appended under the lock to the
+/// one list of the lead, so the cabinet and the wizard show it and the
+/// consent form (Anlage 1) names it. Staff record how the client gave the
+/// consent, as in the client's form (owner 2026-10-29); the client still
+/// signs the form. Never sanctions-screened (owner 2026-10-12).
+async fn add_trusted_person(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<AddTrustedPersonRequest>,
+) -> axum::response::Response {
+    if auth.role == Role::Patient {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only staff add a trusted person here",
+        );
+    }
+    let (request, person) = body.into_parts();
+    write_trusted_persons(
+        state,
+        auth,
+        lead_id,
+        request,
+        Some(StaffPersonChange::Add(person)),
+    )
+    .await
+}
+
+impl AddTrustedPersonRequest {
+    /// The decision staff record with the person: disclosure to the named
+    /// persons with the client's consent.
+    fn into_parts(self) -> (TrustedPersonsRequest, consent_choices::ConsentRecipient) {
+        (
+            TrustedPersonsRequest {
+                persons: Vec::new(),
+                allow_disclosure: true,
+                consent_given: true,
+                version: self.version,
+                language: self.language,
+                recorded_how: self.recorded_how,
+                recorded_note: self.recorded_note,
+            },
+            self.person,
+        )
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditTrustedPersonRequest {
+    /// The person as staff loaded it: the list may have changed meanwhile.
+    base: consent_choices::ConsentRecipient,
+    person: consent_choices::ConsentRecipient,
+    version: String,
+    language: String,
+    #[serde(default)]
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
+}
+
+/// `PUT /leads/{lead_id}/trusted-persons/{index}`: staff change a trusted
+/// person with the full data set — name, relation, phone, date of birth,
+/// citizenships and scope (owner 2026-11-18) — as the client tells them,
+/// recorded with how the client said it like an added person. The data
+/// alone, without a word from the client, stays the correction
+/// ([`correct_trusted_person`]); a removal is the client's withdrawal there.
+async fn edit_trusted_person(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, index)): Path<(Uuid, usize)>,
+    Json(body): Json<EditTrustedPersonRequest>,
+) -> axum::response::Response {
+    if auth.role == Role::Patient {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only staff change a trusted person here",
+        );
+    }
+    let (request, person) = AddTrustedPersonRequest {
+        person: body.person,
+        version: body.version,
+        language: body.language,
+        recorded_how: body.recorded_how,
+        recorded_note: body.recorded_note,
+    }
+    .into_parts();
+    write_trusted_persons(
+        state,
+        auth,
+        lead_id,
+        request,
+        Some(StaffPersonChange::Replace {
+            index,
+            base: body.base,
+            person,
+        }),
+    )
+    .await
+}
+
+/// One person staff add to the stored list or change in it.
+enum StaffPersonChange {
+    Add(consent_choices::ConsentRecipient),
+    Replace {
+        index: usize,
+        base: consent_choices::ConsentRecipient,
+        person: consent_choices::ConsentRecipient,
+    },
+}
+
+/// Stores the trusted persons and the disclosure decision: the whole list of
+/// `body`, or — with `change` — the stored list with that one person added
+/// or changed by staff.
+async fn write_trusted_persons(
+    state: AppState,
+    auth: AuthUser,
+    lead_id: Uuid,
+    body: TrustedPersonsRequest,
+    change: Option<StaffPersonChange>,
+) -> axum::response::Response {
     // Staff record the trusted persons the client named (owner decision 2026-10-29).
     if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
+    let (added, replaced) = match change {
+        None => (None, None),
+        Some(StaffPersonChange::Add(person)) => (Some(person), None),
+        Some(StaffPersonChange::Replace {
+            index,
+            base,
+            person,
+        }) => (Some(person), Some((index, base))),
+    };
+    let appending = added.is_some();
     if body.version != consent_choices::DISCLOSURE_VERSION {
         return coded(
             StatusCode::CONFLICT,
@@ -5888,7 +6041,10 @@ async fn save_trusted_persons(
             json!({}),
         );
     }
-    let persons = match consent_choices::clean_persons(body.persons) {
+    let persons = match consent_choices::clean_persons(match added {
+        Some(person) => vec![person],
+        None => body.persons,
+    }) {
         Ok(persons) => persons,
         Err(code) => {
             return coded(
@@ -5917,10 +6073,6 @@ async fn save_trusted_persons(
             json!({ "field": "scope_codes" }),
         );
     }
-    let persons_json = match serde_json::to_value(&persons) {
-        Ok(value) => value,
-        Err(error) => return internal(error, "encode trusted persons"),
-    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
@@ -5947,6 +6099,70 @@ async fn save_trusted_persons(
     let stored_persons = match load_trusted_persons(&mut *tx, lead_id).await {
         Ok(persons) => persons,
         Err(error) => return internal(error, "load trusted persons"),
+    };
+    // Staff add or change one person of the list as it is now: never twice,
+    // at most five.
+    let persons = if appending {
+        if kind != AccessKind::Staff {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Only staff add a trusted person here",
+            );
+        }
+        let normalized = |person: &consent_choices::ConsentRecipient| {
+            consent_choices::clean_persons(vec![person.clone()])
+                .ok()
+                .and_then(|mut persons| persons.pop())
+                .unwrap_or_else(|| person.clone())
+        };
+        if let Some((index, base)) = &replaced
+            && stored_persons
+                .get(*index)
+                .is_none_or(|stored| normalized(stored) != normalized(base))
+        {
+            return coded(
+                StatusCode::CONFLICT,
+                "trusted_person_changed",
+                "The person was changed meanwhile; reload the request",
+                json!({}),
+            );
+        }
+        let replaced_index = replaced.as_ref().map(|(index, _)| *index);
+        let key = consent_choices::person_name_key(&persons[0].name);
+        if stored_persons.iter().enumerate().any(|(at, stored)| {
+            Some(at) != replaced_index && consent_choices::person_name_key(&stored.name) == key
+        }) {
+            return coded(
+                StatusCode::CONFLICT,
+                TRUSTED_PERSON_EXISTS,
+                "This person is named already",
+                json!({ "field": "name" }),
+            );
+        }
+        match replaced_index {
+            Some(index) => {
+                let mut list = stored_persons.clone();
+                list[index] = persons[0].clone();
+                list
+            }
+            None => {
+                if stored_persons.len() >= consent_choices::MAX_RECIPIENTS {
+                    return coded(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        consent_choices::RECIPIENTS_INVALID,
+                        "At most five trusted persons",
+                        json!({ "field": "persons", "max": consent_choices::MAX_RECIPIENTS }),
+                    );
+                }
+                stored_persons.iter().cloned().chain(persons).collect()
+            }
+        }
+    } else {
+        persons
+    };
+    let persons_json = match serde_json::to_value(&persons) {
+        Ok(value) => value,
+        Err(error) => return internal(error, "encode trusted persons"),
     };
     // After the send the decision can only be withdrawn — all of it, or
     // persons removed from the list (owner 2026-10-26, a DSGVO right).
@@ -6206,7 +6422,8 @@ struct TrustedPersonCorrection {
 /// of a person the patient named in the cabinet (name, phone, contact, date
 /// of birth) or remove the person when the patient withdraws the consent for
 /// them (owner decision 2026-10-29). Who is named and what may be told stays
-/// the patient's: staff neither add a person nor change its relation or
+/// the patient's: a correction neither adds a person (staff add one the
+/// client named with [`add_trusted_person`]) nor changes its relation or
 /// scope. The correction is a new consent choice row (`staff_correction`)
 /// that keeps the patient's choice, chooser and time and records who
 /// corrected it, when and why; earlier consent invitations are invalidated,

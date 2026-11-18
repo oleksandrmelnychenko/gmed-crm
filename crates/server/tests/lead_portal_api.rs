@@ -11394,3 +11394,473 @@ async fn nothing_goes_further_without_the_health_consent() {
     assert_eq!(status, StatusCode::OK, "{sent}");
     assert!(sent["submitted_at"].is_string(), "{sent}");
 }
+
+/// A trusted person with the full data of the cabinet (owner 2026-11-18).
+fn full_person(name: &str, relation: &str, phone: &str, born: &str, scope: &str) -> Value {
+    json!({ "name": name, "relation": relation, "phone": phone, "birth_date": born,
+        "citizenships": ["DE"], "scope_codes": [scope] })
+}
+
+/// Staff add one trusted person the client named to them.
+async fn staff_add_person(
+    router: &axum::Router,
+    lead: Uuid,
+    bearer: &str,
+    person: Value,
+    how: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut body = json!({ "person": person, "version": "2026-10-14", "language": "de" });
+    if let Some(how) = how {
+        body["recorded_how"] = json!(how);
+    }
+    json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/trusted-persons"),
+        bearer,
+        Some(body),
+    )
+    .await
+}
+
+/// The names of the trusted persons the client's own view of the request lists.
+async fn cabinet_person_names(router: &axum::Router, lead: Uuid, bearer: &str) -> Vec<String> {
+    let (status, view) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    view["trusted_persons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|person| person["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Generates the consent form (Anlage 1); returns its id, the recorded
+/// recipients' names and the PDF text.
+async fn consent_form_recipients(
+    app: &TestApp,
+    lead: Uuid,
+    previous: Option<Uuid>,
+) -> (Uuid, Vec<String>, String) {
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let mut body = json!({"template_id":"privacy_consents","lead_id":lead,"language":"de"});
+    if let Some(previous) = previous {
+        body["replace_document_id"] = json!(previous);
+    }
+    let (status, generated) = json_request(
+        router,
+        "POST",
+        "/api/v1/documents/generate",
+        &pm,
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let id: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+    let recorded: Value = sqlx::query_scalar(
+        "SELECT generated_bindings->'_own_consent_choice' FROM documents WHERE id=$1",
+    )
+    .bind(id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    let names = recorded["recipients"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|person| person["name"].as_str().unwrap().to_string())
+        .collect();
+    (id, names, document_pdf_text(router, id, &pm).await)
+}
+
+/// Owner 2026-11-18: a contact person staff enter in the wizard is the same
+/// record as one the client names in the cabinet — the same fields, one
+/// list, shown on both sides — and the consent form names it. Staff first,
+/// the client adds another one later: both are named.
+#[tokio::test]
+async fn a_trusted_person_staff_add_is_the_cabinets_and_the_consent_form_names_it() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let (lead, _user, patient) = lead_with_login(&app, "Kontakt", "staff.first@example.com").await;
+    // A contact staff keep in the wizard's own list does not get in the way.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/update"),
+        &pm,
+        Some(
+            json!({ "trusted_contacts": [{ "name": "Maria Kontakt", "relation": "spouse",
+            "phone": "+49 30 5550111" }] }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let maria = full_person(
+        "Maria Kontakt",
+        "spouse",
+        "+49 30 5550111",
+        "1975-03-04",
+        "all",
+    );
+
+    // Staff say how the client gave the consent; the patient adds nothing here.
+    let (status, refused) = staff_add_person(router, lead, &pm, maria.clone(), None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["code"], "consent_recorded_how_required",
+        "{refused}"
+    );
+    let (status, _) = staff_add_person(router, lead, &patient, maria.clone(), Some("phone")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // The cabinet's rules: a phone number, a date of birth, a scope.
+    let mut incomplete = maria.clone();
+    incomplete.as_object_mut().unwrap().remove("birth_date");
+    let (status, refused) = staff_add_person(router, lead, &pm, incomplete, Some("phone")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["field"], "birth_date", "{refused}");
+
+    let (status, added) = staff_add_person(router, lead, &pm, maria.clone(), Some("phone")).await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    assert_eq!(added["trusted_persons"], json!([maria]), "{added}");
+    assert_eq!(added["disclosure"]["allow_disclosure"], true, "{added}");
+    assert_eq!(added["disclosure"]["access_kind"], "staff", "{added}");
+    let how: Option<String> = sqlx::query_scalar(
+        "SELECT recorded_how FROM consent_form_choices WHERE lead_id=$1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(how.as_deref(), Some("phone"));
+    // The client sees the person with all of its data in the cabinet.
+    assert_eq!(
+        cabinet_person_names(router, lead, &patient).await,
+        ["Maria Kontakt"]
+    );
+    // The same person once only, however the name is written.
+    let mut twin = maria.clone();
+    twin["name"] = json!("kontakt,  MARIA");
+    let (status, refused) = staff_add_person(router, lead, &pm, twin, Some("phone")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "trusted_person_exists", "{refused}");
+
+    // The client adds a second person in the cabinet and gives the consent.
+    let (_, view) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &patient,
+        None,
+    )
+    .await;
+    let mut persons = view["trusted_persons"].as_array().cloned().unwrap();
+    persons.push(full_person(
+        "Olga Zwei",
+        "relative",
+        "+49 30 5550122",
+        "1960-01-02",
+        "medical",
+    ));
+    let (status, saved) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(json!(persons), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (status, chosen) = choose(
+        router,
+        lead,
+        &patient,
+        &json!({"agency_processing":true,"doctors_to_agency":true,"data_system":true,"named_recipients":true}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chosen}");
+    assert_eq!(chosen["chosen_by_me"], true, "{chosen}");
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(
+        intake["trusted_persons"].as_array().unwrap().len(),
+        2,
+        "{intake}"
+    );
+
+    let (_, names, text) = consent_form_recipients(&app, lead, None).await;
+    assert_eq!(names, ["Maria Kontakt", "Olga Zwei"]);
+    for line in [
+        "Maria Kontakt (Ehe-/Lebenspartner/in), geb. 04.03.1975",
+        "Olga Zwei (Angehörige/r), geb. 02.01.1960",
+    ] {
+        assert!(text.contains(line), "{line}: {text}");
+    }
+}
+
+/// Owner 2026-11-18: the client named a person in the cabinet; later the
+/// client asks staff to add one more. Both are in the cabinet and the
+/// wizard with their data, and the new version of the consent form names
+/// both; the earlier version is no longer offered for signing.
+#[tokio::test]
+async fn staff_add_one_more_person_after_the_client_named_one() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let (lead, _user, patient) =
+        lead_with_login(&app, "Cabinet", "cabinet.first@example.com").await;
+    let anna = full_person(
+        "Anna Erste",
+        "friend",
+        "+49 30 5550131",
+        "1980-02-03",
+        "organisational",
+    );
+    let (status, saved) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(json!([anna]), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (status, chosen) = choose(
+        router,
+        lead,
+        &patient,
+        &json!({"agency_processing":true,"doctors_to_agency":true,"data_system":true,"named_recipients":true}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chosen}");
+    let (first, names, _) = consent_form_recipients(&app, lead, None).await;
+    assert_eq!(names, ["Anna Erste"]);
+
+    let ben = full_person(
+        "Ben Zweiter",
+        "child",
+        "+49 30 5550132",
+        "2001-04-05",
+        "all",
+    );
+    let (status, added) = staff_add_person(router, lead, &pm, ben.clone(), Some("in_person")).await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    assert_eq!(added["trusted_persons"], json!([anna, ben]), "{added}");
+    assert_eq!(
+        cabinet_person_names(router, lead, &patient).await,
+        ["Anna Erste", "Ben Zweiter"]
+    );
+    // The client's choice of the core consents is kept, the list is new.
+    let (_, view) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(
+        view["consent_form"]["choices"]["agency_processing"], true,
+        "{view}"
+    );
+    assert_eq!(
+        view["consent_form"]["recipients"],
+        json!([anna, ben]),
+        "{view}"
+    );
+    let (_, state) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/documents/{first}/signature-requests"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(
+        state["ineligible_reason"], "consent_choice_changed",
+        "{state}"
+    );
+    let (second, names, text) = consent_form_recipients(&app, lead, Some(first)).await;
+    assert_eq!(names, ["Anna Erste", "Ben Zweiter"]);
+    for name in ["Anna Erste", "Ben Zweiter (Kind), geb. 05.04.2001"] {
+        assert!(text.contains(name), "{name}: {text}");
+    }
+    // The client's later save in the cabinet keeps the person staff added.
+    let (_, view) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &patient,
+        None,
+    )
+    .await;
+    let (status, saved) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(view["trusted_persons"].clone(), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["trusted_persons"], json!([anna, ben]), "{saved}");
+
+    // At most five persons.
+    for (index, name) in ["Carl Drei", "Dora Vier", "Emil Fuenf"].iter().enumerate() {
+        let person = full_person(
+            name,
+            "relative",
+            &format!("+49 30 555014{index}"),
+            "1970-01-01",
+            "medical",
+        );
+        let (status, body) = staff_add_person(router, lead, &pm, person, Some("email")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let sixth = full_person(
+        "Fritz Sechs",
+        "relative",
+        "+49 30 5550150",
+        "1970-01-01",
+        "medical",
+    );
+    let (status, refused) = staff_add_person(router, lead, &pm, sixth, Some("email")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recipients_invalid", "{refused}");
+
+    // Staff change a person with the full data set as the client tells them.
+    let edit = |base: &Value, person: &Value, how: Option<&str>| {
+        let mut body =
+            json!({ "base": base, "person": person, "version": "2026-10-14", "language": "de" });
+        if let Some(how) = how {
+            body["recorded_how"] = json!(how);
+        }
+        body
+    };
+    let mut ben_changed = ben.clone();
+    ben_changed["relation"] = json!("relative");
+    ben_changed["phone"] = json!("+49 30 5550160");
+    ben_changed["citizenships"] = json!(["AT", "DE"]);
+    ben_changed["scope_codes"] = json!(["medical", "financial"]);
+    let ben_path = format!("/api/v1/leads/{lead}/trusted-persons/1");
+    let (status, refused) = json_request(
+        router,
+        "PUT",
+        &ben_path,
+        &pm,
+        Some(edit(&ben, &ben_changed, None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["code"], "consent_recorded_how_required",
+        "{refused}"
+    );
+    let (status, refused) = json_request(
+        router,
+        "PUT",
+        &ben_path,
+        &pm,
+        Some(edit(&anna, &ben_changed, Some("phone"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "trusted_person_changed", "{refused}");
+    let mut renamed_twin = ben_changed.clone();
+    renamed_twin["name"] = json!("Erste Anna");
+    let (status, refused) = json_request(
+        router,
+        "PUT",
+        &ben_path,
+        &pm,
+        Some(edit(&ben, &renamed_twin, Some("phone"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "trusted_person_exists", "{refused}");
+    let (status, changed) = json_request(
+        router,
+        "PUT",
+        &ben_path,
+        &pm,
+        Some(edit(&ben, &ben_changed, Some("phone"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["trusted_persons"][1], ben_changed, "{changed}");
+    let (_, view) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(view["trusted_persons"][1], ben_changed, "{view}");
+    assert_eq!(view["consent_form"]["recipients"][1], ben_changed, "{view}");
+
+    // Staff remove a person on the client's withdrawal: out at once.
+    let (status, removed) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/trusted-persons/0"),
+        &pm,
+        Some(json!({ "base": anna, "person": null, "reason": "Widerruf am Telefon" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    // The client removes another one in the cabinet.
+    let (_, view) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &patient,
+        None,
+    )
+    .await;
+    let kept: Vec<Value> = view["trusted_persons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|person| person["name"] != "Carl Drei")
+        .cloned()
+        .collect();
+    let (status, saved) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(json!(kept), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        cabinet_person_names(router, lead, &pm).await,
+        ["Ben Zweiter", "Dora Vier", "Emil Fuenf"]
+    );
+    let (_, names, text) = consent_form_recipients(&app, lead, Some(second)).await;
+    assert_eq!(names, ["Ben Zweiter", "Dora Vier", "Emil Fuenf"]);
+    for part in [
+        "Ben Zweiter (Angehörige/r)",
+        "+49 30 5550160",
+        "medizinische und finanzielle",
+    ] {
+        assert!(text.contains(part), "{part}: {text}");
+    }
+    for gone in ["Anna Erste", "Carl Drei"] {
+        assert!(!text.contains(gone), "{gone}: {text}");
+    }
+}
