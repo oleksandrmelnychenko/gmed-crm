@@ -235,6 +235,8 @@ import {
 import { medicalStepHasContent } from "../model/medical-step-content";
 import { uploadEach } from "../model/upload-each";
 import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
+import { MAX_CONSENT_RECIPIENTS } from "@/pages/patient-lead/lead-request-api";
+import { blankRecipient } from "@/pages/patient-lead/lead-trusted-persons-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, updateLeadRepresentativeFromScan, type RepresentativeDetails, type RepresentativeScanDetails } from "../data/lead-representation-api";
 import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
@@ -460,6 +462,8 @@ import {
   type ConsentRecipientScope,
 } from "@/lib/consent-recipient-scope";
 import { CabinetPersonActions, CabinetPersonDetails, CabinetPersonRow, CabinetRecipientBadge, type CabinetPersonEditTarget } from "./lead-cabinet-person-row";
+import { StaffTrustedPersonDialog, type StaffTrustedPersonTarget } from "./lead-staff-trusted-person-dialog";
+import { actsForLeadRelation, trustedPersonDraftFromContact, trustedPersonDraftFromStored } from "../model/lead-staff-trusted-person";
 import { cabinetPeople, consentFormRecipients, mergeLeadPeople, personNameKey, type CabinetPerson } from "../model/lead-people";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
@@ -3999,6 +4003,9 @@ export function LeadWizard({
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
+  // A trusted person staff add or change (owner 2026-11-18); `fromContact`: the wizard
+  // contact it replaces, removed once the person is stored.
+  const [staffPersonTarget, setStaffPersonTarget] = useState<(StaffTrustedPersonTarget & { fromContact?: TrustedContactDraft }) | null>(null);
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
   const [trustedContactRelationError, setTrustedContactRelationError] = useState("");
   // A new minor's custody, stated before the lead exists and sent with its
@@ -11086,9 +11093,24 @@ ${serviceCommentLines.join("\n")}`
                   const cabinetEdit = (person: CabinetPerson): CabinetPersonEditTarget | null => {
                     const index = storedCabinetPersons.findIndex((stored) => personNameKey(stored.name) === personNameKey(person.name));
                     return index >= 0 && leadId
-                      ? { leadId, index, stored: storedCabinetPersons[index], onChanged: reloadStep1Portal }
+                      ? {
+                        leadId,
+                        index,
+                        stored: storedCabinetPersons[index],
+                        onChanged: reloadStep1Portal,
+                        onFullEdit: () => setStaffPersonTarget({
+                          kind: "edit",
+                          index,
+                          stored: storedCabinetPersons[index],
+                          draft: trustedPersonDraftFromStored(storedCabinetPersons[index]),
+                        }),
+                      }
                       : null;
                   };
+                  // Staff add a trusted person with the cabinet's fields (owner 2026-11-18);
+                  // Sales, who see no medical lead data, record none.
+                  const canAddTrustedPerson = Boolean(leadId) && lead?.medical_fields_hidden !== true
+                    && storedCabinetPersons.length < MAX_CONSENT_RECIPIENTS;
                   const formRecipients = consentFormRecipients(
                     step1Portal.intake?.consent_form,
                     draft.trustedContacts,
@@ -11105,10 +11127,19 @@ ${serviceCommentLines.join("\n")}`
                         <CountBadge>{peopleRows.length}</CountBadge>
                       </div>
                     </div>
-                    <Button type="button" variant="default" size="sm" onClick={() => openNewTrustedContact()}>
-                      <Plus aria-hidden="true" className="size-3.5" />
-                      {tx("Добавить контакт", "Kontakt hinzufügen")}
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {canAddTrustedPerson ? (
+                        <Button type="button" variant="default" size="sm" data-testid="lead-trusted-person-add" disabled={isBusy}
+                          onClick={() => setStaffPersonTarget({ kind: "add", draft: blankRecipient() })}>
+                          <UserRoundPlus aria-hidden="true" className="size-3.5" />
+                          {tx("Доверенное лицо", "Vertrauensperson")}
+                        </Button>
+                      ) : null}
+                      <Button type="button" variant="default" size="sm" onClick={() => openNewTrustedContact()}>
+                        <Plus aria-hidden="true" className="size-3.5" />
+                        {tx("Добавить контакт", "Kontakt hinzufügen")}
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 px-3 py-2.5 text-xs" data-testid="consent-form-recipients">
                     <FileText aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
@@ -11191,6 +11222,22 @@ ${serviceCommentLines.join("\n")}`
                                 onClick={() => void flushLeadAutosaveRef.current().then(() => onNewRequestForPerson({ lead_id: leadId, contact_id: contact.id })).catch(showWizardError)}
                               >
                                 <UserRoundPlus aria-hidden="true" className="size-3.5" />
+                              </Button>
+                            ) : null}
+                            {canAddTrustedPerson && !row.cabinet && !actsForLeadRelation(contact.relation) ? (
+                              // A contact kept here before 2026-11-18 becomes a trusted person
+                              // with the cabinet's fields, so the consent form names it.
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                data-testid="trusted-contact-to-person"
+                                disabled={isBusy}
+                                onClick={() => setStaffPersonTarget({ kind: "add", draft: trustedPersonDraftFromContact(contact), fromContact: contact })}
+                              >
+                                <UserRoundPlus aria-hidden="true" className="size-3.5" />
+                                {tx("В доверенные лица", "Als Vertrauensperson")}
                               </Button>
                             ) : null}
                             <Button
@@ -13332,12 +13379,15 @@ ${serviceCommentLines.join("\n")}`
                         <option value={trustedContactEditor.relation}>{trustedContactRelationLabel(trustedContactEditor.relation, tx)}</option>
                       ) : null}
                       {/* A parent block names the specific role; legacy values remain visible until clarified. */}
+                      {/* A new contact is someone who acts for the client; a person who is only
+                          told is a trusted person with the cabinet's fields (owner 2026-11-18). */}
                       {TRUSTED_CONTACT_RELATIONS.filter((relation) => (
-                        !trustedContactEditorGuardian
-                        || relation === "mother"
-                        || relation === "father"
-                        || relation === "guardian"
-                        || relation === trustedContactEditor.relation
+                        (!trustedContactEditorGuardian
+                          || relation === "mother"
+                          || relation === "father"
+                          || relation === "guardian"
+                          || relation === trustedContactEditor.relation)
+                        && (editingTrustedContact || actsForLeadRelation(relation) || relation === trustedContactEditor.relation)
                       )).map((relation) => (
                         <option key={relation} value={relation}>
                           {guardianRelationOptionLabel(relation, tx, trustedContactEditorGuardian || isMinor(draft?.birthDate ?? "", new Date()))}
@@ -14125,6 +14175,21 @@ ${serviceCommentLines.join("\n")}`
         defaultLanguage={issuedPortalAccess?.language}
         onClose={() => setIssuedPortalAccess(null)}
       />
+      {staffPersonTarget && leadId ? (
+        <StaffTrustedPersonDialog
+          leadId={leadId}
+          target={staffPersonTarget}
+          lang={lang}
+          tx={tx}
+          onClose={() => setStaffPersonTarget(null)}
+          onSaved={() => {
+            const replaced = staffPersonTarget.fromContact;
+            reloadStep1Portal();
+            // The person is now one record: the wizard's own copy goes.
+            if (replaced) void removeTrustedContact(replaced);
+          }}
+        />
+      ) : null}
       <LeadConfirmDialog
         open={Boolean(trustedContactRemoval)}
         testId="lead-contact-remove-dialog"

@@ -780,6 +780,53 @@ export function correctLeadTrustedPerson(
   });
 }
 
+/** The version of the disclosure text staff record a trusted person under (server: `DISCLOSURE_VERSION`). */
+export const TRUSTED_PERSON_DISCLOSURE_VERSION = "2026-10-14";
+
+/** How the client gave staff the consent for a trusted person (owner decision 2026-10-29). */
+export type TrustedPersonRecord = { how: string; note?: string };
+
+function trustedPersonBody(person: LeadPortalConsentRecipient, language: string, recorded: TrustedPersonRecord) {
+  return {
+    person: storedTrustedPerson(person),
+    version: TRUSTED_PERSON_DISCLOSURE_VERSION,
+    language,
+    recorded_how: recorded.how,
+    ...(recorded.note?.trim() ? { recorded_note: recorded.note.trim() } : {}),
+  };
+}
+
+/**
+ * Staff add a trusted person the client named to them (owner 2026-11-18):
+ * the same record as one the client names in the cabinet, so the consent form names it.
+ */
+export function addLeadTrustedPerson(
+  leadId: string,
+  person: LeadPortalConsentRecipient,
+  language: string,
+  recorded: TrustedPersonRecord,
+): Promise<unknown> {
+  return apiFetch(`${base(leadId)}/trusted-persons`, {
+    method: "POST",
+    body: JSON.stringify(trustedPersonBody(person, language, recorded)),
+  });
+}
+
+/** Staff change a trusted person with the full data set, as the client tells them (owner 2026-11-18). */
+export function editLeadTrustedPerson(
+  leadId: string,
+  index: number,
+  current: LeadPortalConsentRecipient,
+  person: LeadPortalConsentRecipient,
+  language: string,
+  recorded: TrustedPersonRecord,
+): Promise<unknown> {
+  return apiFetch(`${base(leadId)}/trusted-persons/${index}`, {
+    method: "PUT",
+    body: JSON.stringify({ base: storedTrustedPerson(current), ...trustedPersonBody(person, language, recorded) }),
+  });
+}
+
 export function setLeadStep1FillMode(leadId: string, mode: Step1FillMode): Promise<{ fill_mode: Step1FillMode }> {
   return apiFetch(`${base(leadId)}/portal-intake/fill-mode`, {
     method: "POST",

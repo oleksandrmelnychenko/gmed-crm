@@ -97,6 +97,8 @@ export type CabinetPersonEditTarget = {
   /** The person as the cabinet list stores it (the server compares it). */
   stored: CabinetPerson;
   onChanged: () => void;
+  /** Opens the change with the full data set (owner 2026-11-18) instead of the data correction. */
+  onFullEdit?: () => void;
 };
 
 function correctionError(error: unknown, tx: Tx): string {
@@ -174,7 +176,7 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
     <>
       <div className="flex shrink-0 items-center gap-1">
         <Button type="button" variant="ghost" size="icon-sm" className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-          onClick={() => open("edit")} aria-label={`${tx("Исправить данные", "Daten korrigieren")}: ${stored.name}`} title={tx("Исправить данные", "Daten korrigieren")}
+          onClick={() => (target.onFullEdit ? target.onFullEdit() : open("edit"))} aria-label={`${tx("Исправить данные", "Daten korrigieren")}: ${stored.name}`} title={tx("Исправить данные", "Daten korrigieren")}
           data-testid="person-cabinet-edit">
           <Pencil className="size-3.5" />
         </Button>

@@ -2,8 +2,9 @@
  * One list of the people and institutions of a lead on the wizard's documents
  * step (owner 2026-10-26: «кожна особа один раз з мітками»). Two sources stay
  * apart in the data: the contacts and representatives staff record, and the
- * persons the client names in the cabinet (Auskunft an Dritte, Anlage 1),
- * which staff never change. A person in both appears once.
+ * trusted persons (Auskunft an Dritte, Anlage 1) — named by the client in the
+ * cabinet or by staff for the client with the same fields (owner
+ * 2026-11-18). A person in both appears once.
  */
 
 import type { LeadPortalConsentForm, LeadPortalConsentRecipient } from "./lead-portal-consents";

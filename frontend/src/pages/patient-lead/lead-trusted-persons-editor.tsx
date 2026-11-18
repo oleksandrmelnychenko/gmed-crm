@@ -78,11 +78,13 @@ const STAFF_LABELS = {
  * refused. A saved person shown unchanged keeps its legacy contact (read-only)
  * and needs no phone or date of birth until it is edited (owner 2026-10-26).
  */
-export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false, showErrors = false, serverProblem = null, variant = "cabinet" }: {
+export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false, showErrors = false, serverProblem = null, variant = "cabinet", single = false }: {
   persons: readonly RecipientDraft[]; onChange: (persons: RecipientDraft[]) => void; lang: string; disabled?: boolean; showErrors?: boolean;
   serverProblem?: { index: number; field: RecipientField } | null;
   /** `staff`: the staff dialogs' short labels and scope options without the hints (fix-92). */
   variant?: "cabinet" | "staff";
+  /** One person of a staff dialog (owner 2026-11-18): no adding or removing rows here. */
+  single?: boolean;
 }) {
   const text = consentFormText(lang);
   const fields = trustedPersonsText(lang);
@@ -142,7 +144,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
       return <div key={index} className="overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="trusted-person-editor">
       <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2">
         <span className="flex min-w-0 items-center gap-2 text-xs font-medium"><span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-card font-mono text-[11px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span className="truncate" title={person.name || undefined}>{person.name || fields.name}</span></span>
-        <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled} aria-label={text.removeRecipient} title={text.removeRecipient} onClick={() => removeAt(index)}><Trash2 aria-hidden="true" className="size-3.5" /></Button>
+        {single ? null : <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled} aria-label={text.removeRecipient} title={text.removeRecipient} onClick={() => removeAt(index)}><Trash2 aria-hidden="true" className="size-3.5" /></Button>}
       </div>
       <div className="grid gap-x-3 gap-y-2.5 p-3 sm:grid-cols-2">
       <label className="min-w-0 space-y-1.5 text-xs"><span className="font-mono font-medium leading-5 text-foreground/75">{fields.name}</span>
@@ -212,7 +214,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
       </div>
     </div>;
     })}
-    {persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, blankRecipient()])}>
+    {single ? null : persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, blankRecipient()])}>
       <Plus aria-hidden="true" className="size-3.5" />{text.addRecipient}
     </Button> : <p className="text-xs text-muted-foreground" data-testid="trusted-person-max">{fields.maxReached}</p>}
   </div>;
