@@ -150,6 +150,10 @@ pub(crate) async fn auto_link_parent_logins_in_tx(
         return Ok(Vec::new());
     }
     let lead_login: Option<Uuid> = lead.try_get("portal_user_id")?;
+    // The first login decides the Auftraggeber while nobody pays (owner
+    // 2026-11-18): documents naming another one are signed again.
+    let contracting_before =
+        crate::routes::documents::contracting_parents_of_lead(tx, lead_id).await?;
     let contacts: Value = lead
         .try_get::<Option<Value>, _>("trusted_contacts")?
         .unwrap_or_else(|| json!([]));
@@ -265,6 +269,15 @@ pub(crate) async fn auto_link_parent_logins_in_tx(
     }
     if let (false, Some(actor)) = (linked.is_empty(), actor) {
         crate::routes::lead_payer_link::revoke_for_cabinet_payer(tx, lead_id, actor).await?;
+    }
+    if !linked.is_empty() {
+        crate::routes::lead_payer::outdate_framework_for_contracting_parents(
+            tx,
+            lead_id,
+            &contracting_before,
+            actor,
+        )
+        .await?;
     }
     Ok(linked)
 }
@@ -661,6 +674,13 @@ async fn issue_guardian_access(
             "Parents' access is for minors: the date of birth must show an age under 18",
         );
     }
+    // The first login decides the Auftraggeber while nobody pays (owner
+    // 2026-11-18): documents naming another one are signed again.
+    let contracting_before =
+        match crate::routes::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return internal(error, "load contracting parents"),
+        };
     let contacts: Value = lead
         .try_get("trusted_contacts")
         .unwrap_or_else(|_| json!([]));
@@ -924,6 +944,17 @@ async fn issue_guardian_access(
     {
         return internal(error, "audit guardian access");
     }
+    if converted_patient.is_none()
+        && let Err(error) = crate::routes::lead_payer::outdate_framework_for_contracting_parents(
+            &mut tx,
+            lead_id,
+            &contracting_before,
+            Some(auth.user_id),
+        )
+        .await
+    {
+        return internal(error, "outdate framework contract");
+    }
     if let Err(error) = tx.commit().await {
         return internal(error, "commit guardian access");
     }
@@ -1129,6 +1160,13 @@ async fn revoke_guardian_access(
         }
         Some(None) => {}
     }
+    // The first login decides the Auftraggeber while nobody pays (owner
+    // 2026-11-18): documents naming another one are signed again.
+    let contracting_before =
+        match crate::routes::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return internal(error, "load contracting parents"),
+        };
     let user_id: Uuid = match sqlx::query_scalar(
         r#"UPDATE lead_portal_access
            SET revoked_at = now(), revoked_by = $3, revoked_reason = 'revoked_by_staff'
@@ -1192,6 +1230,16 @@ async fn revoke_guardian_access(
     .await
     {
         return internal(error, "audit revocation");
+    }
+    if let Err(error) = crate::routes::lead_payer::outdate_framework_for_contracting_parents(
+        &mut tx,
+        lead_id,
+        &contracting_before,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return internal(error, "outdate framework contract");
     }
     if let Err(error) = tx.commit().await {
         return internal(error, "commit revocation");

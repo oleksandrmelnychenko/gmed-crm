@@ -13431,7 +13431,8 @@ fn joint_custody_parents(tag: &str) -> Vec<Value> {
 /// Einzelauftrag of a minor lead name that parent as the only Auftraggeber —
 /// no Gesamtschuldner sentence, one guardian frame — while the other custody
 /// parent is no party. Once that parent no longer pays the invoice it
-/// receives, both parents are the party again, as without an answer.
+/// receives, the parent with access to the form is the one party (owner
+/// 2026-11-18).
 #[tokio::test]
 async fn minor_lead_contract_names_only_the_parent_who_receives_and_pays_the_invoice() {
     let Some((app, pool, admin, bearer)) = test_context().await else {
@@ -13482,8 +13483,9 @@ async fn minor_lead_contract_names_only_the_parent_who_receives_and_pays_the_inv
         assert_eq!(roles, vec!["guardian_1", "agency"], "{template}");
     }
 
-    // The mother receives the invoice but someone else pays: no decided case,
-    // both custody parents contract as before.
+    // The mother receives the invoice but someone else pays: no paying
+    // parent, so the parent with access to the form contracts alone (owner
+    // 2026-11-18) — without a login the first parent with an e-mail address.
     set_parent_invoice_recipient(&pool, lead, &parents[0], false).await;
     let (text, roles) = generate_contract_text(
         &app,
@@ -13492,17 +13494,17 @@ async fn minor_lead_contract_names_only_the_parent_who_receives_and_pays_the_inv
     )
     .await;
     assert!(text.contains("Anna Mutter"), "{text}");
-    assert!(text.contains("Boris Vater"), "{text}");
+    assert!(!text.contains("Boris Vater"), "{text}");
     assert!(
-        text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+        !text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
         "{text}"
     );
-    // § 1: the child is treated, not the parents (owner 2026-11-03).
+    // § 1: the child is treated, not the parent (owner 2026-11-03).
     assert!(
-        text.contains("Die Auftraggeber beabsichtigen, ihr Kind"),
+        text.contains("Der Auftraggeber beabsichtigt, das Kind"),
         "{text}"
     );
-    assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
+    assert_eq!(roles, vec!["guardian_1", "agency"]);
 }
 
 /// QA 2026-11-01, W2 N1: the paying parent changed after signature. The order
@@ -13781,21 +13783,22 @@ async fn converted_minor_contract_names_only_the_parent_who_receives_and_pays_th
         json!({"template_id":"framework_contract","patient_id":patient,"order_id":order,"language":"de"}),
     )
     .await;
+    // Nobody pays: the parent with access to the form contracts alone
+    // (owner 2026-11-18), on the card as well.
     assert!(text.contains("Anna Mutter"), "{text}");
-    assert!(text.contains("Boris Vater"), "{text}");
+    assert!(!text.contains("Boris Vater"), "{text}");
     assert!(
-        text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+        !text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
         "{text}"
     );
-    // § 1: the child is treated, not the parents (owner 2026-11-03).
     assert!(
-        text.contains("Die Auftraggeber beabsichtigen, ihr Kind"),
+        text.contains("Der Auftraggeber beabsichtigt, das Kind"),
         "{text}"
     );
-    assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
+    assert_eq!(roles, vec!["guardian_1", "agency"]);
     assert_eq!(
         payer_summary_party_names(&app, &bearer, patient).await,
-        vec!["Anna Mutter".to_string(), "Boris Vater".to_string()]
+        vec!["Anna Mutter".to_string()]
     );
 }
 
@@ -14068,6 +14071,14 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                         // represented by the guardian, also where the order
                         // names no party; parents contract in their own name.
                         let child_party = represented || custody == "guardian";
+                        // Nobody of the parents pays: the parent with access
+                        // to the form is the one Auftraggeber (owner
+                        // 2026-11-18) — without a login the first parent.
+                        let party = if child_party {
+                            &people[..]
+                        } else {
+                            &people[..1]
+                        };
                         if matches!(template, "framework_contract" | "single_order") {
                             assert_eq!(
                                 text.contains("im eigenen Namen"),
@@ -14153,7 +14164,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                             .await
                             .unwrap();
                         }
-                        for (index, (first, last, _)) in people.iter().enumerate() {
+                        for (index, (first, last, _)) in party.iter().enumerate() {
                             assert!(
                                 text.contains(&format!("{first} {last}")),
                                 "{template}: {text}"
@@ -14167,13 +14178,13 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                                 );
                             }
                         }
-                        // No invoice recipient answered: two custody parents
-                        // stay joint debtors (owner decision 2026-10-25).
+                        // No invoice recipient answered: one parent contracts
+                        // (owner 2026-11-18), no joint debtors.
                         if matches!(template, "framework_contract" | "single_order") && !child_party
                         {
                             assert_eq!(
                                 text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
-                                people.len() == 2,
+                                party.len() == 2,
                                 "{template}: {text}"
                             );
                         }
@@ -14183,7 +14194,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                         // A numbered frame names the person who signs in it
                         // (QA 2026-10-31).
                         if template != "cost_coverage_declaration" && !patient_entry {
-                            for (index, (first, _, _)) in people.iter().enumerate() {
+                            for (index, (first, _, _)) in party.iter().enumerate() {
                                 let frame = anchors
                                     .iter()
                                     .find(|anchor| {
@@ -14211,7 +14222,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                                 assert!(text.contains("gesetzlich vertreten durch"), "{text}");
                             } else {
                                 if let Some(preview) = body["preview_html"].as_str() {
-                                    for (first, last, _) in &people {
+                                    for (first, last, _) in party {
                                         assert!(
                                             preview.contains(&format!("{first} {last}")),
                                             "{preview}"
@@ -14228,7 +14239,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                             );
                             assert_eq!(
                                 roles,
-                                if people.len() == 2 {
+                                if party.len() == 2 {
                                     vec!["guardian_1", "agency", "guardian_2"]
                                 } else {
                                     vec!["guardian_1", "agency"]

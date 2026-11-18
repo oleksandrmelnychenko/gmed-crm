@@ -317,17 +317,18 @@ pub(crate) fn form_parent_preference(
 }
 
 /// Narrows the parents of a minor's document to its signers
-/// ([`minor_signers`]): every one for the consents, the paying parent for a
-/// contract document ([`crate::routes::documents::only_paying_parent`]), and
-/// for any other document one parent — the first of `preference` who has an
-/// e-mail address, else the first who has one. Unchanged when `parents` is
+/// ([`minor_signers`]): every one for the consents, the party the PDF prints
+/// for a contract document — `contract_parent`, the paying parent else the
+/// form parent ([`crate::routes::documents::contracting_parent_contact`]) —
+/// and for any other document one parent — the first of `preference` who has
+/// an e-mail address, else the first who has one. Unchanged when `parents` is
 /// false (a Vormund) or nobody can be invited.
 pub(crate) fn narrow_minor_signers<T>(
     people: Vec<T>,
     kind: MinorSigners,
     parents: bool,
     preference: &[Uuid],
-    paying_parent: Option<Uuid>,
+    contract_parent: Option<Uuid>,
     contact_id: impl Fn(&T) -> Option<Uuid>,
     email: impl Fn(&T) -> Option<&str>,
 ) -> Vec<T> {
@@ -336,7 +337,7 @@ pub(crate) fn narrow_minor_signers<T>(
         // A Vormund represents the child whoever pays (the party block).
         MinorSigners::ContractParty if !parents => people,
         MinorSigners::ContractParty => {
-            crate::routes::documents::only_paying_parent(people, paying_parent, contact_id)
+            crate::routes::documents::only_paying_parent(people, contract_parent, contact_id)
         }
         MinorSigners::FormParent if !parents || people.len() < 2 => people,
         MinorSigners::FormParent => {
@@ -377,7 +378,7 @@ async fn contracting_signers(
     kind: MinorSigners,
     chooser: &[String],
 ) -> Result<Option<Vec<Signer>>, Response> {
-    use crate::routes::documents::paying_parent_contact;
+    use crate::routes::documents::{contracting_parent_contact, paying_parent_contact};
     let mut conn = state.db.acquire().await.map_err(db_error)?;
     if let Some(lead_id) = lead_id {
         let Some(mut loaded) = crate::routes::lead_representatives::load(&mut conn, lead_id)
@@ -388,6 +389,9 @@ async fn contracting_signers(
         };
         if kind != MinorSigners::BothParents {
             let paying_parent = paying_parent_contact(&mut conn, lead_id)
+                .await
+                .map_err(db_error)?;
+            let contract_parent = contracting_parent_contact(&mut conn, lead_id)
                 .await
                 .map_err(db_error)?;
             let representation = &mut loaded.representation;
@@ -402,7 +406,7 @@ async fn contracting_signers(
                 kind,
                 parents,
                 &preference,
-                paying_parent,
+                contract_parent,
                 |person| Some(person.id),
                 |person| person.email.as_deref(),
             );
@@ -432,9 +436,12 @@ async fn contracting_signers(
         .fetch_optional(&mut *conn)
         .await
         .map_err(db_error)?;
-        let (paying_parent, preference) = match lead_id {
+        let (contract_parent, preference) = match lead_id {
             Some(lead_id) => {
                 let paying_parent = paying_parent_contact(&mut conn, lead_id)
+                    .await
+                    .map_err(db_error)?;
+                let contract_parent = contracting_parent_contact(&mut conn, lead_id)
                     .await
                     .map_err(db_error)?;
                 let preference = crate::routes::lead_representatives::load(&mut conn, lead_id)
@@ -444,7 +451,7 @@ async fn contracting_signers(
                         form_parent_preference(&loaded.representation, chooser, paying_parent)
                     })
                     .unwrap_or_default();
-                (paying_parent, preference)
+                (contract_parent, preference)
             }
             None => (None, Vec::new()),
         };
@@ -455,7 +462,7 @@ async fn contracting_signers(
             kind,
             parents,
             &preference,
-            paying_parent,
+            contract_parent,
             |representative| representative.source_contact_id,
             |representative| representative.email.as_deref(),
         );
@@ -1013,11 +1020,44 @@ mod tests {
             narrow(&with_login, MinorSigners::ContractParty, &[], ioann_pays),
             ["Ioann"]
         );
-        // Without a paying parent the contract keeps the party of both.
+        // Without a paying parent the contract's party is the form parent
+        // (owner 2026-11-18): the login holder, else the first parent with an
+        // e-mail address, else the first parent.
+        let form_parent = |representation: &Representation, logins: &[Uuid]| {
+            crate::routes::documents::form_parent_contact(representation, logins)
+        };
+        let maria_id = with_login.representatives[0].id;
+        assert_eq!(form_parent(&with_login, &[maria_id]), Some(maria_id));
         assert_eq!(
-            narrow(&with_login, MinorSigners::ContractParty, &[], None),
-            ["Maria", "Ioann"]
+            narrow(
+                &with_login,
+                MinorSigners::ContractParty,
+                &[],
+                form_parent(&with_login, &[maria_id])
+            ),
+            ["Maria"]
         );
+        // A later login of the other parent does not take it over.
+        assert_eq!(
+            form_parent(&with_login, &[maria_id, ioann.id]),
+            Some(maria_id)
+        );
+        assert_eq!(form_parent(&joint, &[]), Some(ioann.id));
+        let mut first_without_email = joint.clone();
+        first_without_email.representatives[0].email = None;
+        assert_eq!(
+            form_parent(&first_without_email, &[ioann.id]),
+            Some(maria.id)
+        );
+        let mut nobody_with_email = first_without_email.clone();
+        nobody_with_email.representatives[1].email = None;
+        assert_eq!(form_parent(&nobody_with_email, &[]), Some(ioann.id));
+        // One parent, a Vormund or an adult: no narrowing.
+        let single = Representation {
+            representatives: vec![joint.representatives[0].clone()],
+            ..joint.clone()
+        };
+        assert_eq!(form_parent(&single, &[]), None);
         // The parent who made the document's consent choice signs it.
         assert_eq!(
             narrow(
@@ -1042,6 +1082,7 @@ mod tests {
             ..joint.clone()
         };
         assert!(!parents_represent(&guardians));
+        assert_eq!(form_parent(&guardians, &[]), None);
         assert_eq!(
             narrow(&guardians, MinorSigners::FormParent, &[], None),
             ["Ioann", "Maria"]

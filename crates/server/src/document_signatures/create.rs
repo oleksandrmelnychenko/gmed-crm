@@ -199,13 +199,17 @@ async fn validate_minor_clients(
             .collect::<Vec<_>>();
         // Each document's own signers (owner rule 2026-11-18,
         // `defaults::minor_signers`): the consents every custody parent, a
-        // contract document its party — the paying parent alone (map item
-        // 94) — and any other document the parent with access to the form.
-        // The package needs the union; the custody's count only while a
-        // consent is in it.
+        // contract document its party — one parent: the paying one (map item
+        // 94), else the one with access to the form (owner 2026-11-18) — and
+        // any other document the parent with access to the form. The package
+        // needs the union; the custody's count only while a consent is in it.
         let paying_parent = crate::routes::documents::paying_parent_contact(&mut conn, lead_id)
             .await
             .map_err(db_error)?;
+        let contract_parent =
+            crate::routes::documents::contracting_parent_contact(&mut conn, lead_id)
+                .await
+                .map_err(db_error)?;
         let parents = defaults::parents_represent(&representation);
         let mut signing: Vec<&crate::routes::lead_representatives::Representative> = Vec::new();
         let mut consent = false;
@@ -225,7 +229,7 @@ async fn validate_minor_clients(
                 kind,
                 parents,
                 &preference,
-                paying_parent,
+                contract_parent,
                 |person| Some(person.id),
                 |person| person.email.as_deref(),
             ) {

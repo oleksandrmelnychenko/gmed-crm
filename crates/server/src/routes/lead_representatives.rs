@@ -3149,6 +3149,11 @@ pub(crate) async fn update_my_representation(
     {
         return refusal;
     }
+    let contracting_before =
+        match crate::routes::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return intake::internal(error, "load contracting parents"),
+        };
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return intake::not_found(),
@@ -3353,6 +3358,14 @@ pub(crate) async fn update_my_representation(
         )
         .await
         .map_err(|error| intake::internal(error, "audit representation"))?;
+        crate::routes::lead_payer::outdate_framework_for_contracting_parents(
+            &mut tx,
+            lead_id,
+            &contracting_before,
+            Some(auth.user_id),
+        )
+        .await
+        .map_err(|error| intake::internal(error, "outdate framework contract"))?;
         Ok::<_, axum::response::Response>(())
     }
     .await;
@@ -4495,6 +4508,11 @@ pub(crate) async fn set_lead_custody(
     if let Err(response) = lock_open_lead(&mut tx, lead_id).await {
         return response;
     }
+    let contracting_before =
+        match crate::routes::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return intake::internal(error, "load contracting parents"),
+        };
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
@@ -4627,6 +4645,16 @@ pub(crate) async fn set_lead_custody(
     .await
     {
         return intake::internal(error, "reassess risk after custody");
+    }
+    if let Err(error) = crate::routes::lead_payer::outdate_framework_for_contracting_parents(
+        &mut tx,
+        lead_id,
+        &contracting_before,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return intake::internal(error, "outdate framework contract");
     }
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit custody");
@@ -5106,6 +5134,11 @@ pub(crate) async fn remove_lead_trusted_contact(
     if contacts.len() == previous_len {
         return intake::err(StatusCode::NOT_FOUND, "Contact not found");
     }
+    let contracting_before =
+        match crate::routes::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return intake::internal(error, "load contracting parents"),
+        };
     let written = async {
         // Deleting the extra row unlinks uploads through their foreign key;
         // it does not delete the documents or their audit history.
@@ -5156,6 +5189,13 @@ pub(crate) async fn remove_lead_trusted_contact(
             &mut tx,
             lead_id,
             auth.user_id,
+        )
+        .await?;
+        crate::routes::lead_payer::outdate_framework_for_contracting_parents(
+            &mut tx,
+            lead_id,
+            &contracting_before,
+            Some(auth.user_id),
         )
         .await?;
         let loaded = load(&mut tx, lead_id).await?.unwrap_or_default();

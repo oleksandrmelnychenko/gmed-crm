@@ -7055,6 +7055,17 @@ async fn update_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    // The parents, their order and e-mail addresses decide the Auftraggeber
+    // while nobody pays (owner 2026-11-18): documents naming another one are
+    // signed again.
+    let contracting_before =
+        match super::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => {
+                tracing::error!(%error, %lead_id, "load contracting parents");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
     let compliance_changed = compliance_status
         .as_deref()
         .is_some_and(|value| value != current_compliance_status);
@@ -7540,6 +7551,17 @@ async fn update_lead(
     .await
     {
         tracing::error!(%error, %lead_id, "link parents' logins after lead update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = super::lead_payer::outdate_framework_for_contracting_parents(
+        &mut tx,
+        lead_id,
+        &contracting_before,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        tracing::error!(%error, %lead_id, "outdate framework contract after lead update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Err(e) = tx.commit().await {

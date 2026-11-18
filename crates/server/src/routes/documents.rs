@@ -23082,7 +23082,7 @@ async fn load_contracting_doc(
                 kind
             };
             let paying_parent = if kind == PartyKind::LegalRepresentatives {
-                paying_parent_contact(&mut conn, lead_id)
+                contracting_parent_contact(&mut conn, lead_id)
                     .await
                     .map_err(failed)?
             } else {
@@ -23421,10 +23421,95 @@ pub(crate) async fn contracting_parents_of_lead(
         .filter(|person| person.slot.is_some())
         .map(|person| person.id)
         .collect::<Vec<_>>();
-    let paying_parent = paying_parent_contact(conn, lead_id).await?;
-    let mut parents = only_paying_parent(parents, paying_parent, |id| Some(*id));
+    let contracting_parent = contracting_parent_contact(conn, lead_id).await?;
+    let mut parents = only_paying_parent(parents, contracting_parent, |id| Some(*id));
     parents.sort();
     Ok(parents)
+}
+
+/// The contact id of the one parent who is a minor's Auftraggeber: the
+/// paying parent ([`paying_parent_contact`], map item 94), else the parent
+/// with access to the form (owner decision 2026-11-18,
+/// [`form_parent_contact`]). Read by the contract documents, their signers,
+/// the patient card's "Vertragspartei" and the outdating of a Rahmenvertrag
+/// whose party changed ([`contracting_parents_of_lead`]). A converted lead is
+/// read as of its conversion: its representation on that day and the logins
+/// issued before it, so a login issued later does not change the party.
+pub(crate) async fn contracting_parent_contact(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    if let Some(parent) = paying_parent_contact(conn, lead_id).await? {
+        return Ok(Some(parent));
+    }
+    let converted_at: Option<Option<chrono::DateTime<chrono::Utc>>> = sqlx::query_scalar(
+        "SELECT status_changed_at FROM leads WHERE id = $1 AND converted_patient_id IS NOT NULL",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let converted = converted_at.is_some();
+    let converted_at = converted_at.flatten();
+    let on = converted_at
+        .map(crate::app_time::date_of)
+        .unwrap_or_else(crate::app_time::today);
+    let Some(loaded) = super::lead_representatives::load_on(conn, lead_id, on).await? else {
+        return Ok(None);
+    };
+    // The contacts in the order their guardian logins were issued: the
+    // active ones of an open lead, those issued before the conversion of a
+    // converted one.
+    let logins: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT trusted_contact_id FROM lead_portal_access
+           WHERE lead_id = $1 AND kind = 'guardian' AND trusted_contact_id IS NOT NULL
+             AND CASE WHEN $2 THEN $3::timestamptz IS NULL OR created_at <= $3
+                      ELSE revoked_at IS NULL END
+           ORDER BY created_at, id"#,
+    )
+    .bind(lead_id)
+    .bind(converted)
+    .bind(converted_at)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(form_parent_contact(&loaded.representation, &logins))
+}
+
+/// The parent of a minor represented by both parents who has access to the
+/// form: the first whose cabinet login was issued first (`logins`, contact
+/// ids in issue order) with an e-mail address, else the first parent with an
+/// e-mail address, else the first parent. `None` for an adult, a Vormund or a
+/// single parent.
+pub(crate) fn form_parent_contact(
+    representation: &super::lead_representatives::Representation,
+    logins: &[Uuid],
+) -> Option<Uuid> {
+    if !crate::document_signatures::defaults::parents_represent(representation) {
+        return None;
+    }
+    let parents = representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_some())
+        .collect::<Vec<_>>();
+    if parents.len() < 2 {
+        return None;
+    }
+    let invitable = |person: &&super::lead_representatives::Representative| {
+        person
+            .email
+            .as_deref()
+            .is_some_and(|email| !email.trim().is_empty())
+    };
+    logins
+        .iter()
+        .find_map(|id| {
+            parents
+                .iter()
+                .find(|person| person.id == *id && invitable(person))
+        })
+        .or_else(|| parents.iter().find(|person| invitable(person)))
+        .or_else(|| parents.first())
+        .map(|person| person.id)
 }
 
 /// The parent the payer declaration names as payer
@@ -23559,10 +23644,10 @@ pub(crate) async fn narrow_patient_party_to_paying_parent(
     else {
         return Ok(());
     };
-    let paying_parent = paying_parent_contact(conn, lead_id).await?;
+    let contracting_parent = contracting_parent_contact(conn, lead_id).await?;
     party.representatives = only_paying_parent(
         std::mem::take(&mut party.representatives),
-        paying_parent,
+        contracting_parent,
         |representative| representative.source_contact_id,
     );
     Ok(())
