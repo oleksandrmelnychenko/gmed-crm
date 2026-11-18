@@ -5253,6 +5253,58 @@ struct ServiceLineInput {
     is_cost_passthrough: Option<bool>,
     #[serde(default)]
     note: Option<String>,
+    /// Net unit price and the catalogue unit of the line (owner 2026-11-18):
+    /// with a discount the server prints the fee and the line amount itself
+    /// from these, never from the client's money strings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unit_price: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
+    /// Discount in percent (0–100, two decimals); none when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    discount_percent: Option<Value>,
+}
+
+impl ServiceLineInput {
+    /// The fee and net line amount of a discounted line, computed here:
+    /// `None` for a line without a discount (its texts print as sent).
+    /// `Err` for a discount out of range or a line whose price or quantity
+    /// cannot be read.
+    fn discounted_texts(&self) -> Result<Option<(String, String)>, &'static str> {
+        let discount = money::discount_percent_input(self.discount_percent.as_ref())?;
+        if discount <= Decimal::ZERO {
+            return Ok(None);
+        }
+        if self.is_cost_passthrough == Some(true) {
+            return Err("A pass-through cost cannot have a discount");
+        }
+        let price = match self.unit_price.as_ref() {
+            Some(Value::String(text)) => parse_eur_decimal(text),
+            Some(Value::Number(number)) => number.to_string().parse::<Decimal>().ok(),
+            _ => None,
+        }
+        .filter(|price| *price >= Decimal::ZERO)
+        .ok_or("A discounted service line needs its unit price")?;
+        let quantity = self
+            .quantity
+            .as_deref()
+            .and_then(|text| text.split_whitespace().next())
+            .and_then(parse_eur_decimal)
+            .filter(|quantity| *quantity > Decimal::ZERO)
+            .ok_or("A discounted service line needs its quantity")?;
+        let price = money::round_cents(price);
+        let net = money::line_list_net(quantity, price)
+            - money::line_discount_amount(quantity, price, discount);
+        Ok(Some((
+            crate::order_document_texts::discounted_unit_price_label_de(
+                price,
+                "EUR",
+                self.unit.as_deref().unwrap_or_default(),
+                discount,
+            ),
+            format_eur_decimal(net),
+        )))
+    }
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -19042,6 +19094,10 @@ async fn generate_document(
                 Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
             };
         }
+        // A discount the server cannot price is refused, never printed as sent.
+        if let Err(message) = line.discounted_texts() {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+        }
     }
     let own_consent_choice = if crate::consent_choices::needs_own_choice(Some(template.id)) {
         let subject_email = patient_row
@@ -32568,13 +32624,26 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
     lines
         .iter()
         .filter(|line| !line.description.trim().is_empty())
-        .map(|line| GeneratedContractLineItem {
+        .map(|line| {
+            // A discounted line prints the fee and amount the server computes
+            // (owner 2026-11-18); `validate_service_line_discounts` refused
+            // an unreadable one before.
+            let discounted = line.discounted_texts().ok().flatten();
+            (line, discounted)
+        })
+        .map(|(line, discounted)| GeneratedContractLineItem {
             description_items: line.description_items.clone(),
             localized_sections: Vec::new(),
             description: line.description.trim().to_string(),
             quantity: line.quantity.clone().unwrap_or_default(),
-            unit_price: line.fee.clone().unwrap_or_default(),
-            line_gross: line.line_total.clone().unwrap_or_default(),
+            unit_price: discounted
+                .as_ref()
+                .map(|(fee, _)| fee.clone())
+                .unwrap_or_else(|| line.fee.clone().unwrap_or_default()),
+            line_gross: discounted
+                .as_ref()
+                .map(|(_, total)| total.clone())
+                .unwrap_or_else(|| line.line_total.clone().unwrap_or_default()),
             vat_rate: line.vat_rate.clone(),
             is_cost_passthrough: line.is_cost_passthrough.unwrap_or(false),
             notes: line
@@ -48383,6 +48452,9 @@ mod tests {
         DocumentBindingOverrides {
             estimate_total: Some("339,15 €".to_string()),
             service_lines: vec![ServiceLineInput {
+                unit_price: None,
+                unit: None,
+                discount_percent: None,
                 description: "Interpreter support".to_string(),
                 description_items: None,
                 fee: Some("285,00 EUR / Std.".to_string()),
@@ -48462,6 +48534,9 @@ mod tests {
         let bindings = DocumentBindingOverrides {
             estimate_total: Some("1.000,00 - 1.500,00 €".to_string()),
             service_lines: vec![ServiceLineInput {
+                unit_price: None,
+                unit: None,
+                discount_percent: None,
                 description: "Kardiologische Untersuchung".to_string(),
                 description_items: None,
                 fee: None,
@@ -48626,6 +48701,9 @@ mod tests {
         let snapshot = generated_binding_snapshot(&DocumentBindingOverrides {
             party_sign_place: Some("Paris".to_string()),
             service_lines: vec![ServiceLineInput {
+                unit_price: None,
+                unit: None,
+                discount_percent: None,
                 description_items: None,
                 description: "Dolmetscher".to_string(),
                 fee: Some("100,00 EUR/1 Stunde".to_string()),

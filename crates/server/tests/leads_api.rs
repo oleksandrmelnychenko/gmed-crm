@@ -11425,3 +11425,87 @@ async fn guardian_candidates_include_representatives_of_other_leads() {
         .count();
     assert_eq!(others, 1, "the other lead's guardian stays: {own}");
 }
+
+/// Owner 2026-11-18, main-session check of qa-fix-108: the lead wizard sends
+/// the positions of a first-time lead as `bindings.service_lines`. A line with
+/// a discount prints the tariff with the discount and the discounted amount,
+/// computed by the server from the price, quantity and discount it sends, not
+/// from the client's money strings. Einzelauftrag and Kostenvoranschlag alike.
+#[tokio::test]
+async fn wizard_service_lines_print_the_discount_on_the_order_documents() {
+    let Some(app) = test_app().await else { return };
+    let ceo = app.auth_header("ceo");
+    let lead = insert_patient_first_wizard_lead(&app, "discount-docs").await;
+    let seeded = seed_complete_lead_onboarding(&app, lead).await;
+    let line = |discount: Value| {
+        json!({
+            "description": "Beratungsleistungen",
+            "quantity": "2",
+            // What the wizard prints without a discount; the server replaces
+            // both for a discounted line.
+            "fee": "180,00 € / Einheit",
+            "line_total": "360,00 €",
+            "unit_price": 180,
+            "unit": "Einheit",
+            "discount_percent": discount,
+            "vat_rate": "19",
+            "is_cost_passthrough": false,
+        })
+    };
+    // A discount the server cannot price is refused.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(
+            json!({"template_id":"single_order","lead_id":lead,"order_id":seeded.order_id,
+            "language":"de","status":"active","bindings":{"service_lines":[line(json!(150))]}}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+
+    for template in ["single_order", "order_cost_estimate"] {
+        let (status, generated) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &ceo,
+            Some(
+                json!({"template_id":template,"lead_id":lead,"order_id":seeded.order_id,
+                "language":"de","status":"active",
+                "bindings":{"estimate_total":"385,56 €","service_lines":[line(json!(10))]}}),
+            ),
+        )
+        .await;
+        assert!(status.is_success(), "{template}: {generated}");
+        let id = generated["id"].as_str().unwrap();
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/documents/{id}/download"))
+            .header("Authorization", &ceo)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{template}");
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .unwrap();
+        let text = pdf_extract::extract_text_from_mem(&bytes)
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        // 2 × 180,00 less 10 %: 162,00 € per unit, 324,00 € net, 61,56 € VAT.
+        assert!(text.contains("Rabatt 10 %"), "{template}: {text}");
+        assert!(text.contains("162,00"), "{template}: {text}");
+        assert!(!text.contains("360,00"), "{template}: {text}");
+        // The Einzelauftrag lists the fee only; the estimate the amounts.
+        if template == "order_cost_estimate" {
+            assert!(text.contains("324,00"), "{template}: {text}");
+            assert!(text.contains("61,56"), "{template}: {text}");
+            assert!(text.contains("385,56"), "{template}: {text}");
+        }
+    }
+}

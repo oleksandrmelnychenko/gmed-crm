@@ -8388,7 +8388,12 @@ ${serviceCommentLines.join("\n")}`
                 description: serviceDocumentDescription(line),
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),
-                line_total: `${formatMoneyValue(roundCents(money(line.quantity) * money(line.price)), "de")} €`,
+                line_total: `${formatMoneyValue(moneyLineAmounts(money(line.quantity), money(line.price), 0, serviceLineDiscount(line)).net, "de")} €`,
+                // With a discount the server prints the fee and amount from
+                // these (owner 2026-11-18).
+                unit_price: money(line.price),
+                unit: serviceDocumentUnit(line),
+                discount_percent: serviceLineDiscount(line),
                 vat_rate: line.vat,
                 // A 0 % pass-through cost is a durchlaufender Posten, not tax-exempt medical care.
                 is_cost_passthrough: line.isCostPassthrough === true,
@@ -8825,11 +8830,15 @@ ${serviceCommentLines.join("\n")}`
     return resolvedServiceCatalogDescription(line) || undefined;
   }
 
-  function serviceDocumentFee(line: ServiceLine) {
+  function serviceDocumentUnit(line: ServiceLine) {
     const catalogService = line.agencyServiceId
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
-    const unit = germanDocumentUnitLabel(line.catalogUnitLabel.trim() || catalogService?.unit_label?.trim());
+    return germanDocumentUnitLabel(line.catalogUnitLabel.trim() || catalogService?.unit_label?.trim());
+  }
+
+  function serviceDocumentFee(line: ServiceLine) {
+    const unit = serviceDocumentUnit(line);
     // German document: "550,00 € / Stück", never the raw catalogue unit "EUR/item" (QA 2026-10-11).
     const currency = (line.currency || "EUR").toUpperCase();
     const amount = `${formatMoneyValue(money(line.price), "de")} ${currency === "EUR" ? "€" : currency}`;

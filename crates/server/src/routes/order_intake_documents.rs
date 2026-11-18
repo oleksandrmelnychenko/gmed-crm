@@ -130,6 +130,9 @@ pub(super) fn apply(bindings: &mut DocumentBindingOverrides, data: &Value, templ
                 crate::service_description::items_text(&description_items)
             };
             ServiceLineInput {
+                unit_price: None,
+                unit: None,
+                discount_percent: None,
                 description: text(line, "description").to_string(),
                 description_items: (!description_items.is_empty()).then_some(description_items),
                 fee: Some(unit_fee(line, unit)),
@@ -277,6 +280,9 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
                 crate::service_description::items_text(&description_items)
             };
             ServiceLineInput {
+                unit_price: None,
+                unit: None,
+                discount_percent: None,
                 description: text(line, "description").to_owned(),
                 description_items: (!description_items.is_empty()).then_some(description_items),
                 note,
