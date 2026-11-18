@@ -257,3 +257,54 @@ AS $$
     WHERE service.order_id = target_order_id
       AND service.status <> 'cancelled'
 $$;
+
+-- Owner 2026-11-18: the discount belongs to the tariff chosen for a service
+-- in the order (price version + discount). A line the system adds later for
+-- a service the order already has (a completed appointment, an interpreter
+-- report) is priced with that tariff (service groups keep their own group
+-- price),
+-- never with the catalogue's current price. Lines staff add or change by
+-- hand keep what they send (the order screens default to the order's tariff).
+-- Named to fire before `set_order_leistung_catalog_snapshot` (BEFORE triggers
+-- fire in name order), which then snapshots the inherited price.
+CREATE OR REPLACE FUNCTION inherit_order_line_tariff()
+RETURNS TRIGGER AS $$
+DECLARE
+    tariff RECORD;
+BEGIN
+    IF NEW.agency_service_id IS NULL
+       OR NEW.is_cost_passthrough
+       OR (NEW.source_medical_appointment_id IS NULL
+           AND NEW.source_interpreter_report_id IS NULL) THEN
+        RETURN NEW;
+    END IF;
+    SELECT line.unit_price_snapshot, line.vat_rate_snapshot, line.currency,
+           line.agency_service_price_version_id, line.tax_profile_id,
+           line.vat_source, line.discount_percent
+    INTO tariff
+    FROM order_leistungen line
+    WHERE line.order_id = NEW.order_id
+      AND line.agency_service_id = NEW.agency_service_id
+      AND line.status <> 'cancelled'
+      AND NOT line.is_cost_passthrough
+      AND line.id IS DISTINCT FROM NEW.id
+      AND UPPER(line.currency) = UPPER(NEW.currency)
+    ORDER BY line.created_at, line.id
+    LIMIT 1;
+    IF FOUND THEN
+        NEW.unit_price := tariff.unit_price_snapshot;
+        NEW.vat_rate := tariff.vat_rate_snapshot;
+        NEW.agency_service_price_version_id := tariff.agency_service_price_version_id;
+        NEW.tax_profile_id := tariff.tax_profile_id;
+        NEW.vat_source := tariff.vat_source;
+        NEW.discount_percent := tariff.discount_percent;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS inherit_order_line_tariff ON order_leistungen;
+CREATE TRIGGER inherit_order_line_tariff
+    BEFORE INSERT ON order_leistungen
+    FOR EACH ROW
+    EXECUTE FUNCTION inherit_order_line_tariff();

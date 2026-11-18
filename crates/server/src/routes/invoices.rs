@@ -882,6 +882,9 @@ struct InvoicePdfLineItem {
     line_net: Decimal,
     line_vat: Decimal,
     line_gross_value: Decimal,
+    /// Discount in percent and its net amount, printed under the position
+    /// (owner 2026-11-18); the amounts above are after it.
+    discount: Option<zugferd::LineDiscount>,
 }
 
 #[derive(Clone)]
@@ -3112,6 +3115,22 @@ impl InvoicePdfLayout {
     }
 }
 
+/// «Rabatt 10 %: −36,00 € netto», the line printed under a discounted
+/// position of an invoice or credit note.
+fn invoice_pdf_discount_text(
+    language: &str,
+    discount: zugferd::LineDiscount,
+    currency: &str,
+) -> String {
+    format!(
+        "{} {} %: {} {}",
+        invoice_pdf_label(language, "line_discount"),
+        format_invoice_pdf_number(language, &discount.percent.to_string()),
+        format_invoice_pdf_deduction(&discount.amount.to_string(), currency),
+        invoice_pdf_label(language, "net_suffix"),
+    )
+}
+
 fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
     match (language, key) {
         ("uk", "invoice_title") => "Рахунок",
@@ -3344,6 +3363,14 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "item_vat") => "НДС позиции",
         ("en", "item_vat") => "Line VAT",
         (_, "item_vat") => "Position MwSt.",
+        ("uk", "line_discount") => "Знижка",
+        ("ru", "line_discount") => "Скидка",
+        ("en", "line_discount") => "Discount",
+        (_, "line_discount") => "Rabatt",
+        ("uk", "net_suffix") => "нетто",
+        ("ru", "net_suffix") => "нетто",
+        ("en", "net_suffix") => "net",
+        (_, "net_suffix") => "netto",
         ("uk", "cost_passthrough") => "Без ПДВ як перевиставлені витрати",
         ("ru", "cost_passthrough") => "Без НДС как перевыставленные расходы",
         ("en", "cost_passthrough") => "VAT-free cost passthrough item",
@@ -3508,6 +3535,7 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
                 line_net,
                 line_vat,
                 line_gross_value,
+                discount: zugferd::stored_line_discount(item),
             }
         })
         .collect()
@@ -7486,6 +7514,23 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
                 false,
                 false,
             );
+            // The discount on its own line under the position: the price
+            // above is the list price, the total after the discount.
+            if let Some(discount) = item.discount {
+                let text = invoice_pdf_discount_text(language, discount, &context.currency);
+                layout.table_row(
+                    &[
+                        (&text, 82.0, InvoicePdfCellAlign::Left),
+                        ("", 18.0, InvoicePdfCellAlign::Right),
+                        ("", 27.0, InvoicePdfCellAlign::Right),
+                        ("", 18.0, InvoicePdfCellAlign::Right),
+                        ("", 29.0, InvoicePdfCellAlign::Right),
+                    ],
+                    false,
+                    false,
+                    false,
+                );
+            }
         }
         layout.spacer(6.0);
     }
@@ -18075,6 +18120,29 @@ mod tests {
     fn pdf_text(context: &InvoicePdfContext) -> String {
         let bytes = build_invoice_pdf(context).unwrap();
         pdf_extract::extract_text_from_mem(&bytes).unwrap()
+    }
+
+    #[test]
+    fn a_discounted_position_prints_its_rabatt_line_under_it() {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.total_net = "324.00".to_string();
+        context.total_vat = "61.56".to_string();
+        context.total_gross = "385.56".to_string();
+        context.line_items = super::parse_invoice_pdf_line_items(&serde_json::json!([{
+            "description": "Beratungsleistungen",
+            "quantity": "2", "unit_price": "180", "vat_rate": "19",
+            "discount_percent": "10", "discount_amount": "36",
+            "line_net": "324", "line_vat": "61.56", "line_gross": "385.56"
+        }]));
+        let text = pdf_text(&context);
+        assert!(text.contains("Rabatt 10 %: -36,00 € netto"), "{text}");
+        // The VAT summary per rate uses the discounted net.
+        assert!(text.contains("324,00"), "{text}");
+        assert!(text.contains("61,56"), "{text}");
+        assert!(text.contains("385,56"), "{text}");
+        // A position without a discount has no such line.
+        assert!(!pdf_text(&sample_context()).contains("Скидка"));
     }
 
     #[test]

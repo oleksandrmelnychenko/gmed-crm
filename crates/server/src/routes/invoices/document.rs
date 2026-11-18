@@ -932,6 +932,7 @@ mod tests {
             line_net: net,
             line_vat: vat,
             line_gross_value: net + vat,
+            discount: None,
         }
     }
 

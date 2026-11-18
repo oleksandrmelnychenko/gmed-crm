@@ -7647,11 +7647,26 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                     .and_then(Value::as_str)
                     .unwrap_or("1")
                     .to_string(),
-                unit_price: object
-                    .get("unit_price")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
+                // A discounted line (owner 2026-11-18) prints its price with
+                // the discount; its amount below is the discounted net.
+                unit_price: match (
+                    money::json_discount_percent(&item),
+                    object
+                        .get("unit_price")
+                        .and_then(Value::as_str)
+                        .and_then(parse_eur_decimal),
+                ) {
+                    (discount, Some(price)) if discount > Decimal::ZERO => {
+                        crate::order_document_texts::discounted_unit_price_label_de(
+                            price, "EUR", "", discount,
+                        )
+                    }
+                    _ => object
+                        .get("unit_price")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                },
                 // Every document prints net line amounts with the VAT below
                 // them, as manual service lines do: a stored quote keeps both,
                 // so its gross never stands under "zzgl. MwSt." (QA 2026-11-01).

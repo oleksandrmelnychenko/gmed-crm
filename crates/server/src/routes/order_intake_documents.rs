@@ -7,7 +7,10 @@ fn line_net(line: &Value) -> Decimal {
             .parse::<Decimal>()
             .unwrap_or_default()
     };
-    money::round_cents(number("quantity") * number("unit_price"))
+    let (quantity, price) = (number("quantity"), number("unit_price"));
+    // The line's discount (owner 2026-11-18) lowers its net like the order.
+    money::line_list_net(quantity, price)
+        - money::line_discount_amount(quantity, price, money::json_discount_percent(line))
 }
 
 /// The VAT rate a document counts for a line. A pass-through cost carries no
@@ -56,7 +59,12 @@ fn unit_fee(line: &Value, unit: &str) -> String {
         "" => "EUR",
         currency => currency,
     };
-    crate::order_document_texts::unit_price_label_de(price, currency, unit)
+    crate::order_document_texts::discounted_unit_price_label_de(
+        price,
+        currency,
+        unit,
+        money::json_discount_percent(line),
+    )
 }
 
 fn decimal(value: &Value) -> f64 {

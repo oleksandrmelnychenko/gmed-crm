@@ -213,6 +213,9 @@ pub(crate) fn creditable_lines(
             let gross = json_decimal(item, "line_gross").unwrap_or(Decimal::ZERO);
             let vat = json_decimal(item, "line_vat").unwrap_or(Decimal::ZERO);
             let net = json_decimal(item, "line_net").unwrap_or(gross - vat);
+            // A discounted line (owner 2026-11-18) is credited and reversed
+            // as its amount: quantity × list price is not its net.
+            let priced = money::json_discount_percent(item) <= Decimal::ZERO;
             CreditableLine {
                 index,
                 description: item
@@ -221,8 +224,8 @@ pub(crate) fn creditable_lines(
                     .unwrap_or_default()
                     .trim()
                     .to_string(),
-                quantity: json_decimal(item, "quantity"),
-                unit_price: json_decimal(item, "unit_price"),
+                quantity: json_decimal(item, "quantity").filter(|_| priced),
+                unit_price: json_decimal(item, "unit_price").filter(|_| priced),
                 vat_rate: effective_vat_rate(item, net, vat),
                 is_cost_passthrough: item
                     .get("is_cost_passthrough")

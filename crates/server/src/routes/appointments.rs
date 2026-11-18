@@ -10445,14 +10445,14 @@ async fn consume_planned_treatment_organization_line(
                 order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
                 is_cost_passthrough, provider_id, doctor_id, status, delivered_at, notes,
                 source_medical_appointment_id, agency_service_id, agency_service_price_version_id,
-                tax_profile_id, vat_source
+                tax_profile_id, vat_source, discount_percent
            )
            SELECT order_id, patient_id, description, 1, unit_price, currency, vat_rate,
                   is_cost_passthrough, COALESCE(provider_id, $3),
                   CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
                   'delivered', now(), $5,
                   $2, agency_service_id, agency_service_price_version_id,
-                  tax_profile_id, vat_source
+                  tax_profile_id, vat_source, discount_percent
            FROM order_leistungen
            WHERE id = $1
            RETURNING id"#,

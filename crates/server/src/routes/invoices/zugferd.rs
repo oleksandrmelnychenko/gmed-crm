@@ -1099,6 +1099,58 @@ mod tests {
     }
 
     #[test]
+    fn a_discounted_line_carries_its_allowance_and_the_totals_still_add_up() {
+        // 2 × 180,00 at 10 %: 360,00 − 36,00 = 324,00 net, 61,56 VAT; plus
+        // the 200,00 pass-through line: 524,00 net, 585,56 gross.
+        let stored = serde_json::json!({
+            "quantity": "2", "unit_price": "180", "vat_rate": "19",
+            "discount_percent": "10", "discount_amount": "36",
+            "line_net": "324", "line_vat": "61.56", "line_gross": "385.56"
+        });
+        let discount = stored_line_discount(&stored).expect("discounted line");
+        assert_eq!(discount.percent, dec("10"));
+        assert_eq!(discount.amount, dec("36"));
+        assert_eq!(
+            stored_line_discount(&serde_json::json!({"line_net": "10"})),
+            None
+        );
+        let mut invoice = sample();
+        invoice.lines[0] = EInvoiceLine {
+            name: "Beratungsleistungen".to_string(),
+            quantity: dec("2"),
+            unit_net: dec("180"),
+            line_net: dec("324"),
+            line_vat: Some(dec("61.56")),
+            vat_rate: dec("19"),
+            is_cost_passthrough: false,
+            discount: Some(discount),
+            note: None,
+        };
+        invoice.total_gross = dec("585.56");
+        invoice.prepaid_amount = Decimal::ZERO;
+        invoice.prepaid_invoices.clear();
+        invoice.prepayment_note = None;
+        let xml = build_cii_xml(&invoice);
+        assert!(xml.contains(concat!(
+            "<ram:SpecifiedTradeAllowanceCharge>",
+            "<ram:ChargeIndicator><udt:Indicator>false</udt:Indicator></ram:ChargeIndicator>",
+            "<ram:CalculationPercent>10</ram:CalculationPercent>",
+            "<ram:BasisAmount>360.00</ram:BasisAmount>",
+            "<ram:ActualAmount>36.00</ram:ActualAmount>",
+            "<ram:ReasonCode>95</ram:ReasonCode><ram:Reason>Rabatt</ram:Reason>",
+            "</ram:SpecifiedTradeAllowanceCharge>",
+            "<ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>324.00</ram:LineTotalAmount>"
+        )));
+        // BR-CO-10: the line nets add up to BT-106; BR-CO-15: + VAT = gross.
+        assert!(xml.contains("<ram:LineTotalAmount>524.00</ram:LineTotalAmount><ram:TaxBasisTotalAmount>524.00</ram:TaxBasisTotalAmount>"));
+        assert!(xml.contains(r#"<ram:TaxTotalAmount currencyID="EUR">61.56</ram:TaxTotalAmount>"#));
+        assert!(xml.contains("<ram:GrandTotalAmount>585.56</ram:GrandTotalAmount>"));
+        assert!(!xml.contains("RoundingAmount"));
+        // The pass-through line without a discount has no allowance.
+        assert_eq!(xml.matches("SpecifiedTradeAllowanceCharge>").count(), 2);
+    }
+
+    #[test]
     fn advance_invoices_use_the_prepayment_type_code() {
         let mut invoice = sample();
         invoice.invoice_type = "advance".to_string();

@@ -77,6 +77,31 @@ pub(crate) fn unit_price_label_de(price: Decimal, currency: &str, unit: &str) ->
     }
 }
 
+/// The price column of a discounted line (owner 2026-11-18): `"360,00 € /
+/// Einheit, Rabatt 10 % = 324,00 € / Einheit"`; without a discount
+/// [`unit_price_label_de`]. The line amount is the discounted net
+/// (`money::line_amounts`), the reduced unit price is shown for reading.
+pub(crate) fn discounted_unit_price_label_de(
+    price: Decimal,
+    currency: &str,
+    unit: &str,
+    discount_percent: Decimal,
+) -> String {
+    let list = unit_price_label_de(price, currency, unit);
+    if discount_percent <= Decimal::ZERO {
+        return list;
+    }
+    let reduced = crate::money::round_cents(
+        price * (Decimal::ONE_HUNDRED - discount_percent.min(Decimal::ONE_HUNDRED))
+            / Decimal::ONE_HUNDRED,
+    );
+    format!(
+        "{list}, Rabatt {} % = {}",
+        format_quantity_de(discount_percent),
+        unit_price_label_de(reduced, currency, unit)
+    )
+}
+
 /// English demo texts the seeded agency catalogue carried until migration
 /// 20261012000300 replaced them with German texts, and those German texts.
 /// Order and quote lines created before keep the English wording (they are
