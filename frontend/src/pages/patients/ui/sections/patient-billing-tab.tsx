@@ -21,7 +21,6 @@ import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import {
   invoiceCreationErrorMessage,
-  partlyCreditedHint,
 } from "@/pages/invoices/model/billing-release";
 import { INVOICE_LINE_COMMENT_MAX_LENGTH, isOverageOnlyInvoice, isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
@@ -609,7 +608,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
         <section className="overflow-hidden rounded-xl border border-border/70">
           <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle icon={BriefcaseMedical}>{copy.services}</AdminSectionTitle></div>
-          {!quote || (!serviceLines.some(line => availableQuantity(line, invoiceType) > 0) && !finalExtras.length) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{!order ? copy.noOrderForQuote : !quote ? (orderQuotes.length > 0 ? copy.selectQuote : copy.noOrderQuotes) : copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</>}</p> : <div className="divide-y divide-border/60">
+          {!quote || (!serviceLines.some(line => availableQuantity(line, invoiceType) > 0) && !finalExtras.length) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{!order ? copy.noOrderForQuote : !quote ? (orderQuotes.length > 0 ? copy.selectQuote : copy.noOrderQuotes) : copy.noServices}</>}</p> : <div className="divide-y divide-border/60">
             {serviceLines.map((line, index) => {
               const available = availableQuantity(line, invoiceType);
               if (available <= 0) return null;

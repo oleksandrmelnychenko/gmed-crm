@@ -29,15 +29,12 @@ import {
   interimLimitBesideOpenAdvance,
   isOverageOnlyInvoice,
   isQuoteAvailableForInvoice,
-  isQuoteClosedForInvoicing,
-
   prepaymentExceedsUnbilledQuote,
   quoteRequiredPrepayment,
 } from "../model/invoice-model";
 import { roundCents } from "@/lib/money";
 import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-indicator";
 import { ownServicesGrossOfSelection } from "@/components/order-budget/order-budget";
-import { partlyCreditedHint } from "../model/billing-release";
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import { finalInvoiceTotals, finalOwnExtrasGross } from "../model/final-invoice";
@@ -227,10 +224,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
   // Quotes this type hides, with why: staff looked for them under the default
   // type without a word (QA 2026-11-01, X3 NEW-3).
-  const hiddenQuotes = quotes.filter((quote) => !selectableQuotes.includes(quote) && !isQuoteClosedForInvoicing(quote.status));
   // Interim invoices are no longer offered (fix-100): no hint points to them
   // (QA verify2 B-4).
-  const partlyCreditedQuotes = hiddenQuotes.filter((quote) => quote.final_invoice_credited);
 
   return (
     <Dialog dirty={dirty} open={open} onOpenChange={(nextOpen) => { if (!formBusy) onOpenChange(nextOpen); }}>
@@ -275,11 +270,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {!optionsError && !optionsBusy && !selectableQuotes.length ? (
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl." : "Для текущего выбора нет доступных предложений."}
-                  </p>
-                ) : null}
-                {partlyCreditedQuotes.length ? (
-                  <p role="status" data-testid="invoice-partly-credited-quotes" className="text-xs leading-5 text-muted-foreground">
-                    {partlyCreditedQuotes.map((quote) => quote.quote_number).join(", ")}: {partlyCreditedHint(lang)}
                   </p>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
