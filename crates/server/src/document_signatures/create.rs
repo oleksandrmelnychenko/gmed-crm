@@ -192,33 +192,52 @@ async fn validate_minor_clients(
         } else {
             1
         };
-        let mut representatives = representation
+        let representatives = representation
             .representatives
             .iter()
             .filter(|person| person.slot.is_some())
             .collect::<Vec<_>>();
-        // Contract documents alone follow the party block: a paying parent is
-        // the only Auftraggeber and signs alone, under joint custody as well
-        // (owner decision 2026-10-25, map item 94; QA 2026-10-31). Any other
-        // document in the package keeps every custody parent.
-        if rows
-            .iter()
-            .all(|row| defaults::paying_parent_signs_alone(template_of(row).as_deref()))
-        {
-            let paying_parent = crate::routes::documents::paying_parent_contact(&mut conn, lead_id)
-                .await
-                .map_err(db_error)?;
-            let parties = representatives.len();
-            representatives = crate::routes::documents::only_paying_parent(
-                representatives,
+        // Each document's own signers (owner rule 2026-11-18,
+        // `defaults::minor_signers`): the consents every custody parent, a
+        // contract document its party — the paying parent alone (map item
+        // 94) — and any other document the parent with access to the form.
+        // The package needs the union; the custody's count only while a
+        // consent is in it.
+        let paying_parent = crate::routes::documents::paying_parent_contact(&mut conn, lead_id)
+            .await
+            .map_err(db_error)?;
+        let parents = defaults::parents_represent(&representation);
+        let mut signing: Vec<&crate::routes::lead_representatives::Representative> = Vec::new();
+        let mut consent = false;
+        for row in rows {
+            let kind =
+                defaults::minor_signers(template_of(row).as_deref(), &row.get::<String, _>("art"));
+            consent |= kind == defaults::MinorSigners::BothParents;
+            let preference = defaults::form_parent_preference(
+                &representation,
+                &defaults::chooser_emails(
+                    row.get::<Option<Value>, _>("generated_bindings").as_ref(),
+                ),
+                paying_parent,
+            );
+            for person in defaults::narrow_minor_signers(
+                representatives.clone(),
+                kind,
+                parents,
+                &preference,
                 paying_parent,
                 |person| Some(person.id),
-            );
-            if representatives.len() < parties {
-                expected = representatives.len();
+                |person| person.email.as_deref(),
+            ) {
+                if !signing.iter().any(|known| known.id == person.id) {
+                    signing.push(person);
+                }
             }
         }
-        let required = representatives
+        if !consent {
+            expected = signing.len();
+        }
+        let required = signing
             .iter()
             .filter_map(|person| person.email.clone())
             .collect::<Vec<_>>();
@@ -254,7 +273,7 @@ async fn validate_minor_clients(
             // the order's choice, else the relations the conversion stored on
             // the patient, else every recorded parent; the trusted contacts
             // of the profile only for old patients without relations.
-            let contracting = crate::services::contracting_party::resolve(
+            let party = crate::services::contracting_party::resolve(
                 &mut conn,
                 patient_id,
                 row.get("order_id"),
@@ -262,8 +281,38 @@ async fn validate_minor_clients(
                 crate::app_time::today(),
             )
             .await
-            .map_err(db_error)?
-            .representatives;
+            .map_err(db_error)?;
+            // Without a lead nobody holds a form login: a package without a
+            // consent needs one parent, the first who can be invited, for
+            // its documents of the form parent's rule (owner rule
+            // 2026-11-18), as `defaults::suggested` names them.
+            let kinds = rows
+                .iter()
+                .map(|row| {
+                    defaults::minor_signers(
+                        template_of(row).as_deref(),
+                        &row.get::<String, _>("art"),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let one_parent = !party.representatives.is_empty()
+                && kinds
+                    .iter()
+                    .all(|kind| *kind == defaults::MinorSigners::FormParent);
+            let contracting = if one_parent {
+                defaults::narrow_minor_signers(
+                    party.representatives,
+                    defaults::MinorSigners::FormParent,
+                    party.kind
+                        == crate::services::contracting_party::PartyKind::LegalRepresentatives,
+                    &[],
+                    None,
+                    |representative| representative.source_contact_id,
+                    |representative| representative.email.as_deref(),
+                )
+            } else {
+                party.representatives
+            };
             let required = if contracting.is_empty() {
                 let contacts: Value = patient.get("guardian_contacts");
                 contacts
@@ -288,7 +337,9 @@ async fn validate_minor_clients(
                 .ok()
                 .flatten()
                 .or_else(|| profile["custody"].as_str().map(str::to_string));
-            let expected = if custody
+            let expected = if one_parent {
+                contracting.len()
+            } else if custody
                 .as_deref()
                 .is_some_and(|value| matches!(value, "sole_parent" | "guardian"))
             {

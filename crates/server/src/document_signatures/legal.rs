@@ -56,7 +56,7 @@ pub(super) fn informational_template(template: &str) -> bool {
     matches!(template, "privacy_information" | "cost_estimate")
 }
 
-fn document_kind<'a>(template: Option<&'a str>, art: &'a str) -> &'a str {
+pub(super) fn document_kind<'a>(template: Option<&'a str>, art: &'a str) -> &'a str {
     template
         .map(str::trim)
         .filter(|value| !value.is_empty())

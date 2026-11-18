@@ -29607,8 +29607,12 @@ struct LeadSelfDisclosure {
     has_representative: Option<bool>,
     under_guardianship: Option<bool>,
     /// Who acts for the lead: an adult's representative and legal guardian,
-    /// or a minor's legal representatives (who sign).
+    /// or a minor's legal representatives.
     acting_persons: Vec<LeadDisclosurePerson>,
+    /// The one parent of `acting_persons` who signs for a minor (owner rule
+    /// 2026-11-18: the parent with access to the form); `None` for the
+    /// first. A Vormund's form keeps every representative's line.
+    signing_parent: Option<usize>,
     /// The invoice recipient of step 3; `None` while not answered.
     invoice_recipient: Option<LeadDisclosureRecipient>,
     payer: Option<LeadDisclosurePayer>,
@@ -29657,6 +29661,12 @@ impl LeadSelfDisclosure {
     /// The persons of the form's numbered frames: every legal representative
     /// of a minor, or the one Betreuer who signs for an adult.
     fn frame_emails(&self) -> Vec<Option<String>> {
+        if self.one_parent_signs() {
+            return vec![
+                self.signing_parent()
+                    .and_then(|person| person.email.clone()),
+            ];
+        }
         match self
             .acting_persons
             .iter()
@@ -29669,6 +29679,24 @@ impl LeadSelfDisclosure {
                 .map(|person| person.email.clone())
                 .collect(),
         }
+    }
+
+    /// A minor represented by the parents (no Vormund): one parent signs
+    /// the form (owner rule 2026-11-18).
+    fn one_parent_signs(&self) -> bool {
+        self.minor
+            && self.custody.as_deref() != Some(super::lead_representatives::CUSTODY_GUARDIAN)
+            && !self
+                .acting_persons
+                .iter()
+                .any(|person| person.role == "Vormund")
+    }
+
+    /// The parent who signs ([`Self::signing_parent`]), else the first.
+    fn signing_parent(&self) -> Option<&LeadDisclosurePerson> {
+        self.signing_parent
+            .and_then(|index| self.acting_persons.get(index))
+            .or_else(|| self.acting_persons.first())
     }
 
     /// "First Middle Last".
@@ -29918,12 +29946,48 @@ async fn load_lead_self_disclosure(
     let consent_choice = crate::consent_choices::current_for(&mut *conn, Some(lead_id), None)
         .await
         .map_err(|error| failed(error, "third-party disclosure"))?;
+    let paying_parent = paying_parent_contact(&mut conn, lead_id)
+        .await
+        .map_err(|error| failed(error, "paying parent"))?;
     conn.commit()
         .await
         .map_err(|error| failed(error, "snapshot complete"))?;
 
     let representation = &represented.representation;
     let custody = representation.answers.custody();
+    // One parent signs the form for the child: the one with access to it
+    // (owner rule 2026-11-18), as its default signers name them.
+    let signing_parent = crate::document_signatures::defaults::parents_represent(representation)
+        .then(|| {
+            let parents = representation
+                .representatives
+                .iter()
+                .filter(|person| person.slot.is_some())
+                .filter(|person| !person.name().is_empty())
+                .collect::<Vec<_>>();
+            let preference = crate::document_signatures::defaults::form_parent_preference(
+                representation,
+                &consent_choice
+                    .as_ref()
+                    .map(|choice| choice.chosen_by_emails.clone())
+                    .unwrap_or_default(),
+                paying_parent,
+            );
+            let signer = crate::document_signatures::defaults::narrow_minor_signers(
+                parents.clone(),
+                crate::document_signatures::defaults::MinorSigners::FormParent,
+                true,
+                &preference,
+                paying_parent,
+                |person| Some(person.id),
+                |person| person.email.as_deref(),
+            );
+            match signer.as_slice() {
+                [only] => parents.iter().position(|person| person.id == only.id),
+                _ => None,
+            }
+        })
+        .flatten();
     let acting_persons = representation
         .representatives
         .iter()
@@ -30123,6 +30187,7 @@ async fn load_lead_self_disclosure(
         has_representative: representation.answers.has_representative,
         under_guardianship: representation.answers.under_guardianship,
         acting_persons,
+        signing_parent,
         acts_on_own_account: own_account.map(|declaration| declaration.acts_on_own_account),
         beneficial_owner_name: own_account
             .and_then(|declaration| declaration.beneficial_owner_name.clone()),
@@ -30989,8 +31054,9 @@ fn build_lead_self_disclosure_pdf(
     );
 
     // The declaration of § 11 Abs. 6 GwG and the signature of the
-    // patient side: the patient, for a minor every legal representative
-    // (frames `guardian_1`, `guardian_2` like the minors' consent).
+    // patient side: the patient; for a minor one parent, the one with access
+    // to the form (owner rule 2026-11-18, frame `guardian_1`), or every
+    // Vormund.
     let representatives = data
         .acting_persons
         .iter()
@@ -31001,6 +31067,13 @@ fn build_lead_self_disclosure_pdf(
     // the form is about (`betreuer`, read above).
     let signers: Vec<String> = if let Some(betreuer) = betreuer.clone() {
         vec![betreuer]
+    } else if minor && data.one_parent_signs() {
+        vec![
+            data.signing_parent()
+                .map(|person| person.name.clone())
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| "____________________".to_string()),
+        ]
     } else if minor {
         if representatives.is_empty() {
             let count = if data
@@ -44420,9 +44493,13 @@ mod tests {
                 super::LeadDisclosurePerson {
                     role: "Elternteil",
                     name: "Ben Muster".to_string(),
+                    email: Some("ben@example.org".to_string()),
                     ..Default::default()
                 },
             ],
+            // Ben holds the form's login: he alone signs (owner rule
+            // 2026-11-18).
+            signing_parent: Some(1),
             payer: Some(super::LeadDisclosurePayer {
                 self_payer: true,
                 ..Default::default()
@@ -44439,7 +44516,11 @@ mod tests {
             "DOC-LEAD-SD-0002",
         )
         .unwrap();
-        assert_eq!(recorded_roles(&generated), ["guardian_1", "guardian_2"]);
+        assert_eq!(recorded_roles(&generated), ["guardian_1"]);
+        assert_eq!(
+            parents.frame_emails(),
+            [Some("ben@example.org".to_string())]
+        );
         assert_signature_frames_detected(&generated);
         let text = assert_legal_pdf_chrome(&generated, "DOC-LEAD-SD-0002");
         assert_no_assessment_or_medical_data(&text);
@@ -44452,7 +44533,7 @@ mod tests {
             "Die Patientin / der Patient ist eine politisch exponierte Person (PEP) nein",
             "Herkunft der Mittel Ersparnisse",
             "Ersparnisse der Familie",
-            "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind.",
+            "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind.",
             "Unterschrift gesetzl. Vertreter/in",
             "[x] Nein, nur wir als Eltern.",
             super::THIRD_PARTY_DISCLOSURE_INTRO_PARENTS,
@@ -44460,6 +44541,11 @@ mod tests {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
         assert!(!text.contains("Unterschrift Patient/in"), "{text}");
+        assert_eq!(
+            text.matches("Unterschrift gesetzl. Vertreter/in").count(),
+            1,
+            "{text}"
+        );
         // Why a third party pays belongs to a third party only.
         assert!(!text.contains("bleibt unberücksichtigt"), "{text}");
         assert!(
@@ -44548,8 +44634,7 @@ mod tests {
         assert!(!text.contains("nur ich selbst"), "{text}");
         assert!(!text.contains("ausschließlich an Sie selbst"), "{text}");
 
-        // Joint custody with one parent recorded: the other legal
-        // representative gets an empty line (paper), with its frame.
+        // Joint custody with one parent recorded: that parent signs alone.
         let one_of_two = super::LeadSelfDisclosure {
             custody: Some("joint".to_string()),
             ..sole.clone()
@@ -44561,16 +44646,16 @@ mod tests {
             "DOC-LEAD-SD-0008",
         )
         .unwrap();
-        assert_eq!(recorded_roles(&generated), ["guardian_1", "guardian_2"]);
+        assert_eq!(recorded_roles(&generated), ["guardian_1"]);
         assert_signature_frames_detected(&generated);
         let text = normalized_pdf_text(&generated);
         assert!(
-            text.contains("Wir versichern als gesetzliche Vertreter"),
+            text.contains("Ich versichere als gesetzliche/r Vertreter/in"),
             "{text}"
         );
         assert_eq!(
             text.matches("Unterschrift gesetzl. Vertreter/in").count(),
-            2,
+            1,
             "{text}"
         );
         let unnamed = super::LeadSelfDisclosure {
@@ -44585,7 +44670,7 @@ mod tests {
             "DOC-LEAD-SD-0004",
         )
         .unwrap();
-        assert_eq!(recorded_roles(&generated), ["guardian_1", "guardian_2"]);
+        assert_eq!(recorded_roles(&generated), ["guardian_1"]);
     }
 
     /// Owner decision 2026-10-25 (DEV QA F-G1, document review): the consent

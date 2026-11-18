@@ -240,29 +240,144 @@ fn patient_contracting_signers(
     }))
 }
 
-/// The contract documents a minor's paying parent signs alone (owner decision
-/// 2026-10-25, map item 94: one e-mail, one signature — the parent the
-/// cabinet named as invoice recipient who also pays is the only Auftraggeber,
-/// as the PDF prints them). The consents keep every custody parent.
-pub(super) fn paying_parent_signs_alone(template: Option<&str>) -> bool {
-    matches!(
-        template,
-        Some("framework_contract" | "single_order" | "order_cost_estimate")
-    )
+/// Who signs a minor's document when the parents represent the child (owner
+/// rule 2026-11-18).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MinorSigners {
+    /// The Einverständniserklärung der Sorgeberechtigten and the
+    /// Schweigepflichtsentbindung: every custody parent.
+    BothParents,
+    /// Rahmenvertrag, Einzelauftrag, Kostenvoranschlag: the party the PDF
+    /// prints — the paying parent alone (map item 94), else every parent of
+    /// the party block.
+    ContractParty,
+    /// Every other document: one parent, the one with access to the form.
+    FormParent,
+}
+
+/// The [`MinorSigners`] rule of a document, by its template, else its type.
+pub(crate) fn minor_signers(template: Option<&str>, art: &str) -> MinorSigners {
+    match super::legal::document_kind(template, art) {
+        "consent_data_release_child"
+        | "consent_data_release_single"
+        | "consent_data_release"
+        | "confidentiality_release" => MinorSigners::BothParents,
+        "framework_contract" | "single_order" | "order_cost_estimate" => {
+            MinorSigners::ContractParty
+        }
+        _ => MinorSigners::FormParent,
+    }
+}
+
+/// The parents represent the minor lead (no Vormund): the
+/// [`MinorSigners::FormParent`] rule applies.
+pub(crate) fn parents_represent(
+    representation: &crate::routes::lead_representatives::Representation,
+) -> bool {
+    let custody = representation.answers.custody();
+    representation.minor
+        && custody != crate::routes::lead_representatives::CUSTODY_GUARDIAN
+        && !representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+            .any(|person| person.is_guardian_of_minor(custody))
+}
+
+/// The contact ids of a minor lead's parents in the order they are preferred
+/// as the one signer of a [`MinorSigners::FormParent`] document: the parent
+/// who made the document's consent choice (`chooser_emails`), the parent who
+/// holds the cabinet login (the first login issued: the representatives are
+/// sorted by it), then the paying parent.
+pub(crate) fn form_parent_preference(
+    representation: &crate::routes::lead_representatives::Representation,
+    chooser_emails: &[String],
+    paying_parent: Option<Uuid>,
+) -> Vec<Uuid> {
+    let slotted = || {
+        representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+    };
+    let chooser = slotted()
+        .find(|person| {
+            person.email.as_deref().is_some_and(|email| {
+                chooser_emails.contains(&normalized_email(email)) && !email.trim().is_empty()
+            })
+        })
+        .map(|person| person.id);
+    let login = slotted()
+        .find(|person| person.has_login())
+        .map(|person| person.id);
+    [chooser, login, paying_parent]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// Narrows the parents of a minor's document to its signers
+/// ([`minor_signers`]): every one for the consents, the paying parent for a
+/// contract document ([`crate::routes::documents::only_paying_parent`]), and
+/// for any other document one parent — the first of `preference` who has an
+/// e-mail address, else the first who has one. Unchanged when `parents` is
+/// false (a Vormund) or nobody can be invited.
+pub(crate) fn narrow_minor_signers<T>(
+    people: Vec<T>,
+    kind: MinorSigners,
+    parents: bool,
+    preference: &[Uuid],
+    paying_parent: Option<Uuid>,
+    contact_id: impl Fn(&T) -> Option<Uuid>,
+    email: impl Fn(&T) -> Option<&str>,
+) -> Vec<T> {
+    match kind {
+        MinorSigners::BothParents => people,
+        // A Vormund represents the child whoever pays (the party block).
+        MinorSigners::ContractParty if !parents => people,
+        MinorSigners::ContractParty => {
+            crate::routes::documents::only_paying_parent(people, paying_parent, contact_id)
+        }
+        MinorSigners::FormParent if !parents || people.len() < 2 => people,
+        MinorSigners::FormParent => {
+            let invitable =
+                |person: &T| email(person).is_some_and(|email| !email.trim().is_empty());
+            let chosen = preference
+                .iter()
+                .find_map(|id| {
+                    people
+                        .iter()
+                        .position(|person| contact_id(person) == Some(*id) && invitable(person))
+                })
+                .or_else(|| people.iter().position(&invitable));
+            match chosen {
+                Some(index) => people.into_iter().nth(index).into_iter().collect(),
+                None => people,
+            }
+        }
+    }
+}
+
+/// The consent choice's chooser addresses a generated document recorded.
+pub(crate) fn chooser_emails(bindings: Option<&Value>) -> Vec<String> {
+    crate::consent_choices::OwnConsentChoice::from_bindings(bindings)
+        .map(|choice| choice.chosen_by_emails)
+        .unwrap_or_default()
 }
 
 /// Who signs for a minor; `None` when nothing is recorded beyond the legacy
-/// trusted contacts of a patient. `template` is the generated template of the
-/// document: for the contract documents the signers follow the party block
-/// (`paying_parent_signs_alone`).
+/// trusted contacts of a patient. `kind` is the document's rule
+/// ([`minor_signers`]), `chooser` the addresses of the person who made its
+/// consent choice.
 async fn contracting_signers(
     state: &AppState,
     patient_id: Option<Uuid>,
     lead_id: Option<Uuid>,
     order_id: Option<Uuid>,
-    template: Option<&str>,
+    kind: MinorSigners,
+    chooser: &[String],
 ) -> Result<Option<Vec<Signer>>, Response> {
-    use crate::routes::documents::{only_paying_parent, paying_parent_contact};
+    use crate::routes::documents::paying_parent_contact;
     let mut conn = state.db.acquire().await.map_err(db_error)?;
     if let Some(lead_id) = lead_id {
         let Some(mut loaded) = crate::routes::lead_representatives::load(&mut conn, lead_id)
@@ -271,14 +386,25 @@ async fn contracting_signers(
         else {
             return Ok(None);
         };
-        if paying_parent_signs_alone(template) {
+        if kind != MinorSigners::BothParents {
             let paying_parent = paying_parent_contact(&mut conn, lead_id)
                 .await
                 .map_err(db_error)?;
-            loaded.representation.representatives = only_paying_parent(
-                loaded.representation.representatives,
+            let representation = &mut loaded.representation;
+            let parents = parents_represent(representation);
+            let preference = form_parent_preference(representation, chooser, paying_parent);
+            let slotted = std::mem::take(&mut representation.representatives)
+                .into_iter()
+                .filter(|person| person.slot.is_some())
+                .collect();
+            representation.representatives = narrow_minor_signers(
+                slotted,
+                kind,
+                parents,
+                &preference,
                 paying_parent,
                 |person| Some(person.id),
+                |person| person.email.as_deref(),
             );
         }
         return Ok(Some(lead_contracting_signers(&loaded.representation)));
@@ -298,23 +424,41 @@ async fn contracting_signers(
     if party.representatives.is_empty() {
         return Ok(None);
     }
-    if paying_parent_signs_alone(template)
-        && party.representatives.len() > 1
-        && let Some(lead_id) = sqlx::query_scalar::<_, Uuid>(
+    if kind != MinorSigners::BothParents && party.representatives.len() > 1 {
+        let lead_id = sqlx::query_scalar::<_, Uuid>(
             "SELECT id FROM leads WHERE converted_patient_id = $1 ORDER BY created_at DESC LIMIT 1",
         )
         .bind(patient_id)
         .fetch_optional(&mut *conn)
         .await
-        .map_err(db_error)?
-    {
-        let paying_parent = paying_parent_contact(&mut conn, lead_id)
-            .await
-            .map_err(db_error)?;
-        party.representatives =
-            only_paying_parent(party.representatives, paying_parent, |representative| {
-                representative.source_contact_id
-            });
+        .map_err(db_error)?;
+        let (paying_parent, preference) = match lead_id {
+            Some(lead_id) => {
+                let paying_parent = paying_parent_contact(&mut conn, lead_id)
+                    .await
+                    .map_err(db_error)?;
+                let preference = crate::routes::lead_representatives::load(&mut conn, lead_id)
+                    .await
+                    .map_err(db_error)?
+                    .map(|loaded| {
+                        form_parent_preference(&loaded.representation, chooser, paying_parent)
+                    })
+                    .unwrap_or_default();
+                (paying_parent, preference)
+            }
+            None => (None, Vec::new()),
+        };
+        let parents =
+            party.kind == crate::services::contracting_party::PartyKind::LegalRepresentatives;
+        party.representatives = narrow_minor_signers(
+            party.representatives,
+            kind,
+            parents,
+            &preference,
+            paying_parent,
+            |representative| representative.source_contact_id,
+            |representative| representative.email.as_deref(),
+        );
     }
     Ok(Some(patient_contracting_signers(&party.representatives)))
 }
@@ -442,11 +586,20 @@ pub(super) async fn suggested(
         let birth_date = row.get::<Option<NaiveDate>, _>("birth_date");
         if is_minor(birth_date) {
             // The representatives who contract for the child sign (owner
-            // decision 2026-10-19): the recorded parents only for old
-            // patients nobody resolved.
+            // decision 2026-10-19), as many as the document needs (owner
+            // rule 2026-11-18, `minor_signers`): the recorded parents only
+            // for old patients nobody resolved.
             let template = source
                 .try_get::<Option<String>, _>("generated_template_id")
                 .unwrap_or_default();
+            let art = source.try_get::<String, _>("art").unwrap_or_default();
+            let chooser = chooser_emails(
+                source
+                    .try_get::<Option<Value>, _>("generated_bindings")
+                    .ok()
+                    .flatten()
+                    .as_ref(),
+            );
             let guardians = match contracting_signers(
                 state,
                 patient_id,
@@ -454,7 +607,8 @@ pub(super) async fn suggested(
                 source
                     .try_get::<Option<Uuid>, _>("order_id")
                     .unwrap_or_default(),
-                template.as_deref(),
+                minor_signers(template.as_deref(), &art),
+                &chooser,
             )
             .await?
             {
@@ -548,8 +702,10 @@ pub(super) async fn suggested(
 /// The signers a package suggests: the union of every document's suggestion
 /// (`suggested`), deduplicated by e-mail, the first document's signers first
 /// (owner rule map 94 follow-up 2026-10-25). A minor's contract names only the
-/// paying parent, the child's consents both custody parents: a package with
-/// both suggests both. The parent who contracts leads the client signers, so
+/// paying parent, any other document but the consents the parent with access
+/// to the form, the child's consents both custody parents (owner rule
+/// 2026-11-18): a package with both suggests both. The parent who contracts
+/// leads the client signers, so
 /// the bundle gives the contract's `client` frame to that parent and the other
 /// parent only the `guardian_N` frames of the documents they sign
 /// (`package::visual_positions`). A document of the payer suggests the payer
@@ -566,7 +722,8 @@ pub(super) async fn suggested_for_package(
         let template = row
             .try_get::<Option<String>, _>("generated_template_id")
             .unwrap_or_default();
-        let contract = paying_parent_signs_alone(template.as_deref());
+        let art = row.try_get::<String, _>("art").unwrap_or_default();
+        let contract = minor_signers(template.as_deref(), &art) == MinorSigners::ContractParty;
         let policy = match signer_policy(row) {
             policy @ (SignerPolicy::PayerAndAgency | SignerPolicy::PayerPackage) => policy,
             _ => SignerPolicy::BothParties,
@@ -766,10 +923,135 @@ mod tests {
             emails(lead_contracting_signers(&contract_only)),
             vec!["maria@example.org"]
         );
-        assert!(paying_parent_signs_alone(Some("framework_contract")));
-        assert!(paying_parent_signs_alone(Some("single_order")));
-        assert!(!paying_parent_signs_alone(Some("privacy_consents")));
-        assert!(!paying_parent_signs_alone(None));
+    }
+
+    #[test]
+    fn only_the_two_consents_need_both_parents() {
+        for kind in [
+            "consent_data_release_child",
+            "consent_data_release_single",
+            "consent_data_release",
+            "confidentiality_release",
+        ] {
+            assert_eq!(minor_signers(Some(kind), ""), MinorSigners::BothParents);
+        }
+        // An uploaded Schweigepflichtsentbindung without a template.
+        assert_eq!(
+            minor_signers(None, "confidentiality_release"),
+            MinorSigners::BothParents
+        );
+        for kind in ["framework_contract", "single_order", "order_cost_estimate"] {
+            assert_eq!(minor_signers(Some(kind), ""), MinorSigners::ContractParty);
+        }
+        for kind in [
+            "privacy_consents",
+            "privacy_consent",
+            "consent",
+            "cost_estimate",
+            "cost_coverage_declaration",
+            "lead_self_disclosure",
+        ] {
+            assert_eq!(minor_signers(Some(kind), ""), MinorSigners::FormParent);
+        }
+        assert_eq!(minor_signers(None, "Sonstiges"), MinorSigners::FormParent);
+    }
+
+    #[test]
+    fn one_parent_signs_every_other_document_of_a_minor() {
+        use crate::routes::lead_representatives::Representation;
+        let mut ioann = lead_parent(Some("rep1"), "Ioann", Some("ioann@example.org"));
+        let maria = lead_parent(Some("rep2"), "Maria", Some("maria@example.org"));
+        let joint = Representation {
+            minor: true,
+            answers: Default::default(),
+            representatives: vec![ioann.clone(), maria.clone()],
+        };
+        let narrow = |representation: &Representation,
+                      kind: MinorSigners,
+                      chooser: &[String],
+                      paying: Option<Uuid>| {
+            let preference = form_parent_preference(representation, chooser, paying);
+            narrow_minor_signers(
+                representation.representatives.clone(),
+                kind,
+                parents_represent(representation),
+                &preference,
+                paying,
+                |person| Some(person.id),
+                |person| person.email.as_deref(),
+            )
+            .into_iter()
+            .map(|person| person.first_name)
+            .collect::<Vec<_>>()
+        };
+        // Nobody holds a login and nobody pays: the first parent.
+        assert_eq!(
+            narrow(&joint, MinorSigners::FormParent, &[], None),
+            ["Ioann"]
+        );
+        // The consents: both parents.
+        assert_eq!(
+            narrow(&joint, MinorSigners::BothParents, &[], Some(maria.id)),
+            ["Ioann", "Maria"]
+        );
+        // Without a login the paying parent signs.
+        assert_eq!(
+            narrow(&joint, MinorSigners::FormParent, &[], Some(maria.id)),
+            ["Maria"]
+        );
+        // The parent with the form's login signs, whoever pays; the contract
+        // stays with the paying parent, the party the PDF prints.
+        let mut with_login = joint.clone();
+        with_login.representatives[1].login_user_ids = vec![Uuid::new_v4()];
+        with_login.representatives.swap(0, 1);
+        let ioann_pays = Some(ioann.id);
+        assert_eq!(
+            narrow(&with_login, MinorSigners::FormParent, &[], ioann_pays),
+            ["Maria"]
+        );
+        assert_eq!(
+            narrow(&with_login, MinorSigners::ContractParty, &[], ioann_pays),
+            ["Ioann"]
+        );
+        // Without a paying parent the contract keeps the party of both.
+        assert_eq!(
+            narrow(&with_login, MinorSigners::ContractParty, &[], None),
+            ["Maria", "Ioann"]
+        );
+        // The parent who made the document's consent choice signs it.
+        assert_eq!(
+            narrow(
+                &with_login,
+                MinorSigners::FormParent,
+                &["ioann@example.org".to_string()],
+                None
+            ),
+            ["Ioann"]
+        );
+        // A form parent without an e-mail address: the next choice.
+        let mut no_email = with_login.clone();
+        no_email.representatives[0].email = None;
+        assert_eq!(
+            narrow(&no_email, MinorSigners::FormParent, &[], None),
+            ["Ioann"]
+        );
+        // A Vormund: unchanged.
+        ioann.relation = Some("Vormund".into());
+        let guardians = Representation {
+            representatives: vec![ioann, maria],
+            ..joint.clone()
+        };
+        assert!(!parents_represent(&guardians));
+        assert_eq!(
+            narrow(&guardians, MinorSigners::FormParent, &[], None),
+            ["Ioann", "Maria"]
+        );
+        // An adult: unchanged.
+        let adult = Representation {
+            minor: false,
+            ..joint
+        };
+        assert!(!parents_represent(&adult));
     }
 
     #[test]
