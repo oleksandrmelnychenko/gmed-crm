@@ -65,10 +65,10 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
 
 /** Short field labels of the staff dialogs: staff need no hints (owner 2026-11-15, fix-92). */
 const STAFF_LABELS = {
-  ru: { phone: "Телефон", relation: "Кем приходится", citizenship: "Гражданство" },
-  de: { phone: "Telefon", relation: "Beziehung", citizenship: "Staatsangehörigkeit" },
-  uk: { phone: "Телефон", relation: "Ким доводиться", citizenship: "Громадянство" },
-  en: { phone: "Phone", relation: "Relationship", citizenship: "Citizenship" },
+  ru: { phone: "Телефон", relation: "Кем приходится", citizenship: "Гражданство", contact: "E-mail / контакт" },
+  de: { phone: "Telefon", relation: "Beziehung", citizenship: "Staatsangehörigkeit", contact: "E-Mail / Kontakt" },
+  uk: { phone: "Телефон", relation: "Ким доводиться", citizenship: "Громадянство", contact: "E-mail / контакт" },
+  en: { phone: "Phone", relation: "Relationship", citizenship: "Citizenship", contact: "E-mail / contact" },
 } as const;
 
 /**
@@ -138,7 +138,8 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
     {persons.map((person, index) => {
       const problems = problemsOf(person, index);
       const describedBy = (field: RecipientField) => (problems.has(field) ? `trusted-person-${field}-${index}-error` : undefined);
-      const legacyContact = person.contact.trim() && unchangedStored(person) ? person.contact.trim() : "";
+      // Staff keep a stored e-mail address or older contact also while they edit the person (owner 2026-11-18).
+      const legacyContact = person.contact.trim() && (staff || unchangedStored(person)) ? person.contact.trim() : "";
       const institution = isInstitution(person.relation);
       const checked = checkedScopeCodes(person.scopeCodes);
       return <div key={index} className="overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="trusted-person-editor">
@@ -164,7 +165,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
           data-testid="trusted-person-phone"
           onBlur={() => setLeftPhone((current) => (current.has(index) ? current : new Set(current).add(index)))}
           onChange={(event) => update(index, { phone: event.target.value })} />
-        {legacyContact ? <p id={`trusted-person-contact-${index}`} className="text-muted-foreground" data-testid="trusted-person-legacy-contact">{fields.legacyContact(legacyContact)}</p> : null}
+        {legacyContact ? <p id={`trusted-person-contact-${index}`} className="text-muted-foreground" data-testid="trusted-person-legacy-contact">{staff ? `${short.contact}: ${legacyContact}` : fields.legacyContact(legacyContact)}</p> : null}
         {message("phone", problems, index)}
       </div>
       {institution ? null : <div className="min-w-0 space-y-1.5 text-xs">

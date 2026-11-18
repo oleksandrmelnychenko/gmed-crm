@@ -11098,7 +11098,8 @@ ${serviceCommentLines.join("\n")}`
                         index,
                         stored: storedCabinetPersons[index],
                         onChanged: reloadStep1Portal,
-                        onFullEdit: () => setStaffPersonTarget({
+                        // Without the medical view (Sales) the data correction stays.
+                        onFullEdit: lead?.medical_fields_hidden === true ? undefined : () => setStaffPersonTarget({
                           kind: "edit",
                           index,
                           stored: storedCabinetPersons[index],
@@ -11240,16 +11241,20 @@ ${serviceCommentLines.join("\n")}`
                                 {tx("В доверенные лица", "Als Vertrauensperson")}
                               </Button>
                             ) : null}
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              title={tx("Редактировать контакт", "Kontakt bearbeiten")}
-                              aria-label={`${tx("Редактировать контакт", "Kontakt bearbeiten")}: ${contact.name}`}
-                              onClick={() => openTrustedContact(contact)}
-                            >
-                              <Pencil aria-hidden="true" className="size-3.5" />
-                            </Button>
+                            {/* The same person is a trusted person: it is changed there, with all of
+                                its fields; this older copy can only be removed. */}
+                            {row.cabinet && !actsForLeadRelation(contact.relation) ? null : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                title={tx("Редактировать контакт", "Kontakt bearbeiten")}
+                                aria-label={`${tx("Редактировать контакт", "Kontakt bearbeiten")}: ${contact.name}`}
+                                onClick={() => openTrustedContact(contact)}
+                              >
+                                <Pencil aria-hidden="true" className="size-3.5" />
+                              </Button>
+                            )}
                             {gwgDataContactIds.has(contact.id) ? (
                               // Clearing only the extra data remains separate from removing the contact.
                               <Button

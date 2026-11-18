@@ -416,3 +416,19 @@ describe("the disclosure step after the request is sent (owner 2026-10-26)", () 
     expect(open).toContain('data-testid="trusted-persons-editor"');
   });
 });
+
+describe("the staff dialog's one person (owner 2026-11-18)", () => {
+  it("asks every field of the cabinet, keeps the e-mail address in view and offers no other rows", () => {
+    const person = { ...friend, contact: "eva@example.org", citizenships: ["DE"] };
+    const html = renderToStaticMarkup(<TrustedPersonsEditor persons={[person]} lang="ru" variant="staff" single onChange={() => undefined} />);
+    for (const field of ["trusted-person-phone", "trusted-person-birth-date", "trusted-person-scope", "trusted-person-legacy-contact"]) {
+      expect(html).toContain(`data-testid="${field}"`);
+    }
+    expect(html).toContain("trusted-person-citizenships-0");
+    expect(html).toContain("eva@example.org");
+    expect(html).not.toContain('data-testid="trusted-person-add"');
+    expect(html).not.toContain('data-testid="trusted-person-max"');
+    expect(html).not.toContain(`aria-label="${consentFormText("ru").removeRecipient}"`);
+    expect(html).toContain("E-mail / контакт: eva@example.org");
+  });
+});

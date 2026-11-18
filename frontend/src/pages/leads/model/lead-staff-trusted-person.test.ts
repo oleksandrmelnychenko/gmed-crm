@@ -22,14 +22,14 @@ describe("staff trusted person (owner 2026-11-18)", () => {
 
   it("carries a wizard contact over with its data and asks for what the cabinet needs in addition", () => {
     const draft = trustedPersonDraftFromContact({
-      name: " Maria Kontakt ", relation: "spouse", phone: "+49 30 5550111", birthDate: "1975-03-04", scopeCodes: ["all"],
+      name: " Maria Kontakt ", relation: "spouse", phone: "+49 30 5550111", email: "", birthDate: "1975-03-04", scopeCodes: ["all"],
     });
     expect(draft).toMatchObject({ name: "Maria Kontakt", relation: "spouse", phone: "+49 30 5550111", birthDate: "1975-03-04", scopeCodes: ["all"] });
     expect(trustedPersonToSend(draft)).toEqual({
       name: "Maria Kontakt", relation: "spouse", contact: null, phone: "+49 30 5550111", birth_date: "1975-03-04", scope_codes: ["all"],
     });
     // A relation the cabinet does not know is chosen again; without a scope nothing is sent.
-    const unknown = trustedPersonDraftFromContact({ name: "Max", relation: "Nachbar", phone: "+49 30 5550112", birthDate: "1970-01-01" });
+    const unknown = trustedPersonDraftFromContact({ name: "Max", relation: "Nachbar", phone: "+49 30 5550112", email: "", birthDate: "1970-01-01" });
     expect(unknown.relation).toBe("");
     expect(trustedPersonToSend(unknown)).toBeNull();
   });
@@ -42,6 +42,17 @@ describe("staff trusted person (owner 2026-11-18)", () => {
       name: "Ben Zweiter", relation: "relative", contact: null, phone: "+49 30 5550132", birth_date: "2001-04-05",
       citizenships: ["AT", "DE"], scope_codes: ["medical"],
     });
+  });
+
+  it("keeps the e-mail address of a wizard contact and of a stored person", () => {
+    const draft = trustedPersonDraftFromContact({
+      name: "Maria Kontakt", relation: "relative", phone: "+49 30 5550111", email: "maria@example.org", birthDate: "1975-03-04", scopeCodes: ["medical"],
+    });
+    expect(trustedPersonToSend(draft)?.contact).toBe("maria@example.org");
+    const stored = trustedPersonDraftFromStored({ name: "Olga", relation: "friend", contact: "olga@example.org", phone: "+49 30 5550122", birth_date: "1960-01-02", scope_codes: ["all"] });
+    expect(trustedPersonToSend({ ...stored, phone: "+49 30 5550199" })).toMatchObject({ contact: "olga@example.org", phone: "+49 30 5550199" });
+    const noMail = trustedPersonDraftFromContact({ name: "Max", relation: "other", phone: "+49 30 5550112", email: "kein", birthDate: "1970-01-01", scopeCodes: ["all"] });
+    expect(trustedPersonToSend(noMail)?.contact).toBeNull();
   });
 
   it("names the refusal of the server", () => {

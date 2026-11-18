@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { DISCLOSURE_VERSION } from "@/pages/patient-lead/lead-request-api";
 import { normalizeConsentRecipients, normalizeLeadPortalConsentForm, normalizeLeadPortalDisclosure, type LeadPortalConsentForm, type LeadPortalConsentRecipient, type LeadPortalDisclosure } from "../model/lead-portal-consents";
 
 import { INVOICE_TO_VALUES, PAYMENT_METHODS, type InvoiceTo, type PaymentMethod } from "../model/lead-payer";
@@ -780,16 +781,13 @@ export function correctLeadTrustedPerson(
   });
 }
 
-/** The version of the disclosure text staff record a trusted person under (server: `DISCLOSURE_VERSION`). */
-export const TRUSTED_PERSON_DISCLOSURE_VERSION = "2026-10-14";
-
 /** How the client gave staff the consent for a trusted person (owner decision 2026-10-29). */
 export type TrustedPersonRecord = { how: string; note?: string };
 
 function trustedPersonBody(person: LeadPortalConsentRecipient, language: string, recorded: TrustedPersonRecord) {
   return {
     person: storedTrustedPerson(person),
-    version: TRUSTED_PERSON_DISCLOSURE_VERSION,
+    version: DISCLOSURE_VERSION,
     language,
     recorded_how: recorded.how,
     ...(recorded.note?.trim() ? { recorded_note: recorded.note.trim() } : {}),

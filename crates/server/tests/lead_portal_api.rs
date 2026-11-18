@@ -11623,8 +11623,7 @@ async fn staff_add_one_more_person_after_the_client_named_one() {
     let Some(app) = test_app().await else { return };
     let router = &app.suite.app;
     let pm = app.staff("patient_manager");
-    let (lead, _user, patient) =
-        lead_with_login(&app, "Cabinet", "cabinet.first@example.com").await;
+    let (lead, user, patient) = lead_with_login(&app, "Cabinet", "cabinet.first@example.com").await;
     let anna = full_person(
         "Anna Erste",
         "friend",
@@ -11650,6 +11649,13 @@ async fn staff_add_one_more_person_after_the_client_named_one() {
     assert_eq!(status, StatusCode::CREATED, "{chosen}");
     let (first, names, _) = consent_form_recipients(&app, lead, None).await;
     assert_eq!(names, ["Anna Erste"]);
+    // The client sent the request; later the client asks staff to add one more.
+    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp(), portal_submitted_by = $2 WHERE id = $1")
+        .bind(lead)
+        .bind(user)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
 
     let ben = full_person(
         "Ben Zweiter",
@@ -11700,6 +11706,16 @@ async fn staff_add_one_more_person_after_the_client_named_one() {
     for name in ["Anna Erste", "Ben Zweiter (Kind), geb. 05.04.2001"] {
         assert!(text.contains(name), "{name}: {text}");
     }
+    // The client signs the new version: the person staff recorded does not stop it.
+    let (_, state) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/documents/{second}/signature-requests"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(state["ineligible_reason"], Value::Null, "{state}");
     // The client's later save in the cabinet keeps the person staff added.
     let (_, view) = json_request(
         router,
@@ -11862,5 +11878,55 @@ async fn staff_add_one_more_person_after_the_client_named_one() {
     }
     for gone in ["Anna Erste", "Carl Drei"] {
         assert!(!text.contains(gone), "{gone}: {text}");
+    }
+}
+
+/// The owner's report of 2026-11-18, replayed in the orders tried: a wizard
+/// contact (also one who acts for the client) and the client's trusted
+/// person with the consent, the consent form options saved first or last.
+#[tokio::test]
+async fn a_wizard_contact_never_blocks_the_clients_trusted_person() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let core = json!({"agency_processing":true,"doctors_to_agency":true,"data_system":true,"named_recipients":false});
+    let mut named = core.clone();
+    named["named_recipients"] = json!(true);
+    for (index, relation) in ["spouse", "representative"].iter().enumerate() {
+        let (lead, _user, patient) =
+            lead_with_login(&app, "Replay", &format!("replay.{index}@example.com")).await;
+        let (status, body) = json_request(
+            router,
+            "POST",
+            &format!("/api/v1/leads/{lead}/update"),
+            &pm,
+            Some(
+                json!({ "trusted_contacts": [{ "name": "Maria Kontakt", "relation": relation,
+                "phone": "+49 30 5550111", "birth_date": "1975-03-04", "scope_codes": ["all"] }] }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, chosen) = choose(router, lead, &patient, &core).await;
+        assert_eq!(status, StatusCode::CREATED, "{chosen}");
+        let maria = full_person(
+            "Maria Kontakt",
+            "spouse",
+            "+49 30 5550111",
+            "1975-03-04",
+            "all",
+        );
+        let (status, saved) = save_disclosure(
+            router,
+            lead,
+            &patient,
+            confirmed_disclosure(json!([maria]), true),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        let (status, chosen) = choose(router, lead, &patient, &named).await;
+        assert_eq!(status, StatusCode::CREATED, "{chosen}");
+        let (_, names, _) = consent_form_recipients(&app, lead, None).await;
+        assert_eq!(names, ["Maria Kontakt"], "{relation}");
     }
 }

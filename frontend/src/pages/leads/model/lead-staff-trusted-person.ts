@@ -7,7 +7,7 @@
 
 import { normalizeScopeCodes } from "@/lib/consent-recipient-scope";
 import type { ConsentRecipient, ConsentRecipientRelation } from "@/pages/patient-lead/lead-request-api";
-import { blankRecipient, recipientDrafts, recipientProblems, recipientsToSend, type RecipientDraft } from "@/pages/patient-lead/lead-trusted-persons-model";
+import { blankRecipient, contactValid, recipientDrafts, recipientProblems, recipientsToSend, type RecipientDraft } from "@/pages/patient-lead/lead-trusted-persons-model";
 
 import type { LeadPortalConsentRecipient } from "./lead-portal-consents";
 import { isParentOrGuardianRelation, type TrustedContactDraft } from "./lead-trusted-contacts";
@@ -36,13 +36,15 @@ function cabinetRelation(relation: string): ConsentRecipientRelation | "" {
  * before 2026-11-18 (spouse, relative, other): its data taken over, what the
  * cabinet asks in addition left to fill.
  */
-export function trustedPersonDraftFromContact(contact: Pick<TrustedContactDraft, "name" | "relation" | "phone" | "birthDate" | "scopeCodes">): RecipientDraft {
+export function trustedPersonDraftFromContact(contact: Pick<TrustedContactDraft, "name" | "relation" | "phone" | "email" | "birthDate" | "scopeCodes">): RecipientDraft {
   return {
     ...blankRecipient(),
     name: contact.name.trim(),
     relation: cabinetRelation(contact.relation),
     phone: contact.phone.trim(),
     birthDate: contact.birthDate.trim(),
+    // The e-mail address goes with the person as its contact.
+    contact: contactValid(contact.email) ? contact.email.trim() : "",
     scopeCodes: normalizeScopeCodes(contact.scopeCodes ?? []),
   };
 }
@@ -57,7 +59,9 @@ export function trustedPersonDraftFromStored(person: LeadPortalConsentRecipient)
 export function trustedPersonToSend(draft: RecipientDraft): LeadPortalConsentRecipient | null {
   if (recipientProblems(draft).length > 0) return null;
   const [person] = recipientsToSend([draft]);
-  return person ? { ...person, contact: person.contact ?? null } : null;
+  // A stored or carried-over e-mail address (or older contact) stays with the person.
+  const contact = person?.contact ?? (contactValid(draft.contact) ? draft.contact.trim() : "");
+  return person ? { ...person, contact: contact || null } : null;
 }
 
 /** Why the server refused the person, in the staff language. */
