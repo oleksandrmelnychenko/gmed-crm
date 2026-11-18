@@ -297,6 +297,35 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
 mod tests {
     use super::*;
     #[test]
+    fn a_discounted_line_prints_its_tariff_and_the_discounted_amount() {
+        // 2 × 180,00 at 10 %: «180,00 € / Einheit, Rabatt 10 % = 162,00 € /
+        // Einheit», 324,00 € net, 385,56 € gross (owner 2026-11-18).
+        let data = json!({
+            "lines":[{"agency_service_id":"service","description":"Beratungsleistungen","quantity":"2",
+                "unit_price":"180","vat_rate":"19","discount_percent":"10"}],
+            "catalog_snapshot":{"services":[{"id":"service","unit_label":"unit"}]}});
+        let mut bindings = DocumentBindingOverrides::default();
+        apply(&mut bindings, &data, "single_order");
+        assert_eq!(
+            bindings.service_lines[0].fee.as_deref(),
+            Some("180,00 € / Einheit, Rabatt 10 % = 162,00 € / Einheit")
+        );
+        assert_eq!(
+            bindings.service_lines[0].line_total.as_deref(),
+            Some("324,00 €")
+        );
+        assert_eq!(bindings.estimate_total.as_deref(), Some("385,56 €"));
+        // A quote line with a discount: the same price text, the discounted net.
+        let quote = super::super::parse_quote_line_items(&json!([{
+            "description": "Beratungsleistungen", "quantity": "2", "unit_price": "180",
+            "vat_rate": "19", "discount_percent": "10", "discount_amount": "36",
+            "line_net": "324", "line_vat": "61.56", "line_gross": "385.56"
+        }]));
+        assert_eq!(quote[0].unit_price, "180,00 €, Rabatt 10 % = 162,00 €");
+        assert_eq!(quote[0].line_gross, "324");
+    }
+
+    #[test]
     fn intake_documents_resolve_catalog_context_and_match_main_estimate() {
         let data = json!({"date_from":"2026-09-14","date_to":"2026-09-19","cost_estimate_additional_language":"ru",
             "lines":[{"agency_service_id":"service","description":"Coordination","quantity":"19","unit_price":"60","vat_rate":"19"}],

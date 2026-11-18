@@ -1929,6 +1929,46 @@ async fn a_discounted_tariff_is_kept_by_later_lines_and_the_final_invoice() {
     let price = Decimal::from(60);
     let discount = Decimal::from(10);
     let case = interpreter_case_with_tariff(&ctx, &ceo, 3, Some(price), discount).await;
+    // The order's tariff is not the catalogue's price.
+    let catalog_price: Decimal =
+        sqlx::query_scalar("SELECT unit_price FROM agency_service_catalog WHERE id = $1")
+            .bind(case.catalog_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_ne!(catalog_price, price);
+    let outdated = || async {
+        let (status, order) = call(
+            &ctx.app,
+            "GET",
+            &format!("/api/v1/orders/{}", case.order_id),
+            &ceo,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{order:?}");
+        order["process_gates"]["estimate_outdated"].clone()
+    };
+    // The stale-estimate rule reads an accepted estimate.
+    sqlx::query("UPDATE quotes SET status = 'accepted' WHERE id = $1::uuid")
+        .bind(&case.quote_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    assert!(outdated().await.is_null());
+    // A changed discount makes the estimate outdated like a changed price.
+    sqlx::query("UPDATE order_leistungen SET discount_percent = 15 WHERE id = $1")
+        .bind(case.service_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    assert!(!outdated().await.is_null());
+    sqlx::query("UPDATE order_leistungen SET discount_percent = 10 WHERE id = $1")
+        .bind(case.service_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    assert!(outdated().await.is_null());
 
     // The quote: 3 × 60,00 = 180,00 − 18,00 = 162,00 net, 30,78 VAT.
     let quote = get_quote(&ctx, &ceo, &case.quote_id).await;

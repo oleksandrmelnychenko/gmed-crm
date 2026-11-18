@@ -223,8 +223,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
   // Quotes this type hides, with why: staff looked for them under the default
   // type without a word (QA 2026-11-01, X3 NEW-3).
-  // Interim invoices are no longer offered (fix-100): no hint points to them
-  // (QA verify2 B-4).
+  // Interim invoices are offered again (owner 2026-11-18): quotes that only an
+  // interim invoice can bill are named under the choice.
+  const interimOnlyQuotes = form.invoiceType === "interim"
+    ? []
+    : quotes.filter((quote) => !isQuoteAvailableForInvoice(quote, form.invoiceType) && isQuoteAvailableForInvoice(quote, "interim"));
 
   return (
     <Dialog dirty={dirty} open={open} onOpenChange={(nextOpen) => { if (!formBusy) onOpenChange(nextOpen); }}>
@@ -269,6 +272,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {!optionsError && !optionsBusy && !selectableQuotes.length ? (
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl." : "Для текущего выбора нет доступных предложений."}
+                  </p>
+                ) : null}
+                {interimOnlyQuotes.length ? (
+                  <p role="status" data-testid="invoice-interim-only-quotes" className="text-xs leading-5 text-muted-foreground">
+                    {de ? "Nur als Zwischenrechnung verfügbar" : "Доступны только промежуточным счётом"}: {interimOnlyQuotes.map((quote) => quote.quote_number).join(", ")}.
                   </p>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">

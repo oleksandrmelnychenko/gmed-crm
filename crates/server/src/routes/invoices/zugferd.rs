@@ -1098,6 +1098,31 @@ mod tests {
         assert!(!xml.contains("RoundingAmount"));
     }
 
+    /// A final invoice with a line of 2 × 180,00 less 10 % and a pass-through line.
+    fn sample_discounted() -> EInvoice {
+        let mut invoice = sample();
+        invoice.number = "INV-2026-0108".to_string();
+        invoice.lines[0] = EInvoiceLine {
+            name: "Beratungsleistungen".to_string(),
+            quantity: dec("2"),
+            unit_net: dec("180"),
+            line_net: dec("324"),
+            line_vat: Some(dec("61.56")),
+            vat_rate: dec("19"),
+            is_cost_passthrough: false,
+            discount: Some(LineDiscount {
+                percent: dec("10"),
+                amount: dec("36"),
+            }),
+            note: None,
+        };
+        invoice.total_gross = dec("585.56");
+        invoice.prepaid_amount = Decimal::ZERO;
+        invoice.prepaid_invoices.clear();
+        invoice.prepayment_note = None;
+        invoice
+    }
+
     #[test]
     fn a_discounted_line_carries_its_allowance_and_the_totals_still_add_up() {
         // 2 × 180,00 at 10 %: 360,00 − 36,00 = 324,00 net, 61,56 VAT; plus
@@ -1114,22 +1139,8 @@ mod tests {
             stored_line_discount(&serde_json::json!({"line_net": "10"})),
             None
         );
-        let mut invoice = sample();
-        invoice.lines[0] = EInvoiceLine {
-            name: "Beratungsleistungen".to_string(),
-            quantity: dec("2"),
-            unit_net: dec("180"),
-            line_net: dec("324"),
-            line_vat: Some(dec("61.56")),
-            vat_rate: dec("19"),
-            is_cost_passthrough: false,
-            discount: Some(discount),
-            note: None,
-        };
-        invoice.total_gross = dec("585.56");
-        invoice.prepaid_amount = Decimal::ZERO;
-        invoice.prepaid_invoices.clear();
-        invoice.prepayment_note = None;
+        let invoice = sample_discounted();
+        assert_eq!(invoice.lines[0].discount, Some(discount));
         let xml = build_cii_xml(&invoice);
         assert!(xml.contains(concat!(
             "<ram:SpecifiedTradeAllowanceCharge>",
@@ -1659,6 +1670,7 @@ mod tests {
             sample_concierge_cents(),
             sample_concierge_without_line_vat(),
             sample_final_fully_prepaid(),
+            sample_discounted(),
         ] {
             assert!(missing_requirements(&invoice).is_empty());
             let path = std::path::Path::new(&dir).join(format!("{}.xml", invoice.number));

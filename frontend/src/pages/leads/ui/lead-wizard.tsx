@@ -272,7 +272,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
-import { formatMoneyLabel, formatMoneyRange, moneyInputText, moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
+import { formatMoneyLabel, formatMoneyRange, moneyInputText, moneyLineAmounts, parseDiscountPercent, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKey, appDateKeyOf, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput, parseDateKey } from "@/lib/app-time-zone";
 import { isValidEmailAddress } from "@/lib/contact-validation";
@@ -1303,6 +1303,7 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
           quantity: inputString(line.quantity, "1"),
           price: inputString(line.price),
           vat: inputString(line.vat, "19"),
+          discount: inputString(line.discount),
         }];
       })
     : [];
@@ -1514,6 +1515,7 @@ function autosavePayload(
           quantity: line.quantity,
           price: line.price,
           vat: line.vat,
+          discount: line.discount ?? "",
         })),
         paid_amount: paidAmount,
         prepayment,
@@ -7881,6 +7883,14 @@ ${serviceCommentLines.join("\n")}`
           clientReference:
             line.clientReference ?? `lead-wizard:${leadId}:${line.id}`,
         }));
+        // An unreadable discount is refused, never sent as none (owner 2026-11-18).
+        const badDiscount = currentServiceLines.find(({ line }) => !line.isCostPassthrough && parseDiscountPercent(line.discount ?? "") === null);
+        if (badDiscount) {
+          throw new Error(tx(
+            `Скидка «${badDiscount.line.discount}» указана неверно: от 0 до 100 % с не более чем двумя знаками после запятой`,
+            `Rabatt „${badDiscount.line.discount}“ ist ungültig: 0 bis 100 % mit höchstens zwei Nachkommastellen`,
+          ));
+        }
         await Promise.all(
           currentServiceLines.map(({ line, clientReference }) =>
             createOrderLeistung(targetOrderId, {
