@@ -53,6 +53,7 @@ export type AgencyServiceRow = {
   unit: string;
 };
 
+/** Active services in the catalog's manual order, as the API returns it (owner 2026-11-18). */
 export function agencyServiceRows(
   services: ConciergeAgencyService[],
   translations: Translations,
@@ -69,8 +70,7 @@ export function agencyServiceRows(
         description: description === name ? "" : description,
         unit: service.unit_label?.trim() ? agencyServiceUnitLabel(service.unit_label, translations) : "",
       };
-    })
-    .sort((left, right) => left.name.localeCompare(right.name, lang));
+    });
 }
 
 /** "Трансфер — 2 поездки": what a package contains, never its price. */

@@ -170,6 +170,8 @@ export type AgencyServiceItem = {
   name_ru?: string | null;
   description_ru?: string | null;
   unit_label: string;
+  /** Manual catalog position (owner 2026-11-18); lists come in this order. */
+  sort_order?: number;
   unit_price: unknown;
   currency: string;
   vat_rate: unknown;

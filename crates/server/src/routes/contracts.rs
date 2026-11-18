@@ -3,7 +3,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
             "/agency-services",
             get(list_agency_services).post(create_agency_service),
         )
+        .route("/agency-services/order", put(reorder_agency_services))
         .route(
             "/agency-services/{service_id}/update",
             post(update_agency_service),
@@ -98,6 +99,13 @@ struct ListAgencyServicesQuery {
     search: Option<String>,
     active_only: Option<bool>,
 }
+
+#[derive(Deserialize)]
+struct ReorderAgencyServicesRequest {
+    service_ids: Vec<Uuid>,
+}
+
+const MAX_REORDERED_AGENCY_SERVICES: usize = 2000;
 
 #[derive(Deserialize)]
 struct CreateFrameworkContractRequest {
@@ -1683,6 +1691,7 @@ const PRICELESS_AGENCY_SERVICE_FIELDS: &[&str] = &[
     "name_ru",
     "description_ru",
     "unit_label",
+    "sort_order",
     "is_active",
 ];
 
@@ -1715,7 +1724,7 @@ async fn list_agency_services(
     match sqlx::query(
         r#"SELECT catalog.id, catalog.service_key, catalog.service_name, catalog.description, catalog.description_items,
                   catalog.name_ru, catalog.description_ru,
-                  catalog.unit_label,
+                  catalog.unit_label, catalog.sort_order,
                   COALESCE(current_price.unit_price, catalog.unit_price) AS unit_price,
                   COALESCE(current_price.currency, catalog.currency) AS currency,
                   COALESCE(current_price.vat_rate, catalog.vat_rate) AS vat_rate,
@@ -1765,7 +1774,7 @@ async fn list_agency_services(
                     OR COALESCE(catalog.description, '') ILIKE $1
                  )
              AND ($2::BOOL IS NULL OR catalog.is_active = $2)
-           ORDER BY catalog.is_active DESC, catalog.valid_from DESC, catalog.service_name ASC"#,
+           ORDER BY catalog.sort_order ASC, catalog.service_name ASC, catalog.id ASC"#,
     )
     .bind(
         query
@@ -1793,6 +1802,7 @@ async fn list_agency_services(
                         "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
                         "description_ru": row.try_get::<Option<String>, _>("description_ru").unwrap_or_default(),
                         "unit_label": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
+                        "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
                         "unit_price": row.try_get::<Decimal, _>("unit_price").unwrap_or(Decimal::ZERO),
                         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                         "vat_rate": row.try_get::<Decimal, _>("vat_rate").unwrap_or(Decimal::ZERO),
@@ -2538,6 +2548,119 @@ async fn delete_agency_service_price_version(
     )
     .await;
     Json(json!({ "ok": true })).into_response()
+}
+
+/// Staff order the catalog by hand (owner 2026-11-18). The listed services
+/// take the positions they hold now, in the given order: the full list reorders
+/// the whole catalog, and a service created meanwhile keeps its place at the end.
+async fn reorder_agency_services(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<ReorderAgencyServicesRequest>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let service_ids = body.service_ids;
+    if service_ids.is_empty() || service_ids.len() > MAX_REORDERED_AGENCY_SERVICES {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "service_ids must name between 1 and 2000 services",
+        );
+    }
+    let unique: std::collections::HashSet<Uuid> = service_ids.iter().copied().collect();
+    if unique.len() != service_ids.len() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "service_ids must not repeat a service",
+        );
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, "begin agency service reorder");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reorder agency services",
+            );
+        }
+    };
+
+    let found = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM agency_service_catalog WHERE id = ANY($1) ORDER BY id FOR UPDATE",
+    )
+    .bind(&service_ids)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows.len(),
+        Err(error) => {
+            tracing::error!(%error, "lock agency services for reorder");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reorder agency services",
+            );
+        }
+    };
+    if found != service_ids.len() {
+        return err(StatusCode::NOT_FOUND, "Agency service not found");
+    }
+
+    let changed = match sqlx::query(
+        r#"WITH wanted AS (
+               SELECT wanted.id, wanted.position
+               FROM UNNEST($1::UUID[]) WITH ORDINALITY AS wanted(id, position)
+           ),
+           slots AS (
+               SELECT catalog.sort_order,
+                      ROW_NUMBER() OVER (
+                          ORDER BY catalog.sort_order, catalog.service_name, catalog.id
+                      ) AS position
+               FROM agency_service_catalog catalog
+               WHERE catalog.id = ANY($1)
+           )
+           UPDATE agency_service_catalog catalog
+           SET sort_order = slots.sort_order
+           FROM wanted
+           JOIN slots ON slots.position = wanted.position
+           WHERE catalog.id = wanted.id
+             AND catalog.sort_order IS DISTINCT FROM slots.sort_order"#,
+    )
+    .bind(&service_ids)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(%error, "reorder agency services");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reorder agency services",
+            );
+        }
+    };
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, "commit agency service reorder");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reorder agency services",
+        );
+    }
+
+    if changed > 0 {
+        let _ = audit(
+            &state,
+            auth.user_id,
+            "reorder_agency_services",
+            "agency_service_catalog",
+            None,
+            Some(json!({ "service_ids": service_ids, "changed": changed })),
+        )
+        .await;
+    }
+    Json(json!({ "ok": true, "changed": changed })).into_response()
 }
 
 async fn delete_agency_service(

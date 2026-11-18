@@ -91,6 +91,14 @@ export function saveAgencyService(serviceId: string, payload: JsonPayload) {
   return postJson<void>(path, payload);
 }
 
+/** Stores the manual order of the agency service catalog (full ordered id list). */
+export function reorderAgencyServices(serviceIds: readonly string[]) {
+  return apiFetch<{ ok: boolean; changed: number }>("/agency-services/order", {
+    method: "PUT",
+    body: JSON.stringify({ service_ids: serviceIds }),
+  });
+}
+
 export function updateContractStatus(contractId: string, payload: JsonPayload) {
   return postJson<ContractItem>(`/framework-contracts/${contractId}/status`, payload);
 }

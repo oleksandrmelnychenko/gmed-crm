@@ -37,7 +37,7 @@ pub(super) async fn snapshot(
         .filter_map(|line| line.agency_service_id)
         .collect();
     let services: Vec<Value> = sqlx::query_scalar(
-        "SELECT to_jsonb(s) FROM agency_service_catalog s WHERE s.id=ANY($1) ORDER BY s.id",
+        "SELECT to_jsonb(s) FROM agency_service_catalog s WHERE s.id=ANY($1) ORDER BY s.sort_order,s.service_name,s.id",
     )
     .bind(&service_ids)
     .fetch_all(&mut *conn)

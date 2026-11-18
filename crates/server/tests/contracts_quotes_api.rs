@@ -2729,6 +2729,164 @@ async fn agency_service_catalog_supports_create_read_only_visibility_and_update(
     assert_eq!(items[0]["valid_to"], "2026-12-31");
 }
 
+async fn listed_agency_service_ids(app: &axum::Router, bearer: &str, tag: &str) -> Vec<String> {
+    let (status, body) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/agency-services?search={tag}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body.as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn agency_service_catalog_keeps_the_manual_order_staff_set() {
+    let Some((app, pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("agency-order");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+
+    // Names deliberately out of alphabetical order: a new position goes to the end.
+    let mut created = Vec::new();
+    for name in ["Charlie", "Alpha", "Bravo"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/agency-services",
+            &bearer,
+            Some(json!({
+                "service_name": format!("{name} {tag}"),
+                "unit_label": "hour",
+                "unit_price": 10.0,
+                "currency": "EUR",
+                "vat_rate": 19.0,
+                "is_active": true,
+                "valid_from": "2026-04-01"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        created.push(body["id"].as_str().unwrap().to_string());
+    }
+    assert_eq!(
+        listed_agency_service_ids(&app, &bearer, &tag).await,
+        created
+    );
+
+    let reordered = vec![created[2].clone(), created[0].clone(), created[1].clone()];
+
+    // Reading the catalog is not editing it: the CEO assistant and the concierge are refused.
+    for refused in [&assistant_bearer, &concierge_bearer] {
+        let (status, _) = json_request(
+            &app,
+            "PUT",
+            "/api/v1/agency-services/order",
+            refused,
+            Some(json!({ "service_ids": reordered })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    assert_eq!(
+        listed_agency_service_ids(&app, &bearer, &tag).await,
+        created
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        "/api/v1/agency-services/order",
+        &billing_bearer,
+        Some(json!({ "service_ids": reordered })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["changed"], 3);
+    assert_eq!(
+        listed_agency_service_ids(&app, &bearer, &tag).await,
+        reordered
+    );
+    // The concierge's priceless list follows the same order.
+    assert_eq!(
+        listed_agency_service_ids(&app, &concierge_bearer, &tag).await,
+        reordered
+    );
+
+    // A position created after the reorder goes to the end.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &bearer,
+        Some(json!({
+            "service_name": format!("Aardvark {tag}"),
+            "unit_label": "hour",
+            "unit_price": 10.0,
+            "valid_from": "2026-04-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let newest = body["id"].as_str().unwrap().to_string();
+    let mut expected = reordered.clone();
+    expected.push(newest.clone());
+    assert_eq!(
+        listed_agency_service_ids(&app, &bearer, &tag).await,
+        expected
+    );
+
+    // A repeated or unknown id is refused and changes nothing.
+    let (status, _) = json_request(
+        &app,
+        "PUT",
+        "/api/v1/agency-services/order",
+        &bearer,
+        Some(json!({ "service_ids": [newest, newest] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = json_request(
+        &app,
+        "PUT",
+        "/api/v1/agency-services/order",
+        &bearer,
+        Some(json!({ "service_ids": [newest, Uuid::new_v4()] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        listed_agency_service_ids(&app, &bearer, &tag).await,
+        expected
+    );
+
+    let pool_ref = &pool;
+    support::wait_until("audit action reorder_agency_services", || async move {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'reorder_agency_services' AND user_id = $1",
+        )
+        .bind(billing_id)
+        .fetch_one(pool_ref)
+        .await
+        .unwrap();
+        count == 1
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn concierge_reads_agency_services_and_packages_without_prices_and_never_writes() {
     let Some((app, pool, _admin_id, bearer)) = test_context().await else {

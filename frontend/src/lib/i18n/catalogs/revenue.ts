@@ -33,6 +33,8 @@ export interface RevenueTranslations {
   finance_catalog_empty_tax_profiles: string;
   finance_catalog_default_badge: string;
   finance_catalog_edit: string;
+  finance_catalog_reorder: string;
+  finance_catalog_reorder_error: string;
   finance_catalog_service_package_catalog: string;
   finance_catalog_new_package: string;
   finance_catalog_package_basics: string;
@@ -923,6 +925,8 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_empty_tax_profiles: "Налоговые профили пока не настроены.",
   finance_catalog_default_badge: "По умолчанию",
   finance_catalog_edit: "Изменить",
+  finance_catalog_reorder: "Переместить",
+  finance_catalog_reorder_error: "Не удалось сохранить порядок позиций",
   finance_catalog_service_package_catalog: "Каталог сервисных пакетов",
   finance_catalog_new_package: "Новый пакет",
   finance_catalog_package_basics: "Параметры пакета",
@@ -1341,6 +1345,8 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_empty_tax_profiles: "Noch keine Steuerprofile konfiguriert.",
   finance_catalog_default_badge: "Standard",
   finance_catalog_edit: "Bearbeiten",
+  finance_catalog_reorder: "Verschieben",
+  finance_catalog_reorder_error: "Reihenfolge der Positionen konnte nicht gespeichert werden",
   finance_catalog_service_package_catalog: "Servicepaket-Katalog",
   finance_catalog_new_package: "Neues Paket",
   finance_catalog_package_basics: "Paketdaten",

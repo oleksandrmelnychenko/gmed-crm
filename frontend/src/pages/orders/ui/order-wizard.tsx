@@ -225,7 +225,9 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
     loading: workCatalog.loading,
     failed: Boolean(workCatalog.error),
   }), tx, workTypesStepLabel);
-  const orderCatalog = [...new Map([...(data?.catalog_snapshot?.services ?? []), ...catalog].map(item => [item.id, item])).values()];
+  // The catalog's manual order first; a snapshot service no longer in the active catalog follows.
+  const orderCatalogIds = new Set(catalog.map(item => item.id));
+  const orderCatalog = [...catalog, ...[...new Map((data?.catalog_snapshot?.services ?? []).map(item => [item.id, item])).values()].filter(item => !orderCatalogIds.has(item.id))];
   const amount = intakeTotal(data?.lines ?? []);
   const amountLabel = formatMoneyAmount(amount);
   const periodLabel = data?.date_from || data?.date_to ? `${formatIntakeDate(data.date_from)} – ${formatIntakeDate(data.date_to)}` : tx("Период не указан", "Zeitraum nicht angegeben");

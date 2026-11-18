@@ -8,8 +8,11 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
+  type PointerEvent,
   type SetStateAction,
 } from "react";
 import {
@@ -31,6 +34,7 @@ import {
   BadgeEuro,
   ChevronDown,
   CornerDownRight,
+  GripVertical,
   Pencil,
   Plus,
   Search,
@@ -105,6 +109,14 @@ import type {
   AgencyServiceItem,
   AgencyServicePriceVersion,
 } from "@/pages/contracts/model/types";
+import { reorderAgencyServices } from "@/pages/contracts/data/contracts-api";
+import {
+  findScrollParent,
+  moveCatalogItemBy,
+  moveCatalogItemTo,
+  sameCatalogOrder,
+  scrollTableWhileDragging,
+} from "@/pages/finance-catalog-order";
 import { cn } from "@/lib/utils";
 import { formatMoneyAmount, moneyInputText, moneyLineAmounts, parseMoneyInput } from "@/lib/money";
 import { MoneyInput } from "@/components/ui/money-input";
@@ -967,6 +979,138 @@ function useFinanceCatalogPageContent() {
     filteredAgencyServices,
     catalogSearch,
   );
+  // Manual order of the catalog (owner 2026-11-18): only in the unsorted,
+  // unfiltered default view, saved at once, rolled back when the save fails.
+  const [catalogViewState, setCatalogViewState] = useState({ sorted: false, filtered: false });
+  const handleCatalogViewStateChange = useCallback(
+    (next: { sorted: boolean; filtered: boolean }) =>
+      setCatalogViewState((current) =>
+        current.sorted === next.sorted && current.filtered === next.filtered ? current : next,
+      ),
+    [],
+  );
+  const [draggingServiceId, setDraggingServiceId] = useState<string | null>(null);
+  const catalogReorderEnabled =
+    canManageTaxProfiles &&
+    !loading &&
+    !catalogSearch.trim() &&
+    !catalogViewState.sorted &&
+    !catalogViewState.filtered;
+  const catalogDragRef = useRef<{
+    id: string;
+    pointerId: number;
+    origin: AgencyServiceItem[];
+    list: AgencyServiceItem[];
+    scroller: HTMLElement | null;
+    stop: () => void;
+  } | null>(null);
+  useEffect(() => () => catalogDragRef.current?.stop(), []);
+  const catalogOrderSaveRef = useRef<Promise<void>>(Promise.resolve());
+  const saveCatalogOrder = (next: AgencyServiceItem[], previous: AgencyServiceItem[]) => {
+    if (sameCatalogOrder(next, previous)) return;
+    setAgencyServices(next);
+    const serviceIds = next.map((item) => item.id);
+    catalogOrderSaveRef.current = catalogOrderSaveRef.current.then(() =>
+      reorderAgencyServices(serviceIds).then(
+        () => undefined,
+        async () => {
+          setError(t.finance_catalog_reorder_error);
+          // A later move may already be queued: show what the server holds.
+          try {
+            setAgencyServices(
+              await apiFetch<AgencyServiceItem[]>("/agency-services", { forceFresh: true }),
+            );
+          } catch {
+            setAgencyServices(previous);
+          }
+        },
+      ),
+    );
+  };
+  const catalogOrderHandlers = {
+    pointerDown(event: PointerEvent<HTMLButtonElement>, serviceId: string) {
+      event.stopPropagation();
+      if (!catalogReorderEnabled || event.button !== 0 || catalogDragRef.current) return;
+      event.preventDefault();
+      // The moved row re-mounts and a row scrolled out of the virtual window
+      // unmounts: the drag listens on the window, not on the handle.
+      const onMove = (moveEvent: globalThis.PointerEvent) =>
+        catalogOrderHandlersRef.current.dragMove(moveEvent);
+      const onEnd = (endEvent: globalThis.PointerEvent) =>
+        catalogOrderHandlersRef.current.dragEnd(endEvent, endEvent.type === "pointercancel");
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onEnd);
+      window.addEventListener("pointercancel", onEnd);
+      catalogDragRef.current = {
+        id: serviceId,
+        pointerId: event.pointerId,
+        origin: agencyServices,
+        list: agencyServices,
+        scroller: findScrollParent(event.currentTarget),
+        stop: () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onEnd);
+          window.removeEventListener("pointercancel", onEnd);
+        },
+      };
+      setDraggingServiceId(serviceId);
+    },
+    dragMove(event: globalThis.PointerEvent) {
+      const drag = catalogDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      scrollTableWhileDragging(drag.scroller, event.clientY);
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      const targetId = hit
+        ?.closest('[role="row"]')
+        ?.querySelector<HTMLElement>("[data-agency-service-order]")
+        ?.dataset.agencyServiceOrder;
+      if (!targetId || targetId === drag.id) return;
+      const next = moveCatalogItemTo(drag.list, drag.id, targetId);
+      if (sameCatalogOrder(next, drag.list)) return;
+      drag.list = next;
+      setAgencyServices(next);
+    },
+    dragEnd(event: globalThis.PointerEvent, cancelled: boolean) {
+      const drag = catalogDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      drag.stop();
+      catalogDragRef.current = null;
+      // The release over the moved row must not open its edit sheet.
+      const swallowClick = (clickEvent: MouseEvent) => {
+        clickEvent.stopPropagation();
+        clickEvent.preventDefault();
+      };
+      window.addEventListener("click", swallowClick, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener("click", swallowClick, { capture: true }), 0);
+      setDraggingServiceId(null);
+      if (cancelled) {
+        setAgencyServices(drag.origin);
+        return;
+      }
+      saveCatalogOrder(drag.list, drag.origin);
+    },
+    keyDown(event: KeyboardEvent<HTMLButtonElement>, serviceId: string) {
+      // The row opens the edit sheet on Enter/Space; the handle never does.
+      event.stopPropagation();
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      if (!catalogReorderEnabled || catalogDragRef.current) return;
+      saveCatalogOrder(
+        moveCatalogItemBy(agencyServices, serviceId, event.key === "ArrowUp" ? -1 : 1),
+        agencyServices,
+      );
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>(`[data-agency-service-order="${serviceId}"]`)
+          ?.focus(),
+      );
+    },
+  };
+  const catalogOrderHandlersRef = useRef(catalogOrderHandlers);
+  useEffect(() => {
+    catalogOrderHandlersRef.current = catalogOrderHandlers;
+  });
   const [initialAgencyForm, setInitialAgencyForm] = useState<AgencyServiceFormState | null>(null);
   const [initialPackageForm, setInitialPackageForm] = useState<ServicePackageForm | null>(null);
   const [initialTaxForm, setInitialTaxForm] = useState<TaxProfileForm | null>(null);
@@ -1704,6 +1848,44 @@ function useFinanceCatalogPageContent() {
 
   const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceTableRow>[]>(
     () => [
+      ...(canManageTaxProfiles
+        ? [
+            {
+              id: "order_actions",
+              label: t.finance_catalog_reorder,
+              ariaLabel: t.finance_catalog_reorder,
+              headerRender: () => <span className="sr-only">{t.finance_catalog_reorder}</span>,
+              accessor: () => null,
+              sortable: false,
+              required: true,
+              width: 40,
+              render: (row: AgencyServiceTableRow) =>
+                row.kind === "service" ? (
+                  <button
+                    type="button"
+                    data-agency-service-order={row.rowId}
+                    aria-label={t.finance_catalog_reorder}
+                    title={t.finance_catalog_reorder}
+                    aria-disabled={!catalogReorderEnabled}
+                    className={cn(
+                      "flex size-6 touch-none items-center justify-center rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                      catalogReorderEnabled
+                        ? "cursor-grab hover:text-foreground active:cursor-grabbing"
+                        : "cursor-not-allowed opacity-35",
+                      draggingServiceId === row.rowId && "cursor-grabbing text-foreground",
+                    )}
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) =>
+                      catalogOrderHandlersRef.current.pointerDown(event, row.rowId)
+                    }
+                    onKeyDown={(event) => catalogOrderHandlersRef.current.keyDown(event, row.rowId)}
+                  >
+                    <GripVertical className="size-3.5" />
+                  </button>
+                ) : null,
+            } satisfies ColumnDef<AgencyServiceTableRow>,
+          ]
+        : []),
       {
         id: "service",
         label: t.finance_catalog_service,
@@ -2001,6 +2183,8 @@ function useFinanceCatalogPageContent() {
     [
       agencyServicePackageUsages,
       canManageTaxProfiles,
+      catalogReorderEnabled,
+      draggingServiceId,
       expandedAgencyServices,
       servicePackagesById,
       t,
@@ -2763,6 +2947,14 @@ function useFinanceCatalogPageContent() {
         dictionary={t as unknown as Record<string, string>}
         rowId={(row) => row.rowId}
         expandRow={expandAgencyServiceRow}
+        onViewStateChange={handleCatalogViewStateChange}
+        rowBackground={(row) =>
+          row.kind === "service" && row.rowId === draggingServiceId
+            ? "color-mix(in oklch, var(--brand) 10%, var(--card))"
+            : null
+        }
+        mobilePrimaryColumnId="service"
+        mobileDetailColumnIds={["prices", "unit_price", "gross", "unit"]}
         activeRowId={agencyServiceFormOpen ? agencyServiceForm.id : null}
         onRowClick={
           canManageTaxProfiles

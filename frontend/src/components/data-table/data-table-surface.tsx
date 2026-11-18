@@ -60,6 +60,8 @@ export type DataTableSurfaceProps<T> = Omit<
   maxFrozenColumns?: number;
   /** Told how many rows the table's own filters leave (for a count shown outside the table). */
   onFilteredCountChange?: (count: number) => void;
+  /** Told whether the table's own sorting or filters change the given row order. */
+  onViewStateChange?: (state: { sorted: boolean; filtered: boolean }) => void;
   pagination?: {
     className?: string;
     pageSize?: number;
@@ -122,6 +124,7 @@ export function DataTableSurface<T>({
   groupLabels,
   maxFrozenColumns = DEFAULT_MAX_FROZEN_COLUMNS,
   onFilteredCountChange,
+  onViewStateChange,
   pagination,
   rowActionsLabel,
   rowActionsWidth,
@@ -251,6 +254,12 @@ export function DataTableSurface<T>({
   useEffect(() => {
     onFilteredCountChange?.(filteredCount);
   }, [filteredCount, onFilteredCountChange]);
+
+  const viewSorted = sortStack.length > 0;
+  const viewFiltered = filters.length > 0;
+  useEffect(() => {
+    onViewStateChange?.({ sorted: viewSorted, filtered: viewFiltered });
+  }, [onViewStateChange, viewFiltered, viewSorted]);
 
   const paginationResetKey = pagination
     ? `${pagination.resetKey ?? ""}:${JSON.stringify(filters)}:${JSON.stringify(sortStack)}`

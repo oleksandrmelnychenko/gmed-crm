@@ -39,6 +39,16 @@ describe("GMED catalogue for the concierge (read-only, no prices)", () => {
         unit: t("ru").revenue_unit_ride,
       },
     ]);
+    expect(
+      agencyServiceRows(
+        [
+          { id: "z", service_name: "Zahnreinigung" },
+          { id: "a", service_name: "Abholung" },
+        ],
+        t("de"),
+        "de",
+      ).map((row) => row.id),
+    ).toEqual(["z", "a"]);
     expect(agencyServiceRows([{ id: "b", service_name: "Flughafentransfer" }], t("de"), "de")[0])
       .toMatchObject({ name: "Flughafentransfer", description: "", unit: "" });
   });
