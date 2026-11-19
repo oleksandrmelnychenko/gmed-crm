@@ -3144,15 +3144,21 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
     assert_eq!(saved_line["unit_price"], "90");
     assert_eq!(saved_line["unit_price_snapshot"], "90");
     assert_eq!(saved_line["vat_rate_snapshot"], "19");
-    // Invoices explain a catalog line's VAT as coming from the catalog, not as
+    // A catalog item without its own tax profile: the position carries the
+    // one profile of its rate (owner 2026-11-19, explicit tax profiles), not
     // a historical ("legacy") snapshot.
-    let vat_source: String =
-        sqlx::query_scalar("SELECT vat_source FROM order_leistungen WHERE id = $1::uuid")
-            .bind(line["id"].as_str().expect("line id"))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(vat_source, "catalog");
+    let (vat_source, profile_key): (String, Option<String>) = sqlx::query_as(
+        r#"SELECT line.vat_source, profile.profile_key
+           FROM order_leistungen line
+           LEFT JOIN tax_profiles profile ON profile.id = line.tax_profile_id
+           WHERE line.id = $1::uuid"#,
+    )
+    .bind(line["id"].as_str().expect("line id"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(vat_source, "tax_profile");
+    assert_eq!(profile_key.as_deref(), Some("standard_vat"));
 
     let (status, quote) = json_request(
         &app,
