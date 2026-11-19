@@ -8418,6 +8418,8 @@ ${serviceCommentLines.join("\n")}`
                 vat_rate: line.vat,
                 // A 0 % pass-through cost is a durchlaufender Posten, not tax-exempt medical care.
                 is_cost_passthrough: line.isCostPassthrough === true,
+                // Its tax profile prints its own reason for 0 % (QA3 B S2-2).
+                ...(line.taxProfileId ? { tax_profile_id: line.taxProfileId } : {}),
                 note: serviceDocumentNote(line),
                 description_items: resolvedServiceCatalogItems(line),
               })),

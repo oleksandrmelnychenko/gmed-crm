@@ -1743,6 +1743,48 @@ mod tests {
         assert!(!build_cii_xml(&with_vat_id).contains("<ram:SellerTradeParty><ram:ID>"));
     }
 
+    /// QA3 B S2-2 / C S3-11: one E breakdown (BR-E-01) names the reason of
+    /// each line's tax profile; its VATEX code only when every line shares it.
+    #[test]
+    fn the_exempt_breakdown_names_each_profile_reason() {
+        let generic = crate::tax_exemptions::Exemption {
+            reason: "Steuerfreie Leistung".to_string(),
+            code: None,
+            pass_through: false,
+        };
+        let mut invoice = sample_exempt_only();
+        invoice.lines.truncate(1);
+        invoice.total_gross = dec("145");
+        invoice.lines.push(EInvoiceLine {
+            exemption: Some(generic.clone()),
+            ..invoice.lines[0].clone()
+        });
+        invoice.total_gross = dec("290");
+        let xml = build_cii_xml(&invoice);
+        assert_eq!(
+            xml.matches("<ram:CategoryCode>E</ram:CategoryCode>")
+                .count(),
+            3
+        );
+        assert_eq!(xml.matches("<ram:ExemptionReason>").count(), 1);
+        assert!(xml.contains(&format!("{ZERO_RATE_EXEMPTION}; Steuerfreie Leistung")));
+        assert!(!xml.contains("<ram:ExemptionReasonCode>"));
+        // Every line of the group carries the § 4 Nr. 14 profile: one code.
+        invoice.lines[1].exemption = Some(crate::tax_exemptions::Exemption::medical());
+        let xml = build_cii_xml(&invoice);
+        assert!(xml.contains("<ram:ExemptionReasonCode>VATEX-EU-132</ram:ExemptionReasonCode>"));
+    }
+
+    #[test]
+    fn unit_codes_cover_hours_days_and_months() {
+        assert_eq!(unit_code(Some("pro Stunde")), "HUR");
+        assert_eq!(unit_code(Some("Stunde(n)")), "HUR");
+        assert_eq!(unit_code(Some("Monat")), "MON");
+        assert_eq!(unit_code(Some("month")), "MON");
+        assert_eq!(unit_code(Some("Tag")), "DAY");
+        assert_eq!(unit_code(Some("item")), "C62");
+    }
+
     #[test]
     fn the_buyer_vat_id_needs_a_country_prefix() {
         assert_eq!(

@@ -50,12 +50,14 @@ WHERE line.tax_profile_id IS NULL
 
 -- QA3 C S2-4: a line planned for a visit («Добавить в смету») is linked to
 -- the appointment, so its completion delivers that line instead of adding a
--- second one. A cancelled line gives the visit up: the link is cleared, the
--- visit can get a new line and its completion bills again.
+-- second one. A planned line cancelled before the visit gives the visit
+-- up: the link is cleared, the visit can get a new line and its completion
+-- bills it. A delivered or billed line keeps its link when cancelled, so a
+-- completed visit is never billed twice.
 CREATE OR REPLACE FUNCTION release_cancelled_order_line_appointment()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF NEW.status = 'cancelled' AND OLD.status IS DISTINCT FROM 'cancelled' THEN
+    IF NEW.status = 'cancelled' AND OLD.status = 'planned' AND OLD.delivered_at IS NULL THEN
         NEW.source_medical_appointment_id := NULL;
     END IF;
     RETURN NEW;
@@ -72,4 +74,5 @@ CREATE TRIGGER release_cancelled_order_line_appointment
 UPDATE order_leistungen
 SET source_medical_appointment_id = NULL
 WHERE status = 'cancelled'
+  AND delivered_at IS NULL
   AND source_medical_appointment_id IS NOT NULL;

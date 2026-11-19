@@ -1745,7 +1745,7 @@ function useOrdersPageContent() {
       : [];
   const orderNextStepBlocked =
     (orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion") &&
-    (orderNextStep.blocked || orderNextStepReasons.length > 0);
+    (orderNextStep.blocked || signatureResetPending);
   const currentLifecyclePhaseIndex = orderDetail
     ? ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number])
     : -1;

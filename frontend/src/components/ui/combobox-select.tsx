@@ -382,7 +382,7 @@ function ComboboxSelect({
         >
           <ComboboxPrimitive.Popup
             data-overlay-interaction-root=""
-            className="relative isolate z-[300] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover [background-color:var(--control-popover,var(--popover))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="relative isolate z-[300] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover [background-image:linear-gradient(var(--control-popover,var(--popover)),var(--control-popover,var(--popover)))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           >
             <div className="flex items-center gap-2 border-b border-border bg-[var(--control-popover,var(--popover))] px-2.5 py-2">
               <SearchIcon className="size-4 shrink-0 text-muted-foreground" />

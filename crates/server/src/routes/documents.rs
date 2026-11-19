@@ -1210,10 +1210,11 @@ struct GeneratedSingleOrderContext {
 }
 
 /// Whether an order has a flat fee («Pauschale»): a not cancelled position
-/// of a catalogue service due in full on termination.
+/// of a catalogue service due in full on termination. A document without
+/// an order keeps the clause.
 async fn order_has_flat_fee(state: &AppState, order_id: Option<Uuid>) -> bool {
     let Some(order_id) = order_id else {
-        return false;
+        return true;
     };
     sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS (
@@ -5325,6 +5326,9 @@ struct ServiceLineInput {
     vat_rate: Option<String>,
     #[serde(default)]
     is_cost_passthrough: Option<bool>,
+    /// The position's tax profile: a 0 % line prints its reason (QA3 B S2-2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tax_profile_id: Option<Uuid>,
     #[serde(default)]
     note: Option<String>,
     /// Net unit price and the catalogue unit of the line (owner 2026-11-18):
@@ -20468,7 +20472,11 @@ async fn generate_document(
                     .map(|value| value.line_items.clone())
                     .unwrap_or_default()
             } else {
-                service_lines_to_items(&bindings.service_lines)
+                let mut items = service_lines_to_items(&bindings.service_lines);
+                if let Err(resp) = exemption_reasons_or_500(&state, &mut items).await {
+                    return resp;
+                }
+                items
             };
             let manual_totals = if let Some(context) = &intake_context {
                 intake_documents::totals(&context["data"])
@@ -20734,7 +20742,11 @@ async fn generate_document(
                     .map(|q| q.line_items.clone())
                     .unwrap_or_default()
             } else {
-                service_lines_to_items(&bindings.service_lines)
+                let mut items = service_lines_to_items(&bindings.service_lines);
+                if let Err(resp) = exemption_reasons_or_500(&state, &mut items).await {
+                    return resp;
+                }
+                items
             };
             // Manual rows form a self-contained calculation and must never be
             // paired with totals from a different stored quote.
@@ -32896,7 +32908,7 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
                 .map(ToOwned::to_owned),
-            tax_profile_id: None,
+            tax_profile_id: line.tax_profile_id,
             vat_category: None,
             exemption_reason: None,
         })
@@ -48797,6 +48809,7 @@ mod tests {
                 line_total: Some("285,00 €".to_string()),
                 vat_rate: Some("19".to_string()),
                 is_cost_passthrough: None,
+                tax_profile_id: None,
                 note: None,
             }],
             ..Default::default()
@@ -48882,6 +48895,7 @@ mod tests {
                 line_total: Some("1.000,00 - 1.500,00 €".to_string()),
                 vat_rate: None,
                 is_cost_passthrough: None,
+                tax_profile_id: None,
                 note: None,
             }],
             ..Default::default()

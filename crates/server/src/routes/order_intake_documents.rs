@@ -130,6 +130,9 @@ pub(super) fn apply(bindings: &mut DocumentBindingOverrides, data: &Value, templ
                 crate::service_description::items_text(&description_items)
             };
             ServiceLineInput {
+                tax_profile_id: line["tax_profile_id"]
+                    .as_str()
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok()),
                 unit_price: None,
                 unit: None,
                 discount_percent: None,
@@ -283,6 +286,9 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
                 crate::service_description::items_text(&description_items)
             };
             ServiceLineInput {
+                tax_profile_id: line["tax_profile_id"]
+                    .as_str()
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok()),
                 unit_price: None,
                 unit: None,
                 discount_percent: None,

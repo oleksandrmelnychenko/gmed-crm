@@ -708,6 +708,23 @@ mod tests {
         assert!(xml.contains("Zuzüglich verrechneter Anzahlungen"));
     }
 
+    /// QA3 A S3-3: a whole credited line keeps the unit of the invoice line
+    /// it corrects (the Storno XML wrote C62 where the invoice had HUR); a
+    /// partial credit stays one piece.
+    #[test]
+    fn a_whole_credited_line_keeps_the_unit_of_the_invoice_line() {
+        let mut context = credit_note();
+        context.invoice_line_terms = vec![super::super::line_terms::InvoiceLineTerms {
+            unit: Some("hour".to_string()),
+            ..Default::default()
+        }];
+        let invoice = correction_einvoice(&context);
+        assert_eq!(invoice.lines[0].unit_code, "HUR");
+        // The hotel line is a partial credit of another invoice line.
+        assert_eq!(invoice.lines[1].unit_code, "C62");
+        assert!(xml(&context).contains(r#"unitCode="HUR""#));
+    }
+
     #[test]
     fn reversal_charges_again_and_references_the_credit_note() {
         let xml = xml(&reversal());
