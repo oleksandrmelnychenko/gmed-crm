@@ -3087,3 +3087,92 @@ async fn the_statement_counts_a_billed_extra_line_and_skips_cancelled_ones() {
         "{items:?}"
     );
 }
+
+/// Owner 2026-11-19: a service added during the order gets a discount and a
+/// choosable tax profile; a change of a position not billed yet reaches the
+/// final, a billed position keeps its terms (409).
+#[tokio::test]
+async fn a_service_added_during_the_order_bills_its_discount_and_profile() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let organisation = tax_profile_id(&ctx.pool, "termin_fee_0").await;
+    let case = interpreter_case(&ctx, &ceo, 1).await;
+    report_hours(&ctx, &ceo, &case, 1.0, 1).await;
+    let (status, added) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/orders/{}/leistungen", case.order_id),
+        &ceo,
+        Some(json!({
+            "description": "Organisation der Behandlung",
+            "quantity": 1,
+            "unit_price": 550,
+            "vat_rate": 0,
+            "discount_percent": 12,
+            "tax_profile_id": organisation,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{added:?}");
+    let added_id = Uuid::parse_str(added["id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        line_profile(&ctx.pool, added_id).await,
+        (Some(organisation), Decimal::ZERO)
+    );
+    sqlx::query(
+        "UPDATE order_leistungen SET status = 'approved', delivered_at = now(), approved_at = now() WHERE id = $1",
+    )
+    .bind(added_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    // Not billed yet: the discount changes to 20 %.
+    let terms = format!(
+        "/api/v1/orders/{}/leistungen/{added_id}/terms",
+        case.order_id
+    );
+    let (status, changed) = call(
+        &ctx.app,
+        "POST",
+        &terms,
+        &ceo,
+        Some(json!({ "discount_percent": 20, "confirm_signature_reset": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed:?}");
+    assert_eq!(changed["discount_percent"], "20");
+
+    let (status, final_invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [{ "line_index": 0, "quantity": 1 }],
+            "order_services": [{ "order_leistung_id": added_id, "quantity": 1 }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice:?}");
+    let billed = line_by_description(&final_invoice, "Organisation der Behandlung");
+    assert_eq!(billed["discount_percent"], "20", "{billed:?}");
+    assert_eq!(billed["vat_rate"], "0");
+    assert_eq!(billed["line_gross"], "440");
+    release_invoice(&ctx, &ceo, final_invoice["id"].as_str().unwrap()).await;
+
+    // Billed: discount and profile stay as billed.
+    let (status, refused) = call(
+        &ctx.app,
+        "POST",
+        &terms,
+        &ceo,
+        Some(json!({ "discount_percent": 5, "confirm_signature_reset": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
+    assert_eq!(refused["error"], "order_line_already_invoiced");
+}

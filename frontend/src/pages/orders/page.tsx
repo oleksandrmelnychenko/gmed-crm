@@ -237,6 +237,7 @@ import {
   createExternalInvoice,
   createOrder,
   createOrderLeistung,
+  updateOrderLeistungTerms,
   createWorkflowChecklistItem,
   fetchBillingWorkflowOwners,
   fetchOrderDebtQueue,
@@ -343,6 +344,8 @@ import { OrderEconomicsTable } from "./ui/order-economics-table";
 import { OrderConciergeSales } from "./ui/order-concierge-sales";
 import { OrderExistingPatientDocuments } from "./ui/order-existing-patient-documents";
 import { OrderGroupPanel } from "./ui/order-group-panel";
+import { OrderLineTermsEditor } from "./ui/order-line-terms-editor";
+import { usePositionTaxProfiles } from "./data/use-position-tax-profiles";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
 import { OrderSubscriptionCard } from "./ui/order-subscription-card";
 import { ScopedOrderDetail } from "./ui/scoped-order-detail";
@@ -1429,6 +1432,8 @@ function useOrdersPageContent() {
   // Tax profiles a position can carry (owner 2026-11-19), read when the
   // service form opens.
   const [positionTaxProfiles, setPositionTaxProfiles] = useState<PositionTaxProfile[]>([]);
+  // The positions of a running order change discount and profile in place.
+  const workspaceTaxProfiles = usePositionTaxProfiles(permissions.canAddLeistung);
   useEffect(() => {
     if (!leistungOpen || positionTaxProfiles.length) return;
     let cancelled = false;
@@ -7679,6 +7684,28 @@ function useOrdersPageContent() {
                                   />
                                 </div>
 
+                                {permissions.canAddLeistung && !orderStepsLocked
+                                  && leistung.status !== "cancelled" && leistung.status !== "invoiced"
+                                  && invoiceReferences.length === 0 ? (
+                                  <OrderLineTermsEditor
+                                    key={`${leistung.id}:${String(leistung.discount_percent ?? "")}:${leistung.tax_profile_id ?? ""}`}
+                                    discountPercent={leistung.discount_percent}
+                                    taxProfileId={leistung.tax_profile_id}
+                                    isCostPassthrough={Boolean(leistung.is_cost_passthrough)}
+                                    profiles={workspaceTaxProfiles}
+                                    lang={lang === "de" ? "de" : "ru"}
+                                    onSave={async (payload) => {
+                                      await withSignedTermsConfirmation(
+                                        (confirmSignatureReset) => updateOrderLeistungTerms(orderDetail.id, leistung.id, {
+                                          ...payload,
+                                          confirm_signature_reset: confirmSignatureReset,
+                                        }),
+                                        askSignedTermsChange,
+                                      );
+                                      triggerReload();
+                                    }}
+                                  />
+                                ) : null}
                                 {readableServiceLineNotes(leistung.notes, lang) ? (
                                   <div className="whitespace-pre-line border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
                                     {readableServiceLineNotes(leistung.notes, lang)}

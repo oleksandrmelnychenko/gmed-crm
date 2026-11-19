@@ -24,6 +24,7 @@ mod budget;
 pub(crate) mod client_terms;
 mod incoming_invoices;
 pub(crate) mod line_tax;
+mod line_terms;
 mod pipeline;
 mod unassigned_invoices;
 mod visit_drafts;
@@ -115,6 +116,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/orders/{order_id}/leistungen/{leistung_id}/cancel",
             post(cancel_leistung),
+        )
+        .route(
+            "/orders/{order_id}/leistungen/{leistung_id}/terms",
+            post(line_terms::update_leistung_terms),
         )
         .route(
             "/orders/{order_id}/leistungen/{leistung_id}/cancellation-preview",

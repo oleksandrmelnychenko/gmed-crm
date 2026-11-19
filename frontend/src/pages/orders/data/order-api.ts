@@ -344,6 +344,15 @@ export type CreatedOrderLeistung = {
   signature_reset?: boolean;
 };
 
+/** Discount and tax profile of a position not billed yet (owner 2026-11-19). */
+export function updateOrderLeistungTerms(
+  orderId: string,
+  leistungId: string,
+  payload: { discount_percent: number; tax_profile_id: string | null; confirm_signature_reset: boolean },
+) {
+  return postJson<{ id: string; signature_reset?: boolean }>(`/orders/${orderId}/leistungen/${leistungId}/terms`, payload);
+}
+
 export function createOrderLeistung(orderId: string, payload: JsonPayload) {
   return postJson<CreatedOrderLeistung>(`/orders/${orderId}/leistungen`, payload);
 }
