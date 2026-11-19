@@ -5218,11 +5218,22 @@ async fn create_order_quote(
     if only_when_lines_changed {
         // Read after the open quotes were locked: a concurrent document
         // waits here and then finds the quote the first one made.
+        // An order already billed in part keeps its quote: a new one would
+        // cover only the services not invoiced yet and close the quote its
+        // interim invoices were issued from. Advances bill no services and
+        // stay with the order, as when staff make a new quote by hand.
         let latest = sqlx::query(
-            r#"SELECT line_items, valid_until, notes, internal_note
-               FROM quotes
-               WHERE order_id = $1 AND status <> 'superseded'
-               ORDER BY created_at DESC, id DESC
+            r#"SELECT q.line_items, q.valid_until, q.notes, q.internal_note,
+                      (EXISTS (SELECT 1 FROM invoices invoice
+                               WHERE invoice.quote_id = q.id
+                                 AND invoice.invoice_type <> 'advance'
+                                 AND invoice.status <> 'cancelled')
+                       OR EXISTS (SELECT 1 FROM order_leistungen service
+                                  WHERE service.order_id = q.order_id
+                                    AND service.status = 'invoiced')) AS billed
+               FROM quotes q
+               WHERE q.order_id = $1 AND q.status <> 'superseded'
+               ORDER BY q.created_at DESC, q.id DESC
                LIMIT 1"#,
         )
         .bind(order_id)
@@ -5230,9 +5241,12 @@ async fn create_order_quote(
         .await;
         match latest {
             Ok(Some(latest)) => {
-                if latest
-                    .try_get::<Value, _>("line_items")
-                    .is_ok_and(|stored| quote_lines_match_persisted(&stored, &persisted_line_items))
+                if latest.try_get::<bool, _>("billed").unwrap_or(true)
+                    || latest
+                        .try_get::<Value, _>("line_items")
+                        .is_ok_and(|stored| {
+                            quote_lines_match_persisted(&stored, &persisted_line_items)
+                        })
                 {
                     return StatusCode::NO_CONTENT.into_response();
                 }
@@ -5508,7 +5522,7 @@ async fn create_order_quote(
     }
 
     crate::realtime::publish_quote_event(
-        &state,
+        state,
         Some(user_id),
         "quote.created",
         quote_id,
@@ -5527,7 +5541,7 @@ async fn create_order_quote(
     .await;
     for closed in &superseded {
         crate::realtime::publish_quote_event(
-            &state,
+            state,
             Some(user_id),
             "quote.status_changed",
             closed.id,

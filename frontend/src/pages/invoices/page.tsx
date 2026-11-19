@@ -1291,17 +1291,15 @@ function useStaffInvoicesPageContent() {
   // «Промежуточный счёт» from a patient with the invoices open) opens the
   // dialog with its type too; before, the flag was dropped unopened (QA
   // 2026-11-19: `?invoice_type=interim` opened the dialog unreliably).
-  const handledCreateLinkRef = useRef(initialCreateOpen ? searchParams.toString() : "");
+  // Only the flag's arrival opens it: a closed dialog whose flag is still in
+  // the URL while other parameters change (the new invoice's `invoice=`)
+  // must not reopen (QA 2026-11-15, A-8).
+  const createFlagSeenRef = useRef(createFlagInUrl);
   useEffect(() => {
-    if (!createFlagInUrl) {
-      handledCreateLinkRef.current = "";
-      return;
-    }
-    const link = searchParams.toString();
-    if (handledCreateLinkRef.current !== link) {
-      handledCreateLinkRef.current = link;
-      // The open dialog keeps what staff entered when other parameters change.
-      if (createOpen) return;
+    const arrived = createFlagInUrl && !createFlagSeenRef.current;
+    createFlagSeenRef.current = createFlagInUrl;
+    if (!createFlagInUrl) return;
+    if (arrived && !createOpen) {
       const linkType = searchParams.get("invoice_type") as InvoiceType | null;
       const linkQuoteId = searchParams.get("quote") ?? "";
       setFilters((current) => ({

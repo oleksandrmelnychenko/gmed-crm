@@ -476,14 +476,25 @@ test("a double click on create leaves no dialog behind the invoice's sheet", asy
 // create dialog; the due date stays empty (release date + term).
 test("a payment received before the invoice is sent with the new invoice", async ({ page }) => {
   const fixture = await prepare(page);
-  Object.assign(fixture.quote, { order_period_from: "2026-10-20", order_period_to: "2026-10-25", payment_term_days: 14 });
+  Object.assign(fixture.quote, {
+    order_period_from: "2026-10-18",
+    order_period_to: "2026-10-25",
+    order_programme_from: "2026-10-20",
+    order_programme_to: "2026-10-25",
+    order_visits_from: "2026-10-18",
+    order_visits_to: "2026-10-25",
+    payment_term_days: 14,
+  });
   await startClockAt(page);
   const dialog = await openCreate(page);
   await expect(dialog.getByTestId("release-due-date-default")).toHaveText("+14 дней · 26.10.2026");
   await expect(dialog.getByTestId("invoice-service-period")).toContainText("Период оказания услуг");
-  // Not prefilled: the programme dates are offered as pills (owner 2026-11-18).
+  // Not prefilled: the programme dates are offered as pills (owner 2026-11-18),
+  // the first visit apart when it is another day (QA 2026-11-19).
   await expect(dialog.getByTestId("invoice-period-program-start")).toHaveText("Начало программы 20.10.2026");
-  await expect(dialog.getByTestId("invoice-period-program-end")).toHaveText("Окончание 25.10.2026");
+  await expect(dialog.getByTestId("invoice-period-program-end")).toHaveText("Окончание программы 25.10.2026");
+  await expect(dialog.getByTestId("invoice-period-first-visit")).toHaveText("Первый приём 18.10.2026");
+  await expect(dialog.getByTestId("invoice-period-last-visit")).toHaveCount(0);
   await dialog.getByRole("checkbox", { name: "Оплата уже поступила", exact: true }).check();
   const received = dialog.getByRole("group", { name: "Дата поступления" });
   await received.getByRole("spinbutton", { name: pickerSection.day }).fill("10");

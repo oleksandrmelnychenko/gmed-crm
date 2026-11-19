@@ -509,7 +509,7 @@ async fn pdf_text(app: &axum::Router, bearer: &str, id: &str) -> String {
 
 /// `1234.5` as the documents print it: `1.234,50`.
 fn money_de(value: Decimal) -> String {
-    let fixed = format!("{:.2}", value.round_dp(2));
+    let fixed = format!("{:.2}", gmed_server::money::round_cents(value));
     let (whole, cents) = fixed.split_once('.').unwrap();
     let mut grouped = String::new();
     for (index, digit) in whole.chars().enumerate() {

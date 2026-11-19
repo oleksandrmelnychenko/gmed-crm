@@ -18475,11 +18475,33 @@ async fn generate_document(
         }
         _ => None,
     };
-    let intake_context = match super::order_intakes::document_context(&state, order_id).await {
+    // The Einzelauftrag and the Kostenvoranschlag print the order's quote:
+    // a changed order gets a new quote first, so a new version of an outdated
+    // document prints the order of now (QA 2026-11-19 S1), never the quote
+    // of the version it replaces. A new document refreshes it before the
+    // order's preparation context is read (which names the quote); a new
+    // version only after the replace was checked (below), so a refused one
+    // leaves the quotes alone.
+    let refreshes_order_quote = order_id.is_some()
+        && matches!(template.id, "single_order" | "order_cost_estimate")
+        && body
+            .bindings
+            .as_ref()
+            .is_none_or(|bindings| bindings.service_lines.is_empty());
+    if refreshes_order_quote
+        && body.replace_document_id.is_none()
+        && let Some(order_uuid) = order_id
+        && let Err(response) =
+            super::contracts::refresh_order_quote_for_document(&state, auth.user_id, order_uuid)
+                .await
+    {
+        return response;
+    }
+    let mut intake_context = match super::order_intakes::document_context(&state, order_id).await {
         Ok(value) => value,
         Err(response) => return response,
     };
-    let repeat_context = if matches!(
+    let mut repeat_context = if matches!(
         template.id,
         "single_order" | "order_cost_estimate" | "payer_cost_estimate"
     ) {
@@ -18843,23 +18865,6 @@ async fn generate_document(
         None
     };
 
-    // The Einzelauftrag and the Kostenvoranschlag print the order's quote:
-    // a changed order gets a new quote first, so a new version of an outdated
-    // document prints the order of now (QA 2026-11-19 S1), never the quote
-    // of the version it replaces.
-    if let Some(order_uuid) = order_id
-        && matches!(template.id, "single_order" | "order_cost_estimate")
-        && body
-            .bindings
-            .as_ref()
-            .is_none_or(|bindings| bindings.service_lines.is_empty())
-        && let Err(response) =
-            super::contracts::refresh_order_quote_for_document(&state, auth.user_id, order_uuid)
-                .await
-    {
-        return response;
-    }
-
     // The payer's copy of the cost estimate names the payer of the moment and
     // the client's estimate it was made from: it is made anew every time.
     if let (Some(context), Some(guard), false) = (
@@ -18963,6 +18968,42 @@ async fn generate_document(
                     "Failed to check existing document version",
                 );
             }
+        }
+    }
+    if refreshes_order_quote
+        && replacement.is_some()
+        && let Some(order_uuid) = order_id
+    {
+        if let Err(response) =
+            super::contracts::refresh_order_quote_for_document(&state, auth.user_id, order_uuid)
+                .await
+        {
+            return response;
+        }
+        // The preparation contexts name the quote: read them again, so the
+        // document is made from (and checked against) the refreshed one.
+        if intake_context.is_some() {
+            intake_context = match super::order_intakes::document_context(&state, order_id).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
+        }
+        if repeat_context.is_some() {
+            repeat_context = match sqlx::query_scalar::<_, Option<Value>>(
+                "SELECT repeat_order_document_context($1)",
+            )
+            .bind(order_id)
+            .fetch_one(&state.db)
+            .await
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to load current repeat-order context",
+                    );
+                }
+            };
         }
     }
 

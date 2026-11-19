@@ -7752,6 +7752,32 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
             estimate_document = b["id"].as_str().unwrap().to_string();
         }
     }
+    // The estimate made after the change prints the order's current quote: the
+    // changed order got a new quote first (QA 2026-11-19 S1).
+    let printed_now: Option<String> = sqlx::query_scalar(
+        "SELECT generated_bindings->>'_quote_number' FROM documents WHERE id = $1::uuid",
+    )
+    .bind(&estimate_document)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let current_quote: Option<String> = sqlx::query_scalar(
+        "SELECT quote_number FROM quotes WHERE order_id = $1 AND status <> 'superseded'
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(order)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(printed_now, current_quote);
+    // The order changes again after the estimate: its next quote is another.
+    sqlx::query(
+        "UPDATE order_leistungen SET description='Updated synthetic coordination again' WHERE id=$1",
+    )
+    .bind(seeded.service_id)
+    .execute(pool)
+    .await
+    .unwrap();
     // Concurrent retries of the same prepared estimate produce one current quote.
     let quote_path = format!("/api/v1/orders/{order}/quotes");
     let (first, retry) = tokio::join!(
@@ -7871,6 +7897,20 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         signed_estimate.to_string(),
         "{audit_context}"
     );
+    // The Einzelauftrag made before the second change gets its new version too.
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(
+            json!({"template_id":"single_order","lead_id":lead,"order_id":order,
+            "language":"de","status":"active","replace_document_id":order_document}),
+        ),
+    )
+    .await;
+    assert!(s.is_success(), "{b}");
+    let order_document = b["id"].as_str().unwrap().to_string();
     let (s, b) = support::paper_signature(&app, &pm, &order_document).await;
     assert_eq!(s, StatusCode::OK, "{b}");
     let (status, qualified) = json_request(
