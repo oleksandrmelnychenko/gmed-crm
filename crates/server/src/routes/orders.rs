@@ -4471,17 +4471,17 @@ async fn get_order(
                        END AS invoice_display_status,
                        invoice.issued_at,
                        SUM(allocation.quantity) AS invoiced_quantity,
-                       SUM(allocation.amount_gross_snapshot) AS line_gross,
+                       SUM(allocation.amount_gross) AS line_gross,
                        (invoice.total_gross > 0 AND invoice.credited_amount >= invoice.total_gross)
                        OR (
-                           SUM(allocation.amount_gross_snapshot) > 0
+                           SUM(allocation.amount_gross) > 0
                            AND SUM(COALESCE(line_credit.amount_gross, 0))
                                + CASE WHEN invoice.total_gross > 0
-                                      THEN SUM(allocation.amount_gross_snapshot)
+                                      THEN SUM(allocation.amount_gross)
                                            * MAX(COALESCE(legacy_credit.amount_gross, 0))
                                            / invoice.total_gross
                                       ELSE 0 END
-                               >= SUM(allocation.amount_gross_snapshot)
+                               >= SUM(allocation.amount_gross)
                        ) AS line_credited,
                        GREATEST(
                            invoice.total_gross
@@ -4495,7 +4495,7 @@ async fn get_order(
                            invoice.paid_amount
                                + COALESCE(invoice.prepayment_applied_amount, 0)
                        ) AS settled_amount
-                   FROM invoice_order_line_allocations allocation
+                   FROM invoice_service_billings allocation
                    JOIN invoices invoice ON invoice.id = allocation.invoice_id
                    -- Credit notes with lines reduce only the credited lines.
                    LEFT JOIN LATERAL (
@@ -4509,12 +4509,17 @@ async fn get_order(
                          AND credit.line_items IS NOT NULL
                          AND jsonb_typeof(credit.line_items) = 'array'
                          AND jsonb_typeof(invoice.line_items) = 'array'
-                         AND NULLIF(
+                         AND (
+                             NULLIF(
                                  invoice.line_items
                                      -> ((credited.value ->> 'invoice_line_index')::INTEGER)
                                      ->> 'quote_line_index',
                                  ''
                              )::INTEGER = allocation.quote_line_index
+                             -- A line outside the estimate: by its own index.
+                             OR (credited.value ->> 'invoice_line_index')::INTEGER
+                                = allocation.invoice_line_index
+                         )
                    ) line_credit ON true
                    -- Credit notes without lines are spread over the invoice.
                    LEFT JOIN LATERAL (
@@ -4526,7 +4531,11 @@ async fn get_order(
                        WHERE credit.invoice_id = invoice.id
                          AND credit.line_items IS NULL
                    ) legacy_credit ON true
+                   -- Estimate allocations and lines outside the estimate
+                   -- (QA3 A S2-2); a final's credit of a never delivered
+                   -- quantity is not a billing of the line.
                    WHERE allocation.order_leistung_id = ol.id
+                     AND allocation.quantity > 0
                      -- A draft only reserves the service; it is billed once
                      -- the invoice is released.
                      AND invoice.released_at IS NOT NULL
@@ -5426,6 +5435,7 @@ async fn get_order_economics(
                               ->> 'quote_line_index',
                           ''
                       )::INTEGER AS quote_line_index,
+                      (credited.value ->> 'invoice_line_index')::INTEGER AS invoice_line_index,
                       COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
                                    * COALESCE(NULLIF(credited.value ->> 'line_net', '')::NUMERIC, 0)), 0) AS amount_net,
                       COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
@@ -5438,36 +5448,43 @@ async fn get_order_economics(
                WHERE invoice.order_id = $1
                  AND transaction.line_items IS NOT NULL
                  AND jsonb_typeof(invoice.line_items) = 'array'
-               GROUP BY 1, 2
+               GROUP BY 1, 2, 3
            ), service_revenue AS (
+               -- Estimate allocations, lines outside the estimate (QA3 D
+               -- S2-1) and a final's credit of a never delivered quantity
+               -- (negative, QA3 C S1-1).
                SELECT allocation.order_leistung_id,
-                      COALESCE(SUM(GREATEST(
-                          CASE WHEN invoice.total_net > 0 THEN allocation.amount_net_snapshot
+                      COALESCE(SUM(CASE WHEN allocation.amount_net < 0 THEN allocation.amount_net
+                          ELSE GREATEST(
+                          CASE WHEN invoice.total_net > 0 THEN allocation.amount_net
                                * GREATEST(invoice.total_net - COALESCE(legacy.amount_net, 0), 0)
-                               / invoice.total_net ELSE 0 END
+                               / invoice.total_net ELSE allocation.amount_net END
                           - COALESCE(line_credit.amount_net, 0),
                           0
-                      )), 0) AS amount_net,
-                      COALESCE(SUM(GREATEST(
-                          CASE WHEN invoice.total_vat > 0 THEN allocation.amount_vat_snapshot
+                      ) END), 0) AS amount_net,
+                      COALESCE(SUM(CASE WHEN allocation.amount_gross < 0 THEN allocation.amount_vat
+                          ELSE GREATEST(
+                          CASE WHEN invoice.total_vat > 0 THEN allocation.amount_vat
                                * GREATEST(invoice.total_vat - COALESCE(legacy.amount_vat, 0), 0)
                                / invoice.total_vat ELSE 0 END
                           - COALESCE(line_credit.amount_vat, 0),
                           0
-                      )), 0) AS amount_vat,
-                      COALESCE(SUM(GREATEST(
-                          CASE WHEN invoice.total_gross > 0 THEN allocation.amount_gross_snapshot
+                      ) END), 0) AS amount_vat,
+                      COALESCE(SUM(CASE WHEN allocation.amount_gross < 0 THEN allocation.amount_gross
+                          ELSE GREATEST(
+                          CASE WHEN invoice.total_gross > 0 THEN allocation.amount_gross
                                * GREATEST(invoice.total_gross - COALESCE(legacy.amount_gross, 0), 0)
-                               / invoice.total_gross ELSE 0 END
+                               / invoice.total_gross ELSE allocation.amount_gross END
                           - COALESCE(line_credit.amount_gross, 0),
                           0
-                      )), 0) AS amount_gross
-               FROM invoice_order_line_allocations allocation
+                      ) END), 0) AS amount_gross
+               FROM invoice_service_billings allocation
                JOIN invoices invoice ON invoice.id = allocation.invoice_id
                LEFT JOIN legacy_credits legacy ON legacy.invoice_id = invoice.id
                LEFT JOIN line_credits line_credit
                       ON line_credit.invoice_id = invoice.id
-                     AND line_credit.quote_line_index = allocation.quote_line_index
+                     AND (line_credit.quote_line_index = allocation.quote_line_index
+                          OR line_credit.invoice_line_index = allocation.invoice_line_index)
                WHERE invoice.order_id = $1
                  AND invoice.invoice_type <> 'advance'
                  AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')
@@ -12057,8 +12074,12 @@ async fn deliver_leistung(
              delivered_at = now()
          FROM order_leistungen previous
          WHERE previous.id = line.id
-           AND line.id = $2 AND line.order_id = $1
            AND line.delivered_at IS NULL AND line.status <> 'cancelled'
+           -- Estimated outlays an invoice billed are a placeholder, never a
+           -- delivered cost (QA3 C S1-1).
+           AND NOT (line.status = 'invoiced' AND line.is_cost_passthrough
+                    AND btrim(line.description) = 'Voraussichtliche Auslagen')
+           AND line.id = $2 AND line.order_id = $1
          RETURNING previous.status AS previous_status, line.status",
     )
     .bind(order_id)

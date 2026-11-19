@@ -2160,7 +2160,8 @@ function useStaffInvoicesPageContent() {
             internal_note: createForm.internalNote.trim() || null,
             ...(overageOnly || closingFinal ? {} : { line_items: selectedLines }),
             ...documentTerms,
-            ...(createForm.invoiceType === "final"
+            // An interim bills delivered services outside the estimate too (QA3 C S3-13).
+            ...(createForm.invoiceType === "final" || createForm.invoiceType === "interim"
               ? { order_services: finalOrderServicesPayload(createForm, deliveredServices) }
               : {}),
           });

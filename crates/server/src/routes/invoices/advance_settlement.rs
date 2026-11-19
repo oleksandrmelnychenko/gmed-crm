@@ -697,6 +697,9 @@ pub(super) async fn reverse_release_transfers_tx(
     final_invoice_id: Uuid,
     reason: &str,
     actor_id: Uuid,
+    // Only what one credit note of the final moved (same transaction time,
+    // QA3 B S1-3); `None`: everything the final's release moved.
+    only_created_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Vec<Value>, axum::response::Response> {
     let ids = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT transfer.id
@@ -708,9 +711,11 @@ pub(super) async fn reverse_release_transfers_tx(
                  WHERE reversal.reverses_transaction_id = transfer.target_payment_transaction_id
                    AND reversal.transaction_type = 'reversal'
              )
+             AND ($2::TIMESTAMPTZ IS NULL OR transfer.created_at = $2)
            ORDER BY transfer.created_at DESC, transfer.id DESC"#,
     )
     .bind(final_invoice_id)
+    .bind(only_created_at)
     .fetch_all(&mut **transaction)
     .await
     .map_err(|error| failed_response(error, final_invoice_id, "release transfers"))?;
@@ -773,6 +778,7 @@ pub(super) async fn reverse_release_credit_notes_tx(
     final_invoice_id: Uuid,
     reason: &str,
     actor_id: Uuid,
+    only_created_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Vec<ReversedReleaseCredit>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT credit.id, credit.invoice_id, advance.patient_id
@@ -785,9 +791,11 @@ pub(super) async fn reverse_release_credit_notes_tx(
                  WHERE reversal.reverses_transaction_id = credit.id
                    AND reversal.transaction_type = 'reversal'
              )
+             AND ($2::TIMESTAMPTZ IS NULL OR credit.created_at = $2)
            ORDER BY credit.created_at DESC, credit.document_number DESC"#,
     )
     .bind(final_invoice_id)
+    .bind(only_created_at)
     .fetch_all(&mut **transaction)
     .await
     .map_err(|error| failed_response(error, final_invoice_id, "release credit notes"))?;

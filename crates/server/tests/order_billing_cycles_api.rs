@@ -1089,7 +1089,8 @@ async fn a_final_invoice_bills_delivered_services_outside_the_quote() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
 
-    // An interim invoice takes no services outside the quote.
+    // An interim invoice may take services outside the quote (QA3 C S3-13);
+    // this one is refused for its estimate line, billed in full already.
     let (status, refused) = call(
         &ctx.app,
         "POST",
@@ -1102,7 +1103,7 @@ async fn a_final_invoice_bills_delivered_services_outside_the_quote() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
 
     // The draft editor keeps the services when only the quote lines change.
     let (status, edited) = call(

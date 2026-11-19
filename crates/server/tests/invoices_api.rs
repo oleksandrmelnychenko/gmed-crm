@@ -3695,31 +3695,21 @@ async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoi
     // The final now bills 59,50 at 19 %, but deducted 118,08 of the
     // advance's 19 % share there: the credit note releases the 58,58 the
     // category no longer bills (QA 2026-11-16, fix-81 open item); the
-    // advance closes that rest, refundable.
+    // advance closes that rest and its money is set off against what the
+    // same final still asks (owner 2026-11-17, QA3 B S1-2), not refunded.
     assert_eq!(credit["released_prepayment_gross"], "58.58", "{credit}");
     let paid = pay_invoice_in_full(&app, &billing_bearer, &final_id, "FINAL").await;
-    assert_eq!(paid["balance_due"], "668.08", "{paid}");
-    // The released 58,58 is refunded (the ledger books cash: until then it
-    // stays booked as the advance's 19 % income).
-    let (status, refunded) = json_request(
+    assert_eq!(paid["balance_due"], "609.5", "{paid}");
+    let (status, advance) = json_request(
         &app,
-        "POST",
-        &format!("/api/v1/invoices/{advance_id}/refunds"),
+        "GET",
+        &format!("/api/v1/invoices/{advance_id}"),
         &billing_bearer,
-        Some(json!({
-            "request_id": Uuid::new_v4(),
-            "amount_gross": "58.58",
-            "payment_method": "bank_transfer",
-            "refunded_on": gmed_server::app_time::today().to_string(),
-            "reason": "Freigegebene Anzahlung",
-        })),
+        None,
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{refunded}");
-    assert_eq!(
-        refunded["invoice"]["refundable_cash_amount"], "0",
-        "{refunded}"
-    );
+    assert_eq!(status, StatusCode::OK, "{advance}");
+    assert_eq!(advance["refundable_cash_amount"], "0", "{advance}");
 
     // Over the order, the ledger books what was invoiced: 238 + 909.50 gross,
     // the 300 pass-through cost once, and 38 + 9.50 VAT, though the advance

@@ -10,7 +10,7 @@ import { hasCapability, type Actor } from "@/lib/permissions";
 import { payerRelationshipKindLabel, type PayerRelationshipKind } from "@/pages/leads/model/lead-payer";
 import { blankReceivedPayment } from "./document-terms";
 
-import { createFinalInvoiceSelection, isFinalSelectionValid } from "./final-invoice";
+import { createFinalInvoiceSelection, finalServiceQuantity, isFinalSelectionValid } from "./final-invoice";
 
 import type {
   AccountingLedgerPayload,
@@ -368,6 +368,11 @@ export function invoiceLineQuantityAvailable(
   line: InvoiceLineItem,
   invoiceType: InvoiceType,
 ) {
+  // An interim never bills the estimated outlays or a pass-through cost not
+  // incurred yet (QA3 C S1-1); no invoice bills a line whose terms changed
+  // after the estimate before a new KV/EA version (QA3 D S2-2).
+  if (invoiceType === "interim" && line.interim_blocked) return 0;
+  if (invoiceType !== "advance" && line.terms_outdated) return 0;
   // An advance takes the quoted quantity no invoice bills yet (QA 2026-11-01, Y2 B1).
   const quantity = invoiceType === "advance"
     ? Number(line.quantity ?? 0) - Number(line.invoiced_quantity ?? 0)
@@ -428,10 +433,34 @@ export function isOverageOnlyInvoice(
     && Boolean(quote?.line_items.every((line) => invoiceLineQuantityAvailable(line, "final") === 0));
 }
 
+/** Why a line of the create dialog cannot be billed by this invoice type, if a rule says so. */
+export function lineBlockedText(line: InvoiceLineItem, invoiceType: InvoiceType, de: boolean): string | null {
+  if (invoiceType !== "advance" && line.terms_outdated) {
+    return de
+      ? "Kostenvoranschlag veraltet: Konditionen der Position geändert — neue Version von KV/EA erstellen"
+      : "Смета устарела: условия позиции изменены — создайте новую версию КВ/ЕА";
+  }
+  if (invoiceType === "interim" && line.interim_blocked === "estimated_outlays") {
+    return de
+      ? "Voraussichtliche Auslagen kommen nicht auf eine Zwischenrechnung"
+      : "Ожидаемые расходы не выставляются промежуточным счётом";
+  }
+  if (invoiceType === "interim" && line.interim_blocked === "pass_through_not_incurred") {
+    return de ? "Durchlaufender Posten noch nicht angefallen" : "Транзитный расход ещё не возник";
+  }
+  return null;
+}
+
 export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateForm, extras: DeliveredOrderService[] = []) {
   if (form.invoiceType === "final") return isFinalSelectionValid(lines, form, extras);
   const selected = new Set(form.selectedLineIndexes);
-  if (!selected.size || selected.size !== form.selectedLineIndexes.length) return false;
+  // An interim may bill delivered services outside the estimate too (QA3 C S3-13).
+  const extraQuantities = form.invoiceType === "interim"
+    ? extras.map((extra) => ({ extra, quantity: finalServiceQuantity(form, extra.order_leistung_id) }))
+    : [];
+  if (extraQuantities.some(({ extra, quantity }) => !Number.isFinite(quantity) || quantity < 0 || quantity > Number(extra.quantity))) return false;
+  const billsExtras = extraQuantities.some(({ quantity }) => quantity > 0);
+  if ((!selected.size && !billsExtras) || selected.size !== form.selectedLineIndexes.length) return false;
   for (const index of selected) {
     const line = lines[index];
     const quantity = Number(form.lineQuantities[String(index)]);

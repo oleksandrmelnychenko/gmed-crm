@@ -7515,7 +7515,10 @@ function useOrdersPageContent() {
                                     ) : null}
                                     {permissions.canApproveLeistung &&
                                     !leistung.delivered_at &&
-                                    leistung.status !== "cancelled" ? (
+                                    leistung.status !== "cancelled" &&
+                                    // Billed estimated outlays are a placeholder, never delivered (QA3 C S1-1).
+                                    !(leistung.status === "invoiced" && leistung.is_cost_passthrough &&
+                                      leistung.description.trim() === "Voraussichtliche Auslagen") ? (
                                       <Button
                                         variant="outline"
                                         className="mt-4 h-auto min-h-8 w-full whitespace-normal rounded-lg py-1.5 text-center"

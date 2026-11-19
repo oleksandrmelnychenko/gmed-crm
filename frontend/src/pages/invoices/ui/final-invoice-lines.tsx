@@ -24,7 +24,7 @@ import {
   isFinalSelectionValid,
   type FinalInvoicePreview,
 } from "../model/final-invoice";
-import type { ServicePeriodForm } from "../model/document-terms";
+import { receivedAmount, type ServicePeriodForm } from "../model/document-terms";
 import { INVOICE_LINE_COMMENT_MAX_LENGTH, invoiceLineSelectionPayload } from "../model/invoice-model";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import type { CreateForm, DeliveredOrderService, InvoiceLineItem, QuoteOption } from "../model/types";
@@ -299,6 +299,14 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
   );
 }
 
+/** «К оплате» after the advances and the money already received (QA3 D S3-2). */
+function dueAfterReceived(dueGross: unknown, form: Pick<CreateForm, "receivedPayment">) {
+  const due = Number(dueGross);
+  if (!Number.isFinite(due) || !form.receivedPayment?.enabled) return due;
+  const received = receivedAmount(form.receivedPayment, due);
+  return Number.isFinite(received) ? roundCents(Math.max(due - Math.max(received, 0), 0)) : due;
+}
+
 type SettlementProps = {
   open: boolean;
   quote: QuoteOption;
@@ -411,9 +419,21 @@ export function FinalInvoiceSettlement({ open, quote, extras, form, money, onDue
           })}
         </div>
       ) : null}
+      {data && form.receivedPayment?.enabled ? (() => {
+        // «Оплата уже поступила» is recorded at the release: the dialog's
+        // «К оплате» is what is left after it, like the issued invoice (QA3 D S3-2).
+        const due = Number(data.due_gross);
+        const received = Math.min(Math.max(receivedAmount(form.receivedPayment, due), 0), due);
+        return Number.isFinite(received) && received > 0 ? (
+          <p className="flex justify-between gap-3 text-xs" data-testid="final-preview-received">
+            <span>{de ? "Zahlung erhalten" : "Оплата уже поступила"}</span>
+            <span className="font-mono tabular-nums">−{money(received)}</span>
+          </p>
+        ) : null;
+      })() : null}
       {data ? (
         <p className="flex justify-between gap-3 border-t border-border pt-3 font-semibold" data-testid="final-preview-due">
-          <span>{de ? "Zu zahlen" : "К оплате"}</span><span className="font-mono tabular-nums">{money(data.due_gross)}</span>
+          <span>{de ? "Zu zahlen" : "К оплате"}</span><span className="font-mono tabular-nums">{money(dueAfterReceived(data.due_gross, form))}</span>
         </p>
       ) : null}
     </div>

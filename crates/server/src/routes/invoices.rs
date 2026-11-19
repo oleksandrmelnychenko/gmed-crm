@@ -1015,6 +1015,24 @@ fn coded_err(
     (status, Json(body)).into_response()
 }
 
+/// Error code: an interim invoice was asked to bill the estimated outlays or
+/// a pass-through cost not incurred yet (QA3 C S1-1).
+const INTERIM_UNDELIVERED_PASS_THROUGH: &str = "interim_undelivered_pass_through";
+
+/// Error code: an estimate line's service changed its price, discount or
+/// VAT after the estimate; what is billed is the signed estimate, so a new
+/// KV/EA version comes first (QA3 D S2-2).
+const ESTIMATE_TERMS_OUTDATED: &str = "estimate_terms_outdated";
+
+fn estimate_terms_outdated(line_index: usize) -> axum::response::Response {
+    coded_err(
+        StatusCode::CONFLICT,
+        ESTIMATE_TERMS_OUTDATED,
+        "The estimate is outdated: the terms of a position changed. Create a new version of the cost estimate and the single order first",
+        json!({ "line_index": line_index }),
+    )
+}
+
 fn can_read_invoices(role: Role) -> bool {
     role.can(Capability::InvoicesView)
 }
@@ -4019,8 +4037,55 @@ async fn enrich_invoice_line_items(
                     .and_then(|id| meta_by_line.get(&id))
                     .and_then(Value::as_object);
                 if let Some(meta) = meta {
-                    for (key, value) in meta {
-                        map.insert(key.clone(), value.clone());
+                    // The line keeps the profile it was billed with: the
+                    // service's profile of now names it only when it is the
+                    // same one, or the line has none and the rates agree —
+                    // never a profile with another rate (QA3 D S2-2).
+                    let own_profile = map
+                        .get("tax_profile_id")
+                        .filter(|value| !value.is_null())
+                        .cloned();
+                    let line_rate = map
+                        .get("vat_rate")
+                        .and_then(|value| match value {
+                            Value::String(text) => Decimal::from_str(text.trim()).ok(),
+                            Value::Number(number) => Decimal::from_str(&number.to_string()).ok(),
+                            _ => None,
+                        })
+                        .map(|rate| rate.round_commercial(2));
+                    let meta_rate = meta
+                        .get("tax_profile_vat_rate")
+                        .and_then(Value::as_str)
+                        .and_then(|text| Decimal::from_str(text).ok())
+                        .map(|rate| rate.round_commercial(2));
+                    let same_profile = match &own_profile {
+                        Some(own) => meta.get("tax_profile_id") == Some(own),
+                        None => meta_rate.is_none() || meta_rate == line_rate,
+                    };
+                    if same_profile {
+                        for (key, value) in meta {
+                            map.insert(key.clone(), value.clone());
+                        }
+                    } else {
+                        let vat_rate = map
+                            .get("vat_rate")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned);
+                        let fallback = if own_profile.is_some() {
+                            "tax_profile"
+                        } else {
+                            fallback_vat_source(map)
+                        };
+                        map.insert("vat_source".to_string(), json!(fallback));
+                        map.insert(
+                            "vat_source_explanation".to_string(),
+                            json!(vat_source_explanation(
+                                fallback,
+                                map.get("tax_profile_name").and_then(Value::as_str),
+                                map.get("tax_profile_key").and_then(Value::as_str),
+                                vat_rate.as_deref(),
+                            )),
+                        );
                     }
                     // A service without a classified source, billed from the
                     // quote: the line's VAT is the quote's.
@@ -4624,6 +4689,41 @@ async fn build_selected_invoice_snapshot(
             (billable_quantity - already_allocated).max(Decimal::ZERO)
         };
         if actual_final {
+            // The final settles what was delivered against everything billed
+            // before: a quantity an interim billed ahead and never delivered
+            // (the estimated outlays, QA3 C S1-1) is credited back on a line
+            // of its own, unless staff bill the line with a quantity.
+            let tracked_by_service = delivery
+                .lines
+                .get(line_index)
+                .is_some_and(|line| line.linked_quantity.is_some() || line.tracked_by_siblings);
+            if tracked_by_service
+                && already_allocated > billable_quantity
+                && !requested
+                    .get(&line_index)
+                    .is_some_and(|quantity| *quantity > Decimal::ZERO)
+            {
+                let billed = billed_amounts.get(&line_index).copied().unwrap_or_default();
+                let credit = final_delivery::not_delivered_credit_line(
+                    source_item,
+                    line_index,
+                    already_allocated,
+                    already_allocated - billable_quantity,
+                    money::LineAmounts {
+                        net: billed.net,
+                        vat: billed.gross - billed.net,
+                        gross: billed.gross,
+                    },
+                );
+                if let Some((line, amounts)) = credit {
+                    total_net = (total_net + amounts.net).round_cents();
+                    total_vat = (total_vat + amounts.vat).round_cents();
+                    total_gross = (total_gross + amounts.gross).round_cents();
+                    selected_items.push(line);
+                    billed_below_quote = true;
+                }
+                continue;
+            }
             // The delivered quantity is a proposal: staff bill what they type.
             let selected_quantity = match requested_items {
                 Some(_) => requested.get(&line_index).copied(),
@@ -4632,6 +4732,13 @@ async fn build_selected_invoice_snapshot(
             let Some(selected_quantity) = selected_quantity else {
                 continue;
             };
+            if delivery
+                .lines
+                .get(line_index)
+                .is_some_and(|line| line.terms_changed)
+            {
+                return Err(estimate_terms_outdated(line_index));
+            }
             consumed_requested_lines.insert(line_index);
             billed_below_quote |= already_allocated + selected_quantity != quoted_quantity;
             let unit_price = invoice_json_decimal(source_item, "unit_price")
@@ -4709,6 +4816,31 @@ async fn build_selected_invoice_snapshot(
             });
             continue;
         }
+        // An interim invoice bills pass-through costs only once they are
+        // incurred, and never the estimated outlays placeholder: the advance
+        // covers prepayments (QA3 C S1-1).
+        if invoice_type == "interim" {
+            let placeholder = final_delivery::is_estimated_outlays_line(source_item);
+            let undelivered_pass_through = money::json_line_pass_through(source_item)
+                && delivery.lines.get(line_index).is_some_and(|line| {
+                    line.linked_quantity.is_some() && line.linked_actual.is_none()
+                });
+            if placeholder || undelivered_pass_through {
+                if requested.contains_key(&line_index) {
+                    return Err(coded_err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        INTERIM_UNDELIVERED_PASS_THROUGH,
+                        if placeholder {
+                            "Estimated outlays are not billed on an interim invoice; the advance covers them"
+                        } else {
+                            "A pass-through cost is billed on an interim invoice only once it is incurred"
+                        },
+                        json!({ "line_index": line_index }),
+                    ));
+                }
+                continue;
+            }
+        }
         if remaining <= Decimal::ZERO {
             continue;
         }
@@ -4724,6 +4856,14 @@ async fn build_selected_invoice_snapshot(
             leaves_quantities_open = true;
             continue;
         };
+        if invoice_type != "advance"
+            && delivery
+                .lines
+                .get(line_index)
+                .is_some_and(|line| line.terms_changed)
+        {
+            return Err(estimate_terms_outdated(line_index));
+        }
         consumed_requested_lines.insert(line_index);
         if selected_quantity > remaining {
             return Err(err(
@@ -6640,7 +6780,10 @@ async fn load_previous_interims(
         r#"SELECT COALESCE(interim.invoice_number, '') AS invoice_number,
                   interim.total_gross - interim.credited_amount AS gross
            FROM invoices final_invoice
-           JOIN invoices interim ON interim.quote_id = final_invoice.quote_id
+           -- Interims of the order: a new estimate version supersedes the quote
+           -- they were issued from (QA3 A S2-1).
+           JOIN invoices interim ON interim.order_id = final_invoice.order_id
+                                AND interim.quote_id IS NOT NULL
            WHERE final_invoice.id = $1
              AND final_invoice.invoice_type = 'final'
              AND interim.invoice_type = 'interim'
@@ -9927,10 +10070,10 @@ async fn create_invoice_from_quote(
             "Only an advance invoice bills the required prepayment",
         );
     }
-    if invoice_type != "final" && !body.order_services.is_empty() {
+    if !matches!(invoice_type.as_str(), "final" | "interim") && !body.order_services.is_empty() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Only a final invoice bills services outside the quote",
+            "Only a final or an interim invoice bills services outside the quote",
         );
     }
     if prepayment_basis && body.line_items.is_some() {
@@ -9940,8 +10083,24 @@ async fn create_invoice_from_quote(
         );
     }
 
+    // An interim invoice of delivered services outside the estimate only
+    // (QA3 C S3-13): no estimate line is picked.
+    let only_extra_services = invoice_type == "interim"
+        && !body.order_services.is_empty()
+        && body
+            .line_items
+            .as_ref()
+            .is_some_and(|items| items.is_empty());
     let invoice_snapshot = if prepayment_basis {
         build_prepayment_advance_snapshot(&state, &ctx).await
+    } else if only_extra_services {
+        Ok(InvoiceCreationSnapshot {
+            total_net: Decimal::ZERO,
+            total_vat: Decimal::ZERO,
+            total_gross: Decimal::ZERO,
+            line_items: Value::Array(Vec::new()),
+            allocations: Vec::new(),
+        })
     } else {
         build_selected_invoice_snapshot(&state, &ctx, &invoice_type, body.line_items.as_deref())
             .await
@@ -13643,16 +13802,47 @@ async fn issue_credit_note_locked(
     )
     .await?;
     issued.room = room;
+    // A credit note on a final that released advance money: the money is
+    // applied to what the same final still asks first (owner 2026-11-17,
+    // QA3 B S1-2): the advance's unused share is VAT-corrected and moved onto
+    // the final as a payment, like at the release; only the rest stays
+    // refundable. The rows carry this transaction's time, so the reversal of
+    // this credit note finds them (B S1-3).
+    let is_final = !issued.room.released_advance_ids().is_empty()
+        && sqlx::query_scalar::<_, bool>(
+            "SELECT invoice_type = 'final' FROM invoices WHERE id = $1",
+        )
+        .bind(context.invoice_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .unwrap_or(false);
+    if is_final {
+        match advance_settlement::apply_advance_rests_tx(
+            transaction,
+            context.invoice_id,
+            issue.user_id,
+        )
+        .await
+        {
+            Ok(mut rests) => issued.follow_ups.append(&mut rests.credit_notes),
+            Err(response) => {
+                issued.discard_document().await;
+                return Err(response);
+            }
+        }
+    }
     for advance_id in issued.room.released_advance_ids() {
         // The released money is no longer needed by this invoice: the
-        // advance's unused rest is closed, so the cash is refundable.
+        // advance's unused rest is closed, so the cash is refundable. On a
+        // final the close names it: its Storno and the reversal of this
+        // credit note give the rest back.
         match advance_settlement::close_advance_rest_tx(
             transaction,
             advance_id,
             &context.invoice_number,
             issue.user_id,
             advance_settlement::AdvanceRest::Unused,
-            None,
+            is_final.then_some(context.invoice_id),
         )
         .await
         {
@@ -14278,6 +14468,44 @@ async fn reverse_invoice_credit_note(
             );
         }
     };
+    // A credit note on a final that moved released advance money onto it
+    // (QA3 B S1-2): its reversal restores the set-off as it was (B S1-3) —
+    // the transfers and the advance credit notes it issued are reversed, and
+    // the advances are deducted again.
+    let final_credit_time = match sqlx::query_scalar::<_, DateTime<Utc>>(
+        r#"SELECT credit.created_at
+           FROM invoice_credit_note_transactions credit
+           JOIN invoices invoice ON invoice.id = credit.invoice_id
+           WHERE credit.id = $1 AND credit.invoice_id = $2
+             AND invoice.invoice_type = 'final'
+             AND credit.transaction_type = 'credit_note'"#,
+    )
+    .bind(credit_note_id)
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load credit note of a final");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
+        }
+    };
+    if let Some(created_at) = final_credit_time
+        && let Err(response) = advance_settlement::reverse_release_transfers_tx(
+            &mut transaction,
+            invoice_id,
+            &reason,
+            auth.user_id,
+            Some(created_at),
+        )
+        .await
+    {
+        return response;
+    }
     let reversed = match reverse_credit_note_tx(
         &mut transaction,
         invoice_id,
@@ -14292,15 +14520,61 @@ async fn reverse_invoice_credit_note(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let (reversal_id, amount_gross, document) = (
+    let (reversal_id, amount_gross, mut document) = (
         reversed.reversal_id,
         reversed.amount_gross,
         reversed.document,
     );
+    let mut reversed_advance_credits = Vec::new();
+    if let Some(created_at) = final_credit_time {
+        match advance_settlement::reverse_release_credit_notes_tx(
+            &mut transaction,
+            invoice_id,
+            &reason,
+            auth.user_id,
+            Some(created_at),
+        )
+        .await
+        {
+            Ok(value) => reversed_advance_credits = value,
+            Err(response) => {
+                if let Some(blob) = document.blob.take() {
+                    blob.discard().await;
+                }
+                return response;
+            }
+        }
+        let reapplied = advance_application::apply_available_advances_tx(
+            &mut transaction,
+            invoice_id,
+            auth.user_id,
+        )
+        .await;
+        let recomputed = match reapplied {
+            Ok(_) => recompute_invoice_settlement_status(&mut transaction, invoice_id).await,
+            Err(error) => Err(error),
+        };
+        if let Err(e) = recomputed {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "re-apply advances after a credit-note reversal");
+            if let Some(blob) = document.blob.take() {
+                blob.discard().await;
+            }
+            for credit in &mut reversed_advance_credits {
+                credit.discard_document().await;
+            }
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
+        }
+    }
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit credit-note reversal");
         if let Some(blob) = document.blob {
             blob.discard().await;
+        }
+        for credit in &mut reversed_advance_credits {
+            credit.discard_document().await;
         }
         return err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -16929,6 +17203,7 @@ async fn update_invoice_status(
             invoice_id,
             &reason,
             auth.user_id,
+            None,
         )
         .await
         {
@@ -17869,6 +18144,7 @@ async fn update_invoice_status(
                             locked_invoice_number.clone().unwrap_or_default()
                         ),
                         auth.user_id,
+                        None,
                     )
                     .await
                     {

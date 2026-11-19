@@ -65,7 +65,8 @@ pub(super) async fn closing_interims(
                ARRAY(
                    SELECT interim.invoice_number
                    FROM invoices interim
-                   WHERE interim.quote_id = q.id
+                   WHERE interim.order_id = q.order_id
+                     AND interim.quote_id IS NOT NULL
                      AND interim.invoice_type = 'interim'
                      AND interim.status <> 'cancelled'
                      AND interim.released_at IS NOT NULL

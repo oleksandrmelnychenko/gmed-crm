@@ -88,6 +88,14 @@ export type InvoiceLineItem = {
   delivery_basis?: "actual" | "estimate";
   /** Quote API: what a final invoice proposes for the line itself. */
   final_quantity?: string;
+  /** Quote API: an interim cannot bill the line (estimated outlays, a pass-through cost not incurred yet; QA3 C S1-1). */
+  interim_blocked?: "estimated_outlays" | "pass_through_not_incurred" | null;
+  /** Quote API: the service changed its terms after the estimate; a new KV/EA version comes first (QA3 D S2-2). */
+  terms_outdated?: boolean;
+  /** Quote API: what a final credits back of a quantity billed before and never delivered (QA3 C S1-1). */
+  not_delivered_credit_quantity?: string;
+  not_delivered_credit_net?: string;
+  not_delivered_credit_gross?: string;
 };
 
 /** A delivered, unbilled order service no quote line links (final invoice). */

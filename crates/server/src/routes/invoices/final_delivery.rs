@@ -39,6 +39,9 @@ pub(crate) const FINAL_ORDER_SERVICE_SOURCE: &str = "final_order_service";
 pub(crate) struct OrderServiceFact {
     pub id: Uuid,
     pub status: String,
+    /// Delivery is recorded (delivered_at or approved_at): an `invoiced`
+    /// service billed ahead of delivery has none (QA3 C S1-1).
+    pub delivery_recorded: bool,
     pub quantity: Decimal,
     pub agency_service_id: Option<Uuid>,
     pub description: String,
@@ -61,9 +64,23 @@ pub(crate) struct OrderServiceFact {
 }
 
 impl OrderServiceFact {
-    /// Delivery is recorded: delivered, approved, or already invoiced.
+    /// Delivery is recorded: delivered, approved, or invoiced after its
+    /// delivery. A service an interim billed while it was planned (the
+    /// estimated outlays) is not delivered: the final credits it back (QA3
+    /// C S1-1).
     pub fn delivered(&self) -> bool {
-        matches!(self.status.as_str(), "delivered" | "approved" | "invoiced")
+        match self.status.as_str() {
+            "delivered" | "approved" => true,
+            // Only the estimated outlays placeholder is read by its recorded
+            // delivery: other services reach `invoiced` from paths that do
+            // not stamp it (an approved interpreter report).
+            "invoiced" => {
+                self.delivery_recorded
+                    || !(self.is_cost_passthrough
+                        && self.description.trim() == ESTIMATED_OUTLAYS_DESCRIPTION)
+            }
+            _ => false,
+        }
     }
 
     /// Billed by an active invoice other than `editing`. An `invoiced`
@@ -131,6 +148,10 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
             Some(OrderServiceFact {
                 id: json_uuid(item.get("id"))?,
                 status: text("status"),
+                delivery_recorded: item
+                    .get("delivery_recorded")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
                 quantity: json_decimal(item.get("quantity")).unwrap_or(Decimal::ZERO),
                 agency_service_id: json_uuid(item.get("agency_service_id")),
                 description: text("description"),
@@ -167,6 +188,23 @@ fn normalize(value: &str) -> String {
         .to_lowercase()
 }
 
+/// The estimate line states other terms than its service has now: unit
+/// price, discount, billed VAT rate, or (when the line names one) the tax
+/// profile. Invoices bill the signed estimate (QA3 D S2-2), so such a line
+/// waits for a new estimate version.
+pub(crate) fn quote_line_terms_differ(quote_line: &Value, fact: &OrderServiceFact) -> bool {
+    let cents = |value: Option<Decimal>| value.map(|value| value.round_cents());
+    let rate = |value: Option<Decimal>| value.map(|value| value.round_commercial(2));
+    let quoted_price = cents(json_decimal(quote_line.get("unit_price")));
+    let quoted_rate = rate(json_decimal(quote_line.get("vat_rate"))).unwrap_or(Decimal::ZERO);
+    let quoted_discount = money::json_discount_percent(quote_line);
+    let quoted_profile = json_uuid(quote_line.get("tax_profile_id"));
+    quoted_price.is_some_and(|price| price != fact.unit_price.round_cents())
+        || quoted_rate != fact.vat_rate.round_commercial(2)
+        || quoted_discount.round_commercial(2) != fact.discount_percent.round_commercial(2)
+        || quoted_profile.is_some_and(|profile| Some(profile) != fact.tax_profile_id)
+}
+
 /// What the order records as delivered for one estimate line.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct LineDelivery {
@@ -179,6 +217,10 @@ pub(crate) struct LineDelivery {
     /// Delivered services of the same catalogue service no estimate line
     /// links, billed or not: delivery of this line is tracked.
     pub tracked_by_siblings: bool,
+    /// The linked service no longer has the price, discount, VAT rate or
+    /// tax profile the estimate states (QA3 D S2-2): what is billed is the
+    /// signed estimate, so a new estimate version comes first.
+    pub terms_changed: bool,
 }
 
 impl LineDelivery {
@@ -271,7 +313,8 @@ pub(crate) fn delivery_plan(
 
     let mut lines = links
         .iter()
-        .map(|linked| {
+        .zip(quote_lines)
+        .map(|(linked, quote_line)| {
             let linked = *linked;
             LineDelivery {
                 linked_actual: linked
@@ -279,6 +322,7 @@ pub(crate) fn delivery_plan(
                     .map(|fact| fact.quantity),
                 linked_quantity: linked.map(|fact| fact.quantity),
                 tracked_by_siblings: false,
+                terms_changed: linked.is_some_and(|fact| quote_line_terms_differ(quote_line, fact)),
             }
         })
         .collect::<Vec<_>>();
@@ -370,6 +414,97 @@ pub(crate) fn extra_service_line(
     (line, amounts)
 }
 
+/// Invoice line source of the credit a final invoice gives for quantities
+/// earlier invoices billed and the order never delivered (QA3 C S1-1).
+pub(crate) const NOT_DELIVERED_CREDIT_SOURCE: &str = "final_not_delivered_credit";
+
+/// Wording of that credit line on the invoice (German document language).
+pub(crate) const NOT_DELIVERED_CREDIT_SUFFIX: &str =
+    "nicht erbracht – Gutschrift der Zwischenrechnung";
+
+/// The negative line crediting `credit_quantity` of `billed_quantity` an
+/// earlier invoice billed of estimate line `line_index` (amounts `billed`):
+/// the whole billed amount when nothing of it was delivered, else the
+/// proportional net with its own VAT. `None` when nothing is to credit.
+pub(crate) fn not_delivered_credit_line(
+    quote_line: &Value,
+    line_index: usize,
+    billed_quantity: Decimal,
+    credit_quantity: Decimal,
+    billed: money::LineAmounts,
+) -> Option<(Value, money::LineAmounts)> {
+    if credit_quantity <= Decimal::ZERO
+        || billed_quantity <= Decimal::ZERO
+        || billed.net <= Decimal::ZERO
+    {
+        return None;
+    }
+    let vat_rate = json_decimal(quote_line.get("vat_rate"))
+        .unwrap_or(Decimal::ZERO)
+        .round_commercial(2);
+    let amounts = if credit_quantity >= billed_quantity {
+        billed
+    } else {
+        let net = (billed.net * credit_quantity / billed_quantity).round_cents();
+        let vat = money::vat_amount(net, vat_rate);
+        money::LineAmounts {
+            net,
+            vat,
+            gross: (net + vat).round_cents(),
+        }
+    };
+    let amounts = money::LineAmounts {
+        net: -amounts.net,
+        vat: -amounts.vat,
+        gross: -amounts.gross,
+    };
+    let description = quote_line
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("Leistung");
+    let unit_price = json_decimal(quote_line.get("unit_price"))
+        .unwrap_or(Decimal::ZERO)
+        .round_cents();
+    let mut line = json!({
+        "description": format!("{description} – {NOT_DELIVERED_CREDIT_SUFFIX}"),
+        "quantity": money::money_string(-credit_quantity),
+        "unit": quote_line.get("unit").and_then(Value::as_str).unwrap_or("unit"),
+        "unit_price": money::money_string(unit_price),
+        "vat_rate": money::money_string(vat_rate),
+        "line_net": money::money_string(amounts.net),
+        "line_vat": money::money_string(amounts.vat),
+        "line_gross": money::money_string(amounts.gross),
+        "is_cost_passthrough": money::json_line_pass_through(quote_line),
+        "source": NOT_DELIVERED_CREDIT_SOURCE,
+        "credited_quote_line_index": line_index,
+        "quoted_quantity": "0",
+    });
+    if let Some(map) = line.as_object_mut() {
+        if let Some(service) = quote_line.get("source_order_leistung_id").cloned() {
+            map.insert("credited_order_leistung_id".to_string(), service);
+        }
+        for key in ["tax_profile_id", "vat_category", "discount_percent"] {
+            if let Some(value) = quote_line.get(key).filter(|value| !value.is_null()) {
+                map.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    Some((line, amounts))
+}
+
+/// The estimated outlays placeholder of an estimate («Voraussichtliche
+/// Auslagen», a pass-through line): a planned amount, never a cost itself.
+pub(crate) fn is_estimated_outlays_line(line: &Value) -> bool {
+    money::json_line_pass_through(line)
+        && line
+            .get("description")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.trim() == ESTIMATED_OUTLAYS_DESCRIPTION)
+}
+
+/// Description of the estimated outlays placeholder line.
+pub(crate) const ESTIMATED_OUTLAYS_DESCRIPTION: &str = "Voraussichtliche Auslagen";
+
 /// Error code: a picked service is not a delivered, unbilled service of the
 /// order outside the quote.
 pub(super) const ORDER_SERVICE_NOT_BILLABLE: &str = "final_order_service_not_billable";
@@ -390,10 +525,12 @@ pub(super) fn append_order_service_lines(
     if selections.is_empty() {
         return Ok(Vec::new());
     }
-    if invoice_type != "final" || ctx.order_contract_terminated {
+    // A delivered service outside the estimate goes on an interim invoice too
+    // (QA3 C S3-13); the final then no longer offers it.
+    if !matches!(invoice_type, "final" | "interim") || ctx.order_contract_terminated {
         return Err(super::err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Only a final invoice bills services outside the quote",
+            "Only a final or an interim invoice bills services outside the quote",
         ));
     }
     let quote_lines = ctx.line_items.as_array().cloned().unwrap_or_default();
@@ -732,6 +869,7 @@ mod tests {
         OrderServiceFact {
             id: Uuid::from_u128(id),
             status: status.to_string(),
+            delivery_recorded: true,
             quantity: Decimal::from_str(quantity).unwrap(),
             agency_service_id: catalog.map(Uuid::from_u128),
             description: format!("Service {id}"),

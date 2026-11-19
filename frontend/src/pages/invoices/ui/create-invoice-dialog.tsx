@@ -25,6 +25,7 @@ import {
   invoiceLineQuantityAvailable,
   invoiceSelectionLineAmounts,
   isInvoiceSelectionValid,
+  lineBlockedText,
   effectiveAdvanceBasis,
   interimLimitBesideOpenAdvance,
   isOverageOnlyInvoice,
@@ -39,7 +40,7 @@ import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-ind
 import { ownServicesGrossOfSelection } from "@/components/order-budget/order-budget";
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
-import { finalInvoiceTotals, finalOwnExtrasGross } from "../model/final-invoice";
+import { finalInvoiceTotals, finalOwnExtrasGross, finalServiceAmounts, finalServiceQuantity } from "../model/final-invoice";
 import { FinalInvoiceLines, FinalInvoiceSettlement, InvoiceLineAmount, InvoiceLineRow, invoiceLineDiscountAmount, invoiceLineQuantityInputClass } from "./final-invoice-lines";
 import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
@@ -147,9 +148,23 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const final = form.invoiceType === "final";
   // Delivered services of the order outside the quote: a final invoice proposes them (owner 2026-11-17).
   const extras = selectedQuote?.delivered_services_outside_quote ?? [];
+  // An interim may bill delivered services outside the estimate too (QA3 C S3-13).
+  const interimExtras = form.invoiceType === "interim" ? extras : [];
+  const interimExtrasTotals = interimExtras.reduce((sum, extra) => {
+    const amounts = finalServiceAmounts(extra, finalServiceQuantity(form, extra.order_leistung_id) || 0);
+    return { net: roundCents(sum.net + amounts.net), vat: roundCents(sum.vat + amounts.vat), gross: roundCents(sum.gross + amounts.gross) };
+  }, { net: 0, vat: 0, gross: 0 });
+  const lineSelectionTotals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
   const selectionTotals = final
     ? finalInvoiceTotals(lines, form, extras)
-    : calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
+    : {
+        ...lineSelectionTotals,
+        net: roundCents(lineSelectionTotals.net + interimExtrasTotals.net),
+        vat: roundCents(lineSelectionTotals.vat + interimExtrasTotals.vat),
+        gross: roundCents(lineSelectionTotals.gross + interimExtrasTotals.gross),
+      };
+  // A line whose terms changed after the estimate: a new KV/EA version comes first (QA3 D S2-2).
+  const termsOutdated = form.invoiceType !== "advance" && lines.some((line) => line.terms_outdated);
   const packageOverage = prepaymentMode
     ? { net: 0, vat: 0, gross: 0 }
     : invoiceSelectionPackageOverage(selectedQuote, lines, form);
@@ -168,7 +183,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const overOpenAdvance = interimLimit != null && selectionTotals.gross > interimLimit.maxGross;
   const selectionValid = prepaymentMode
     ? quoteAvailable && Boolean(prepaymentSplit && prepaymentSplit.gross > 0)
-    : quoteAvailable && (overageOnly || closingFinal || isInvoiceSelectionValid(lines, form, extras)) && (totals.gross > 0 || final) && !overOpenAdvance;
+    : quoteAvailable && (overageOnly || closingFinal || isInvoiceSelectionValid(lines, form, extras)) && (totals.gross > 0 || final) && !overOpenAdvance && !(final && termsOutdated);
   // Money received before the invoice (Billing/CEO) and the service period
   // (owner 2026-11-17); the release records the payment with its day.
   const canRecordPayment = hasCapability(user, "invoices.finance");
@@ -194,7 +209,12 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
       ? receivedPaymentProblemText(receivedProblem, de)
       : null;
   const valid = selectionValid && !periodProblem && !receivedProblem && !receivedDateRefused;
-  const footerMessage = error || optionsError || previewError || (selectedQuote && termsProblem ? termsProblem : null) || (selectedQuote && !selectionValid && !(prepaymentMode && !prepaymentSplit)
+  const termsOutdatedMessage = termsOutdated
+    ? (de
+        ? "Kostenvoranschlag veraltet: Konditionen einer Position wurden geändert — erstellen Sie eine neue Version von KV/EA."
+        : "Смета устарела: условия позиции изменены — создайте новую версию КВ/ЕА.")
+    : null;
+  const footerMessage = error || optionsError || previewError || (selectedQuote && termsProblem ? termsProblem : null) || (selectedQuote ? termsOutdatedMessage : null) || (selectedQuote && !selectionValid && !(prepaymentMode && !prepaymentSplit)
     ? overOpenAdvance
       ? (de
           ? `Die offene Vorauszahlungsrechnung fordert bereits ${money(interimLimit.openAdvance)} für dieses Angebot. Diese Zwischenrechnung darf höchstens ${money(interimLimit.maxGross)} betragen.`
@@ -225,7 +245,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const descriptionLabel = de ? "Leistungsbeschreibung" : "Описание услуги";
   const availableCount = final
     ? lines.length + extras.length
-    : lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
+    : lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length + interimExtras.length;
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
   // An open quote this type cannot bill is listed disabled with the reason
   // (QA2 D S2-4: a second positions advance silently vanished).
@@ -548,8 +568,34 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                               busy,
                               onChange: (value) => onFormChange((current) => ({ ...current, lineComments: { ...current.lineComments, [String(index)]: value } })),
                             } : null}>
-                            {available <= 0 ? <p className="text-xs text-muted-foreground">{de ? "Bereits vollständig abgerechnet" : "Уже выставлено полностью"}</p> : null}
+                            {available <= 0 ? <p className="text-xs text-muted-foreground">{lineBlockedText(line, form.invoiceType, de) ?? (de ? "Bereits vollständig abgerechnet" : "Уже выставлено полностью")}</p> : null}
                             {invalid ? <p role="alert" className="text-xs text-destructive">{de ? `Menge muss größer als 0 und höchstens ${availableText} sein.` : `Количество должно быть больше 0 и не больше ${availableText}.`}</p> : null}
+                          </InvoiceLineRow>
+                        );
+                      })}
+                      {interimExtras.map((extra) => {
+                        const raw = form.orderServiceQuantities?.[extra.order_leistung_id] ?? "";
+                        const quantity = finalServiceQuantity(form, extra.order_leistung_id);
+                        const invalid = !Number.isFinite(quantity) || quantity < 0 || quantity > Number(extra.quantity);
+                        const amounts = finalServiceAmounts(extra, Number.isFinite(quantity) ? quantity : 0);
+                        const name = agencyServiceNameLabel(undefined, extra.name || extra.description, t);
+                        return (
+                          <InvoiceLineRow key={`extra-${extra.order_leistung_id}`} testId="invoice-interim-extra" name={name} muted={!(quantity > 0)}
+                            pills={{ unitPrice: extra.unit_price, vatRate: extra.vat_rate, discountPercent: extra.discount_percent, origin: { kind: "added" }, money }}
+                            quantity={(
+                              <>
+                                <Input type="number" min="0" step="0.01" max={extra.quantity}
+                                  disabled={busy}
+                                  aria-label={`${quantityLabel}: ${name}`} aria-invalid={invalid || undefined}
+                                  value={raw}
+                                  className={invoiceLineQuantityInputClass}
+                                  onChange={(event) => onFormChange((current) => ({ ...current, orderServiceQuantities: { ...(current.orderServiceQuantities ?? {}), [extra.order_leistung_id]: event.target.value } }))} />
+                                <p>{availableLabel}: {Number(extra.quantity).toLocaleString("de-DE", { maximumFractionDigits: 4 })}</p>
+                              </>
+                            )}
+                            amount={<InvoiceLineAmount gross={amounts.gross} net={amounts.net}
+                              discount={invoiceLineDiscountAmount(Number.isFinite(quantity) ? quantity : 0, extra.unit_price, amounts.net)} money={money} />}>
+                            {invalid ? <p role="alert" className="text-xs text-destructive">{de ? `Menge höchstens ${extra.quantity}.` : `Количество не больше ${extra.quantity}.`}</p> : null}
                           </InvoiceLineRow>
                         );
                       })}
@@ -594,7 +640,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   </dl>
                   {selectedQuote && form.invoiceType !== "advance" ? <OrderBudgetIndicator orderId={orderId} lang={lang} basis="invoiced" variant="pill" deltaGross={ownServicesGrossOfSelection(lines, form.selectedLineIndexes, totals.lineGrossByIndex, packageOverage.gross) + (final ? finalOwnExtrasGross(form, extras) : 0)} testId="invoice-create-budget" /> : null}
                   {selectedQuote && final ? <FinalInvoiceSettlement open={open} quote={selectedQuote} extras={extras} form={form} money={money} onDueChange={setFinalDue} /> : null}
-                  {selectedQuote && !prepaymentMode && !final && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
+                  {selectedQuote && !prepaymentMode && !final && availableCount > 0 && !form.selectedLineIndexes.length && !(interimExtrasTotals.gross > 0) ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>
             </div>

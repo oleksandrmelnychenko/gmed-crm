@@ -159,7 +159,17 @@ export function finalInvoiceTotals(
     totals.gross = roundCents(totals.gross + amounts.gross);
   };
   lines.forEach((line, index) => {
-    const amounts = finalLineAmounts(line, finalLineQuantity(form, index));
+    const quantity = finalLineQuantity(form, index);
+    const amounts = finalLineAmounts(line, quantity);
+    // A quantity billed before and never delivered is credited back when the
+    // line bills nothing more (server `not_delivered_credit_line`, QA3 C S1-1).
+    const creditGross = numberOf(line.not_delivered_credit_gross);
+    if (!(quantity > 0) && creditGross > 0) {
+      const creditNet = numberOf(line.not_delivered_credit_net);
+      amounts.net = roundCents(amounts.net - creditNet);
+      amounts.vat = roundCents(amounts.vat - (creditGross - creditNet));
+      amounts.gross = roundCents(amounts.gross - creditGross);
+    }
     totals.lineGrossByIndex[index] = amounts.gross;
     add(amounts);
   });

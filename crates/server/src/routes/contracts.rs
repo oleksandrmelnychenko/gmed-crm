@@ -799,6 +799,24 @@ fn invoiceable_quote_lines(row: &sqlx::postgres::PgRow) -> (Value, Value) {
             continue;
         };
         complete_legacy_quote_line_amounts(map);
+        // What an interim invoice refuses (QA3 C S1-1): the estimated
+        // outlays, and a pass-through cost not incurred yet.
+        let line_value = Value::Object(map.clone());
+        let interim_blocked =
+            if crate::routes::invoices::final_delivery::is_estimated_outlays_line(&line_value) {
+                Some("estimated_outlays")
+            } else if money::json_line_pass_through(&line_value)
+                && delivery.linked_quantity.is_some()
+                && delivery.linked_actual.is_none()
+            {
+                Some("pass_through_not_incurred")
+            } else {
+                None
+            };
+        map.insert("interim_blocked".to_string(), json!(interim_blocked));
+        // The service's terms changed after the estimate: no invoice bills
+        // the line before a new estimate version (QA3 D S2-2).
+        map.insert("terms_outdated".to_string(), json!(delivery.terms_changed));
         // Beside an active final invoice only a line credited on it in full
         // is open again.
         if closed_by_final {
@@ -819,6 +837,45 @@ fn invoiceable_quote_lines(row: &sqlx::postgres::PgRow) -> (Value, Value) {
                 (delivery.final_total(quoted) - invoiced).max(Decimal::ZERO),
             )),
         );
+        // What the final credits back when the line bills nothing more: a
+        // quantity an interim billed and the order never delivered (QA3 C
+        // S1-1, `final_delivery::not_delivered_credit_line`).
+        let tracked = delivery.linked_quantity.is_some() || delivery.tracked_by_siblings;
+        let credit_quantity = if tracked {
+            (invoiced - delivery.final_total(quoted)).max(Decimal::ZERO)
+        } else {
+            Decimal::ZERO
+        };
+        if credit_quantity > Decimal::ZERO {
+            let billed = money::LineAmounts {
+                net: quote_decimal_value(map.get("invoiced_net")),
+                vat: quote_decimal_value(map.get("invoiced_gross"))
+                    - quote_decimal_value(map.get("invoiced_net")),
+                gross: quote_decimal_value(map.get("invoiced_gross")),
+            };
+            if let Some((_, amounts)) =
+                crate::routes::invoices::final_delivery::not_delivered_credit_line(
+                    &Value::Object(map.clone()),
+                    index,
+                    invoiced,
+                    credit_quantity,
+                    billed,
+                )
+            {
+                map.insert(
+                    "not_delivered_credit_quantity".to_string(),
+                    json!(decimal_to_string(credit_quantity)),
+                );
+                map.insert(
+                    "not_delivered_credit_net".to_string(),
+                    json!(decimal_to_string(-amounts.net)),
+                );
+                map.insert(
+                    "not_delivered_credit_gross".to_string(),
+                    json!(decimal_to_string(-amounts.gross)),
+                );
+            }
+        }
     }
     (lines, Value::Array(extras))
 }
@@ -1331,7 +1388,9 @@ async fn quote_of_signed_estimate_tx(
     ) {
         return Ok(Err("quote_expired"));
     }
-    let persisted = load_quote_line_items_from_order_tx(tx, order_id).await?;
+    let persisted =
+        matching_order_quote_lines_tx(tx, order_id, &quote.try_get::<Value, _>("line_items")?)
+            .await?;
     let current_total = compute_quote_totals(&persisted).total_gross;
     if persisted.is_empty()
         || !quote_lines_match_persisted(&quote.try_get::<Value, _>("line_items")?, &persisted)
@@ -4437,6 +4496,39 @@ async fn load_quote_line_items_from_order_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     order_id: Uuid,
 ) -> Result<Vec<QuoteLineItem>, sqlx::Error> {
+    load_order_quote_lines_tx(tx, order_id, false).await
+}
+
+/// The order services a stored quote is checked against: the services not
+/// invoiced yet, or — for the quote of an order document of an order billed
+/// in part — the whole order (`load_order_quote_lines_tx`).
+async fn matching_order_quote_lines_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+    stored: &Value,
+) -> Result<Vec<QuoteLineItem>, sqlx::Error> {
+    let open = load_order_quote_lines_tx(tx, order_id, false).await?;
+    if quote_lines_match_persisted(stored, &open) {
+        return Ok(open);
+    }
+    let whole = load_order_quote_lines_tx(tx, order_id, true).await?;
+    if quote_lines_match_persisted(stored, &whole) {
+        return Ok(whole);
+    }
+    Ok(open)
+}
+
+/// The order services a quote lists. A follow-up quote covers the services
+/// not invoiced yet; the quote an order document prints (`include_invoiced`)
+/// covers the whole order, invoiced services included: a new KV/EA version of
+/// an order billed in part prints the order of now and its quote supersedes
+/// the old one, while what invoices billed is counted per order service
+/// across the quotes (QA3 A S2-1, B S1-1).
+async fn load_order_quote_lines_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+    include_invoiced: bool,
+) -> Result<Vec<QuoteLineItem>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT line.id, line.description, line.agency_service_description_snapshot,
                   line.agency_service_description_items_snapshot,
@@ -4448,12 +4540,14 @@ async fn load_quote_line_items_from_order_tx(
            FROM order_leistungen line
            LEFT JOIN tax_profiles profile ON profile.id = line.tax_profile_id
            WHERE line.order_id = $1
-             AND line.status NOT IN ('invoiced', 'cancelled')
+             AND line.status <> 'cancelled'
+             AND ($2 OR line.status <> 'invoiced')
            ORDER BY (line.is_cost_passthrough AND line.description = 'Voraussichtliche Auslagen'),
                     line.created_at, line.id
            FOR SHARE OF line"#,
     )
     .bind(order_id)
+    .bind(include_invoiced)
     .fetch_all(&mut **tx)
     .await?;
 
@@ -5229,36 +5323,29 @@ async fn create_order_quote(
         tracing::error!(%error, %order_id, "lock open order quotes");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
     }
-    let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id).await {
-        Ok(items) if !items.is_empty() => items,
-        Ok(_) if only_when_lines_changed => return StatusCode::NO_CONTENT.into_response(),
-        Ok(_) => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "No order services available for quote",
-            );
-        }
-        Err(error) => {
-            tracing::error!(%error, %order_id, "load canonical order services for quote");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
-        }
-    };
+    let persisted_line_items =
+        match load_order_quote_lines_tx(&mut tx, order_id, only_when_lines_changed).await {
+            Ok(items) if !items.is_empty() => items,
+            Ok(_) if only_when_lines_changed => return StatusCode::NO_CONTENT.into_response(),
+            Ok(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "No order services available for quote",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %order_id, "load canonical order services for quote");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+            }
+        };
     if only_when_lines_changed {
         // Read after the open quotes were locked: a concurrent document
         // waits here and then finds the quote the first one made.
-        // An order already billed in part keeps its quote: a new one would
-        // cover only the services not invoiced yet and close the quote its
-        // interim invoices were issued from. Advances bill no services and
-        // stay with the order, as when staff make a new quote by hand.
+        // An order billed in part gets a new quote as well (QA3 A S2-1): it
+        // lists the whole order, invoiced services included, and what the
+        // invoices of the old quote billed counts per order service.
         let latest = sqlx::query(
-            r#"SELECT q.line_items, q.valid_until, q.notes, q.internal_note,
-                      (EXISTS (SELECT 1 FROM invoices invoice
-                               WHERE invoice.quote_id = q.id
-                                 AND invoice.invoice_type <> 'advance'
-                                 AND invoice.status <> 'cancelled')
-                       OR EXISTS (SELECT 1 FROM order_leistungen service
-                                  WHERE service.order_id = q.order_id
-                                    AND service.status = 'invoiced')) AS billed
+            r#"SELECT q.line_items, q.valid_until, q.notes, q.internal_note
                FROM quotes q
                WHERE q.order_id = $1 AND q.status <> 'superseded'
                ORDER BY q.created_at DESC, q.id DESC
@@ -5269,12 +5356,9 @@ async fn create_order_quote(
         .await;
         match latest {
             Ok(Some(latest)) => {
-                if latest.try_get::<bool, _>("billed").unwrap_or(true)
-                    || latest
-                        .try_get::<Value, _>("line_items")
-                        .is_ok_and(|stored| {
-                            quote_lines_match_persisted(&stored, &persisted_line_items)
-                        })
+                if latest
+                    .try_get::<Value, _>("line_items")
+                    .is_ok_and(|stored| quote_lines_match_persisted(&stored, &persisted_line_items))
                 {
                     return StatusCode::NO_CONTENT.into_response();
                 }
@@ -5971,8 +6055,15 @@ async fn update_quote_status(
         .try_get::<Decimal, _>("total_gross")
         .unwrap_or(Decimal::ZERO);
     if body.status == "accepted" {
-        let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id)
-            .await
+        let stored_for_match = quote_context
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| json!([]));
+        let persisted_line_items = match matching_order_quote_lines_tx(
+            &mut tx,
+            order_id,
+            &stored_for_match,
+        )
+        .await
         {
             Ok(items) if !items.is_empty() => items,
             Ok(_) => {
