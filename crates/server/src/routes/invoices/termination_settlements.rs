@@ -2049,6 +2049,10 @@ async fn create_termination_final_invoice(
     .await
     {
         Ok(value) => value,
+        Err(error) if super::invoice_line_profile_conflict(&error).is_some() => {
+            return super::invoice_line_profile_conflict(&error)
+                .unwrap_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
+        }
         Err(sqlx::Error::Database(db_error))
             if matches!(
                 db_error.code().as_deref(),

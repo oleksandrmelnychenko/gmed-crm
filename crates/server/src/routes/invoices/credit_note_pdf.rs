@@ -1171,11 +1171,11 @@ pub(crate) fn build_credit_note_pdf(
         let quantity = line
             .quantity
             .map(|value| format_number(language, value))
-            .unwrap_or_else(|| "—".to_string());
+            .unwrap_or_default();
         let unit_price = line
             .unit_price
             .map(|value| format_money(value, &context.currency))
-            .unwrap_or_else(|| "—".to_string());
+            .unwrap_or_default();
         let rate = if context.lines.is_some() {
             format!("{} %", format_number(language, line.vat_rate))
         } else {
@@ -1208,7 +1208,9 @@ pub(crate) fn build_credit_note_pdf(
                     "Скидка"
                 },
                 format_number(language, line.discount_percent),
-                format_money(-sign * discount, &context.currency),
+                // A deduction from the list price, signed like on the invoice
+                // (QA3 B S3).
+                format_money(-discount, &context.currency),
                 if language == "de" {
                     "netto"
                 } else if language == "en" {

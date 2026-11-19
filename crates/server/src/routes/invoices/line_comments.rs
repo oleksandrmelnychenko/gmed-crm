@@ -203,6 +203,9 @@ pub(crate) async fn update_invoice_line_comments(
                 .execute(&mut *transaction)
                 .await
         {
+            if let Some(response) = super::invoice_line_profile_conflict(&error) {
+                return response;
+            }
             tracing::error!(%error, %invoice_id, "update invoice line comments");
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }

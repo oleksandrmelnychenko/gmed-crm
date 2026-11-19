@@ -274,7 +274,13 @@ pub(super) async fn preview_final_invoice(
 pub(super) async fn planned_draft_deductions(
     conn: &mut sqlx::PgConnection,
     invoice_id: Uuid,
-) -> Result<Vec<super::document::DeductedAdvance>, sqlx::Error> {
+) -> Result<
+    (
+        Vec<super::document::DeductedAdvance>,
+        Vec<super::document::SetOffAdvanceRest>,
+    ),
+    sqlx::Error,
+> {
     let Some(draft) = sqlx::query(
         r#"SELECT order_id, patient_id, quote_id, line_items, total_gross
            FROM invoices
@@ -285,7 +291,7 @@ pub(super) async fn planned_draft_deductions(
     .fetch_optional(&mut *conn)
     .await?
     else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     let line_items = draft.try_get::<Value, _>("line_items")?;
     let total_gross = draft.try_get::<Decimal, _>("total_gross")?;
@@ -305,10 +311,22 @@ pub(super) async fn planned_draft_deductions(
              AND advance.patient_id = $2
              AND advance.invoice_type = 'advance'
              AND advance.status NOT IN ('draft', 'cancelled')
+             -- The release's filter (`preview_final_invoice`).
+             AND (
+                 advance.quote_id IS NULL
+                 OR advance.quote_id = $3
+                 OR EXISTS (SELECT 1 FROM orders settled_order
+                            WHERE settled_order.id = advance.order_id
+                              AND settled_order.status = 'cancelled')
+                 OR EXISTS (SELECT 1 FROM quotes advance_quote
+                            WHERE advance_quote.id = advance.quote_id
+                              AND advance_quote.status IN ('superseded', 'rejected', 'expired'))
+             )
            ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#,
     )
     .bind(draft.try_get::<Uuid, _>("order_id")?)
     .bind(draft.try_get::<Uuid, _>("patient_id")?)
+    .bind(draft.try_get::<Option<Uuid>, _>("quote_id")?)
     .fetch_all(&mut *conn)
     .await?;
     let mut set_off = Vec::with_capacity(advances.len());
@@ -339,7 +357,16 @@ pub(super) async fn planned_draft_deductions(
         &set_off,
     );
     let mut deducted = Vec::new();
+    let mut rests = Vec::new();
     for (advance, plan) in advances.iter().zip(&plans) {
+        if plan.rest_applied > Decimal::ZERO {
+            rests.push(super::document::SetOffAdvanceRest {
+                invoice_number: advance
+                    .try_get::<Option<String>, _>("invoice_number")?
+                    .unwrap_or_default(),
+                amount: plan.rest_applied,
+            });
+        }
         let rows = plan
             .rows
             .iter()
@@ -359,5 +386,5 @@ pub(super) async fn planned_draft_deductions(
             rows,
         });
     }
-    Ok(deducted)
+    Ok((deducted, rests))
 }

@@ -1080,6 +1080,9 @@ pub(super) async fn update_invoice_draft(
         .execute(&mut *transaction)
         .await
         {
+            if let Some(response) = super::invoice_line_profile_conflict(&error) {
+                return response;
+            }
             tracing::error!(%error, %invoice_id, "store the rebuilt draft lines");
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }

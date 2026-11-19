@@ -557,11 +557,26 @@ const ORDER_SERVICE_APPOINTMENT_DAY_SQL: &str = r#"COALESCE(
 
 /// An order service (alias `service`) that was neither delivered nor approved
 /// yet: still planned, or invoiced ahead of its delivery.
+/// A planned block whose units were delivered on lines of their own (a
+/// completed appointment, a second interpreter report) is rendered by them
+/// (QA3 B S3: an interim of delivered hours read «услуги ещё не оказаны»).
 const SERVICE_NOT_RENDERED_SQL: &str = r#"(
-    service.status = 'planned'
-    OR (service.status = 'invoiced'
-        AND service.delivered_at IS NULL
-        AND service.approved_at IS NULL)
+    (( service.status = 'planned'
+       OR (service.status = 'invoiced'
+           AND service.delivered_at IS NULL
+           AND service.approved_at IS NULL
+           AND service.source_interpreter_report_id IS NULL))
+     AND NOT EXISTS (
+         SELECT 1 FROM order_leistungen sibling
+         WHERE sibling.order_id = service.order_id
+           AND sibling.id <> service.id
+           AND service.agency_service_id IS NOT NULL
+           AND sibling.agency_service_id = service.agency_service_id
+           AND sibling.status IN ('delivered', 'approved', 'invoiced')
+           AND (sibling.delivered_at IS NOT NULL OR sibling.approved_at IS NOT NULL
+                OR sibling.source_interpreter_report_id IS NOT NULL
+                OR sibling.source_medical_appointment_id IS NOT NULL)
+     ))
 )"#;
 
 /// How many of the order services an invoice bills were not rendered yet
@@ -639,6 +654,20 @@ async fn load_rendered_service_period(
                WHERE service.id = ANY($1)
                  AND service.status <> 'cancelled'
                  AND NOT {SERVICE_NOT_RENDERED_SQL}
+               UNION ALL
+               -- A planned block rendered by its delivered units: their days.
+               SELECT {ORDER_SERVICE_DAY_SQL}
+               FROM order_leistungen block
+               JOIN order_leistungen service
+                 ON service.order_id = block.order_id
+                AND service.id <> block.id
+                AND block.agency_service_id IS NOT NULL
+                AND service.agency_service_id = block.agency_service_id
+                AND service.status IN ('delivered', 'approved', 'invoiced')
+               WHERE block.id = ANY($1)
+                 AND block.status IN ('planned', 'invoiced')
+                 AND block.delivered_at IS NULL
+                 AND block.approved_at IS NULL
            ) days"#
     );
     let row = sqlx::query(sqlx::AssertSqlSafe::<&str>(&sql))
@@ -675,7 +704,15 @@ pub(super) async fn load_invoice_service_timing(
     };
     let period = match not_rendered {
         ServicesNotRendered::None => {
-            load_invoice_service_period(conn, order_id, line_items).await?
+            match load_invoice_service_period(conn, order_id, line_items).await? {
+                Some(period) => Some(period),
+                // Rendered by delivered units of a planned block: their days,
+                // never the invoice date (QA3 B S3).
+                None if invoice_type == "interim" => {
+                    load_rendered_service_period(conn, line_items).await?
+                }
+                None => None,
+            }
         }
         ServicesNotRendered::Some => load_rendered_service_period(conn, line_items).await?,
         ServicesNotRendered::All => None,

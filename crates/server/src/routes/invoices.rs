@@ -1087,6 +1087,27 @@ async fn quantities_held_by_draft(
     }
 }
 
+/// Error code: an invoice line contradicts its tax profile (rate or category;
+/// guard trigger `validate_invoice_line_tax_profiles`, QA3 D S2-2).
+pub(crate) const INVOICE_LINE_PROFILE_MISMATCH: &str = "invoice_line_tax_profile_mismatch";
+
+/// The guard's refusal as a 422 instead of a server error.
+pub(crate) fn invoice_line_profile_conflict(
+    error: &sqlx::Error,
+) -> Option<axum::response::Response> {
+    let sqlx::Error::Database(db_error) = error else {
+        return None;
+    };
+    (db_error.constraint() == Some("invoice_line_tax_profile_consistent")).then(|| {
+        coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            INVOICE_LINE_PROFILE_MISMATCH,
+            "An invoice line's VAT rate or category contradicts its tax profile; create a new version of the cost estimate",
+            json!({}),
+        )
+    })
+}
+
 fn estimate_terms_outdated(line_index: usize) -> axum::response::Response {
     coded_err(
         StatusCode::CONFLICT,
@@ -6989,11 +7010,13 @@ async fn load_invoice_pdf_context_on(
         _ => None,
     };
     let mut deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
-    // A draft final previews the deductions its release will make (QA3 D S3-3).
-    if deducted_advances.is_empty() {
-        deducted_advances = final_preview::planned_draft_deductions(conn, invoice_id).await?;
+    let mut advance_rests = document::load_set_off_advance_rests(conn, invoice_id).await?;
+    // A draft final previews the deductions and the advance rests its
+    // release will set off (QA3 D S3-3).
+    if deducted_advances.is_empty() && advance_rests.is_empty() {
+        (deducted_advances, advance_rests) =
+            final_preview::planned_draft_deductions(conn, invoice_id).await?;
     }
-    let advance_rests = document::load_set_off_advance_rests(conn, invoice_id).await?;
     let previous_interims = load_previous_interims(&mut *conn, invoice_id).await?;
     // An interim names the paid advances of its order the final sets off
     // («Покрывается авансом», QA3 A S3-8).
@@ -9859,6 +9882,9 @@ async fn create_patient_billing_invoice(
     {
         Ok(value) => value,
         Err(error) => {
+            if let Some(response) = invoice_line_profile_conflict(&error) {
+                return response;
+            }
             tracing::error!(%error, %patient_id, "insert patient billing invoice");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -10521,6 +10547,14 @@ async fn create_invoice_from_quote(
             StatusCode::CONFLICT,
             "An active invoice already exists for this quote scope",
         ),
+        Err(error) if invoice_line_profile_conflict(&error).is_some() => {
+            invoice_line_profile_conflict(&error).unwrap_or_else(|| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                )
+            })
+        }
         // The intake gate in the database: a draft (or cancelled draft) order
         // cannot be invoiced until its preparation is confirmed.
         Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23514") => err(
@@ -17941,6 +17975,9 @@ async fn update_invoice_status(
         // is issued with the German ones.
         if let Err(error) = release::refresh_draft_catalog_texts(&mut transaction, invoice_id).await
         {
+            if let Some(response) = invoice_line_profile_conflict(&error) {
+                return response;
+            }
             tracing::error!(%error, %invoice_id, "refresh draft catalogue texts");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -782,14 +782,45 @@ async fn get_order_budget(
                  AND NOT COALESCE((line.value ->> 'is_cost_passthrough')::BOOLEAN, false)
                  AND COALESCE(line.value ->> 'source', '') <> 'external_invoice'
                GROUP BY invoice.id, invoice.total_gross, invoice.credited_amount
+           ), advance_own AS (
+               -- Paid advance money on own services not set off yet: billed
+               -- to the client already (QA3 B S3). An advance covers own
+               -- services first (owner 2026-11-14); what a settlement
+               -- invoice deducted is counted there.
+               SELECT advance.id,
+                      COALESCE(SUM(COALESCE(NULLIF(line.value ->> 'line_net', '')::NUMERIC, 0)), 0) AS net,
+                      COALESCE(SUM(COALESCE(NULLIF(line.value ->> 'line_gross', '')::NUMERIC, 0)), 0) AS gross,
+                      LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
+                          - COALESCE((SELECT SUM(allocation.amount_gross)
+                                      FROM invoice_prepayment_allocations allocation
+                                      WHERE allocation.advance_invoice_id = advance.id), 0)
+                          AS unapplied_paid
+               FROM invoices advance
+               CROSS JOIN LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(advance.line_items) = 'array'
+                        THEN advance.line_items ELSE '[]'::jsonb END
+               ) AS line(value)
+               WHERE advance.order_id = $1
+                 AND advance.invoice_type = 'advance'
+                 AND advance.status IN ('sent', 'partially_paid', 'paid', 'overdue')
+                 AND NOT COALESCE((line.value ->> 'is_cost_passthrough')::BOOLEAN, false)
+               GROUP BY advance.id, advance.paid_amount, advance.total_gross, advance.credited_amount
+           ), advance_billed AS (
+               SELECT LEAST(GREATEST(unapplied_paid, 0), gross) AS gross,
+                      CASE WHEN gross > 0
+                           THEN net * LEAST(GREATEST(unapplied_paid, 0), gross) / gross
+                           ELSE 0 END AS net
+               FROM advance_own
            )
            SELECT
                COALESCE(SUM(CASE WHEN total_gross > 0
                                  THEN net * GREATEST(total_gross - credited_amount, 0) / total_gross
-                                 ELSE net END), 0) AS net,
+                                 ELSE net END), 0)
+                   + (SELECT COALESCE(SUM(net), 0) FROM advance_billed) AS net,
                COALESCE(SUM(CASE WHEN total_gross > 0
                                  THEN gross * GREATEST(total_gross - credited_amount, 0) / total_gross
-                                 ELSE gross END), 0) AS gross
+                                 ELSE gross END), 0)
+                   + (SELECT COALESCE(SUM(gross), 0) FROM advance_billed) AS gross
            FROM own"#,
     )
     .bind(order_id)

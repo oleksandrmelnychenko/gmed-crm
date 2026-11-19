@@ -1320,8 +1320,16 @@ function useStaffInvoicesPageContent() {
       setCreateOpen(true);
       return;
     }
-    if (!createOpen) syncQuery({ create: null }, { replace: true });
-  }, [createOpen, createFlagInUrl, searchParams]);
+    // The draft just created keeps its `invoice=`: this update is built from
+    // the URL of this render and replaced the one that set it, so the new
+    // draft did not open after a `?create=1…` link (QA3 B S3).
+    if (!createOpen) {
+      syncQuery(
+        selectedInvoiceId ? { create: null, invoice: selectedInvoiceId } : { create: null },
+        { replace: true },
+      );
+    }
+  }, [createOpen, createFlagInUrl, searchParams, selectedInvoiceId]);
 
   useEffect(() => {
     const firstAvailable = creditablePrepayments(detail?.available_prepayments)[0];
@@ -2337,8 +2345,8 @@ function useStaffInvoicesPageContent() {
           .join(", ");
         setCreditNoteNotice(
           lang === "de"
-            ? `Zusätzlich ausgestellt: ${listed}. Das freigewordene Geld der Anzahlung ist erstattbares Guthaben des Patienten.`
-            : `Дополнительно выставлено: ${listed}. Освободившиеся деньги аванса — переплата пациента (к возврату).`,
+            ? `Zusätzlich ausgestellt: ${listed}. Das freigewordene Geld der Anzahlung wird zuerst mit dieser Rechnung verrechnet, nur der Rest ist erstattbar.`
+            : `Дополнительно выставлено: ${listed}. Освободившиеся деньги аванса сначала зачтены в этот счёт, к возврату только остаток.`,
         );
       }
       resetCreditNoteForm(newCreditNoteDraft());

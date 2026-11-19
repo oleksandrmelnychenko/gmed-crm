@@ -332,7 +332,9 @@ export function CreditNoteForm({
               .replace("{gross}", money(preview.gross))
           ) : null}
           {missingHint ? (
-            <span className="block text-rose-700" data-testid="credit-note-missing-hint">{missingHint}</span>
+            // What is still missing is a hint, not an error, until the user
+            // acted (QA3 B S3: red before any input).
+            <span className={cn("block", showError ? "text-rose-700" : "text-muted-foreground")} data-testid="credit-note-missing-hint">{missingHint}</span>
           ) : null}
         </div>
         <Button

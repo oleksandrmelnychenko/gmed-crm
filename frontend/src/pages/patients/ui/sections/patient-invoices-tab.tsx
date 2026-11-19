@@ -2052,8 +2052,8 @@ function usePatientInvoicesTabContent({
               {netted ? (
                 <span className="block font-sans text-[11px] font-normal leading-4 text-muted-foreground">
                   {lang === "de"
-                    ? `nach Anzahlungen und Guthaben: ${formatMoney(item.amount_due, currency)}`
-                    : `с учётом авансов и переплат: ${formatMoney(item.amount_due, currency)}`}
+                    ? `nach Anzahlungen: ${formatMoney(item.amount_due, currency)}`
+                    : `с учётом авансов: ${formatMoney(item.amount_due, currency)}`}
                 </span>
               ) : null}
             </span>

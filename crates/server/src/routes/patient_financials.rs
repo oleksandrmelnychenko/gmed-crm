@@ -1627,35 +1627,28 @@ async fn load_patient_account_statement(
                       service.discount_percent,
                       COALESCE(service.currency_snapshot, service.currency) AS currency,
                       service.status, orders.order_number,
-                      COALESCE(SUM(allocation.quantity) FILTER (
-                          WHERE (invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
-                     SELECT 1 FROM invoice_storno_documents storno
-                     WHERE storno.invoice_id = invoice.id AND storno.issued_on > $3
-                 )))
-                            AND invoice.released_at IS NOT NULL
-                      ), 0)
-                      -- A service a final bills outside the estimate has no
-                      -- allocation row: its invoice line names it (QA2 B S2-4).
-                      + COALESCE((
-                          SELECT SUM(NULLIF(extra.value ->> 'quantity', '')::NUMERIC)
-                          FROM invoices extra_invoice
-                          CROSS JOIN LATERAL jsonb_array_elements(
-                              CASE WHEN jsonb_typeof(extra_invoice.line_items) = 'array'
-                                   THEN extra_invoice.line_items ELSE '[]'::jsonb END
-                          ) AS extra(value)
-                          WHERE extra.value ->> 'source' = 'final_order_service'
-                            AND extra.value ->> 'source_order_leistung_id' = service.id::TEXT
-                            AND extra_invoice.released_at IS NOT NULL
-                            AND (extra_invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
-                                SELECT 1 FROM invoice_storno_documents storno
-                                WHERE storno.invoice_id = extra_invoice.id AND storno.issued_on > $3
-                            )))
-                      ), 0) AS invoiced_quantity
+                      -- What released invoices bill of the service: estimate
+                      -- allocations and lines outside the estimate
+                      -- (`invoice_service_billings`, QA3 B S3: the row of an
+                      -- extra line showed its planned amount, not the billed).
+                      billed.quantity AS invoiced_quantity,
+                      billed.gross AS invoiced_gross
                FROM order_leistungen service
                JOIN orders ON orders.id = service.order_id
-               LEFT JOIN invoice_order_line_allocations allocation
-                      ON allocation.order_leistung_id = service.id
-               LEFT JOIN invoices invoice ON invoice.id = allocation.invoice_id
+               CROSS JOIN LATERAL (
+                   SELECT COALESCE(SUM(billing.quantity), 0) AS quantity,
+                          COALESCE(SUM(billing.amount_gross), 0) AS gross
+                   FROM invoice_service_billings billing
+                   JOIN invoices invoice ON invoice.id = billing.invoice_id
+                   WHERE billing.order_id = service.order_id
+                     AND billing.order_leistung_id = service.id
+                     AND billing.quantity > 0
+                     AND invoice.released_at IS NOT NULL
+                     AND (invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                         SELECT 1 FROM invoice_storno_documents storno
+                         WHERE storno.invoice_id = invoice.id AND storno.issued_on > $3
+                     )))
+               ) billed
                WHERE orders.patient_id = $1
                  -- A cancelled service is no unbilled service (QA2 B S2-4).
                  AND service.status <> 'cancelled'
@@ -1678,7 +1671,6 @@ async fn load_patient_account_statement(
                           )
                  ))
                  AND COALESCE(service.currency_snapshot, service.currency) = $6
-               GROUP BY service.id, orders.order_number
                ORDER BY service.created_at DESC"#,
         )
         .bind(patient_id)
@@ -1712,6 +1704,16 @@ async fn load_patient_account_statement(
                     .unwrap_or(Decimal::ZERO),
             )
             .gross;
+            // Billed in full: the amount the invoices bill (a final may bill
+            // another quantity than planned), not the planned one.
+            let invoiced_gross = row
+                .try_get::<Decimal, _>("invoiced_gross")
+                .unwrap_or(Decimal::ZERO);
+            let gross = if invoiced_quantity >= quantity && invoiced_gross > Decimal::ZERO {
+                invoiced_gross
+            } else {
+                gross
+            };
             let financial_state = if invoiced_quantity <= Decimal::ZERO {
                 "not_invoiced"
             } else if invoiced_quantity < quantity {

@@ -57,6 +57,10 @@ const EXACT: Record<string, Pair> = {
     "Kostenvoranschlag veraltet: Konditionen einer Position wurden geändert. Zuerst eine neue Version von KV und Einzelauftrag erstellen.",
     "Смета устарела: условия позиции изменены. Сначала создайте новую версию КВ и Einzelauftrag.",
   ],
+  "an invoice line's vat rate or category contradicts its tax profile; create a new version of the cost estimate": [
+    "MwSt.-Satz oder Kategorie einer Rechnungsposition passen nicht zu ihrem Steuerprofil. Erstellen Sie eine neue Version des Kostenvoranschlags.",
+    "Ставка или категория НДС позиции счёта не совпадает с её налоговым профилем. Создайте новую версию сметы.",
+  ],
   "estimated outlays are not billed on an interim invoice; the advance covers them": [
     "Voraussichtliche Auslagen kommen nicht auf eine Zwischenrechnung; die Anzahlung deckt sie.",
     "Ожидаемые расходы не выставляются промежуточным счётом — их покрывает аванс.",

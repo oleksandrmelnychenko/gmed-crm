@@ -162,8 +162,8 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_order_open_invoices: "Остаток по счетам",
   finance_invoice_advance_credit: "Будет покрыто авансом",
   finance_invoice_amount_to_pay: "К оплате с учётом аванса",
-  finance_statement_credit_balance: "Переплата по счетам",
-  finance_statement_amount_to_pay: "К оплате с учётом авансов и переплат",
+  finance_statement_credit_balance: "Переплата / кредит",
+  finance_statement_amount_to_pay: "Открыто по счетам с учётом авансов",
   finance_settlement_in_drafts: "в черновиках счетов: {amount}",
   finance_settlement_billable_now: "финальный счёт выставит сейчас: {amount}",
   finance_settlement_unmatched_lines:
@@ -253,8 +253,8 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_order_open_invoices: "Offene Rechnungsbeträge",
   finance_invoice_advance_credit: "Durch Anzahlung gedeckt",
   finance_invoice_amount_to_pay: "Zu zahlen nach Anzahlung",
-  finance_statement_credit_balance: "Guthaben aus Rechnungen",
-  finance_statement_amount_to_pay: "Zu zahlen nach Anzahlungen und Guthaben",
+  finance_statement_credit_balance: "Überzahlung / Guthaben",
+  finance_statement_amount_to_pay: "Offen nach Anzahlungen",
   finance_settlement_in_drafts: "in Rechnungsentwürfen: {amount}",
   finance_settlement_billable_now: "die Schlussrechnung berechnet jetzt: {amount}",
   finance_settlement_unmatched_lines:
