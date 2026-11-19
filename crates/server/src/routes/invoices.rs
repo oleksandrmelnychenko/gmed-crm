@@ -1069,8 +1069,14 @@ fn is_valid_invoice_status(value: &str) -> bool {
 /// Status filters of the invoice lists: the stored statuses and `credited`,
 /// the display status of a fully credited invoice.
 fn is_valid_invoice_status_filter(value: &str) -> bool {
-    is_valid_invoice_status(value) || value == INVOICE_DISPLAY_CREDITED
+    is_valid_invoice_status(value)
+        || value == INVOICE_DISPLAY_CREDITED
+        || value == INVOICE_FILTER_ADVANCE_COVERED
 }
+
+/// List filter «Покрывается авансом» (QA2 S3): an open settlement invoice
+/// the order's paid advances, not set off yet, cover in full.
+const INVOICE_FILTER_ADVANCE_COVERED: &str = "advance_covered";
 
 /// Display status of a released invoice whose credit notes cover its whole
 /// total (RU "Закрыт кредит-нотой", DE "Gutgeschrieben"); SQL `invoice_display_status`.
@@ -8543,6 +8549,7 @@ async fn list_invoices(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let overdue_filter = query.status.as_deref() == Some("overdue");
+    let advance_covered_filter = query.status.as_deref() == Some(INVOICE_FILTER_ADVANCE_COVERED);
 
     match sqlx::query(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
@@ -8583,7 +8590,10 @@ async fn list_invoices(
              AND ($3::uuid IS NULL OR i.order_id = $3)
              AND ($4::uuid IS NULL OR i.quote_id = $4)
              AND ($5::text IS NULL
-                  OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $5)
+                  OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $5
+                  OR ($5::text = 'advance_covered'
+                      AND i.invoice_type <> 'advance'
+                      AND i.status IN ('sent', 'partially_paid', 'overdue')))
              AND ($6::text IS NULL OR i.invoice_type = $6)
              -- A deleted draft (cancelled before its release, see `drafts`)
              -- is left out unless cancelled invoices are asked for.
@@ -8711,6 +8721,33 @@ async fn list_invoices(
                         .and_then(|id| Uuid::parse_str(id).ok())
                         .and_then(|id| to_pay.get(&id))
                         .is_none_or(|amount| *amount > Decimal::ZERO)
+                });
+            }
+            if advance_covered_filter {
+                let ids = items
+                    .iter()
+                    .filter_map(|item| item["id"].as_str().and_then(|id| Uuid::parse_str(id).ok()))
+                    .collect::<Vec<_>>();
+                let shares = match advance_application::advance_credit_shares(&state.db, &ids)
+                    .await
+                {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, "load invoices covered by advances");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list invoices");
+                    }
+                };
+                items.retain(|item| {
+                    let share = item["id"]
+                        .as_str()
+                        .and_then(|id| Uuid::parse_str(id).ok())
+                        .and_then(|id| shares.get(&id).copied())
+                        .unwrap_or(Decimal::ZERO);
+                    let balance = item["balance_due"]
+                        .as_str()
+                        .and_then(|value| Decimal::from_str(value).ok())
+                        .unwrap_or(Decimal::ZERO);
+                    share > Decimal::ZERO && balance > Decimal::ZERO && share >= balance
                 });
             }
             let total = items.len();

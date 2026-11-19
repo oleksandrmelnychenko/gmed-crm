@@ -10,6 +10,8 @@ import {
   isInvoiceSelectionValid,
   isOverageOnlyInvoice,
   isQuoteAvailableForInvoice,
+  isClosingFinalPossible,
+  quoteUnavailableReason,
   isQuoteClosedForInvoicing,
   isCoveredByPrepaymentOnly,
   formatCurrency,
@@ -408,6 +410,24 @@ describe("quotes available for invoicing", () => {
       expect(isQuoteAvailableForInvoice({ ...quote, line_items: [line({ remaining_quantity: "0" })] }, type)).toBe(false);
       expect(isQuoteAvailableForInvoice({ ...quote, active_invoice_types: ["final"] }, type)).toBe(false);
     }
+  });
+
+  it("offers a closing final once interims billed every line (QA2 D S2-2)", () => {
+    const billed = { ...quote, active_invoice_types: ["interim"], line_items: [line({ remaining_quantity: "0" })] };
+    expect(isClosingFinalPossible(billed, { invoiceType: "final" })).toBe(true);
+    expect(isQuoteAvailableForInvoice(billed, "final")).toBe(true);
+    expect(isQuoteAvailableForInvoice(billed, "interim")).toBe(false);
+    // Not without interims, beside a final, or with a delivered service outside the estimate.
+    expect(isClosingFinalPossible({ ...billed, active_invoice_types: [] }, { invoiceType: "final" })).toBe(false);
+    expect(isClosingFinalPossible({ ...billed, active_invoice_types: ["interim", "final"] }, { invoiceType: "final" })).toBe(false);
+    expect(isClosingFinalPossible({ ...billed, delivered_services_outside_quote: [{ order_leistung_id: "s" } as never] }, { invoiceType: "final" })).toBe(false);
+  });
+
+  it("names why a second positions advance is not offered (QA2 D S2-4)", () => {
+    const advanced = { ...quote, active_invoice_types: ["advance"], line_items: [line({ remaining_quantity: "2" })] };
+    expect(isQuoteAvailableForInvoice(advanced, "advance")).toBe(false);
+    expect(quoteUnavailableReason(advanced, "advance", "ru")).toContain("аванс уже выставлен");
+    expect(quoteUnavailableReason(advanced, "interim", "ru")).toBeNull();
   });
 
   it("offers a line credited in full on an interim invoice beside the active final invoice", () => {

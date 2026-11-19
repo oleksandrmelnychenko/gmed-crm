@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   advanceSplitPreview,
+  amountsForGross,
   advanceSplitProblem,
   defaultSplitForm,
   draftFormDirty,
@@ -231,5 +232,14 @@ describe("final draft against the estimate", () => {
     form.lines[0] = { ...form.lines[0], selected: false };
     expect(draftFinalLineComparison(finalDraft, finalDraft.quote_lines[0], form)).toMatchObject({ actual: 0, notDelivered: true, difference: -3 });
     expect(isFinalDraft(positions)).toBe(false);
+  });
+});
+
+describe("advance split rounding like the server (QA2 A S3-6)", () => {
+  it("takes the cent net whose VAT reaches the gross", () => {
+    // 87,40 at 19 %: no cent net reaches it; the server keeps 73,45 + 13,95.
+    expect(amountsForGross(87.4, 19)).toEqual({ net: 73.45, vat: 13.95, gross: 87.4 });
+    // 101,75 at 19 %: 85,50 + 16,25 (plain division would give 85,50 too).
+    expect(amountsForGross(101.75, 19)).toEqual({ net: 85.5, vat: 16.25, gross: 101.75 });
   });
 });

@@ -529,6 +529,42 @@ mod tests {
         context
     }
 
+    /// QA2 S3: the Storno of a discounted line keeps quantity, list price
+    /// and the discount (3 h × 95,00 − 10 % = 256,50 net).
+    fn storno_of_discounted_final() -> CreditNotePdfContext {
+        let mut context = storno_of_final();
+        context.document_number = "STORNO-20261119-0018".to_string();
+        let mut line = credit_line(
+            "Dolmetscherbetreuung",
+            Some(("3", "95")),
+            ("19", false),
+            "256.50",
+            "48.74",
+        );
+        line.discount_percent = dec("10");
+        context.lines = Some(vec![line]);
+        context.amount_net = dec("256.50");
+        context.amount_vat = dec("48.74");
+        context.amount_gross = dec("305.24");
+        context.deducted_advances = Vec::new();
+        context
+    }
+
+    #[test]
+    fn a_storno_of_a_discounted_line_states_its_allowance() {
+        let context = storno_of_discounted_final();
+        let xml = xml(&context);
+        assert!(
+            xml.contains("<ram:ActualAmount>28.50</ram:ActualAmount>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<ram:Reason>Rabatt</ram:Reason>"), "{xml}");
+        let pdf = render_correction_pdf(&context).unwrap();
+        let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
+        assert!(text.contains("Rabatt 10 %"), "{text}");
+        assert!(!text.contains("— —"), "{text}");
+    }
+
     /// Storno der Rechnungskorrektur: the credited amount is owed again.
     fn reversal() -> CreditNotePdfContext {
         let mut context = credit_note();
@@ -733,6 +769,7 @@ mod tests {
             credit_note_releasing_advances(),
             credit_note_releasing_more_than_it_credits(),
             storno_of_final(),
+            storno_of_discounted_final(),
             reversal(),
             credit_note_to_payer(),
         ] {

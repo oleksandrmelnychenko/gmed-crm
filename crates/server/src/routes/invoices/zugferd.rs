@@ -1146,6 +1146,49 @@ mod tests {
         invoice
     }
 
+    /// QA2 D S2-2: the closing final after interims billed everything — one
+    /// informational line at 0,00 € (S 19 %), payable 0.
+    fn sample_closing_final() -> EInvoice {
+        let mut invoice = sample();
+        invoice.number = "INV-2026-0113".to_string();
+        invoice.lines = vec![EInvoiceLine {
+            name: "Schlussrechnung zu Auftrag ORD-1 — bereits abgerechnet mit INV-2026-0111, INV-2026-0112"
+                .to_string(),
+            quantity: dec("1"),
+            unit_net: Decimal::ZERO,
+            line_net: Decimal::ZERO,
+            line_vat: Some(Decimal::ZERO),
+            vat_rate: dec("19"),
+            is_cost_passthrough: false,
+            unit_code: "C62",
+            discount: None,
+            note: None,
+        }];
+        invoice.total_gross = Decimal::ZERO;
+        invoice.prepaid_amount = Decimal::ZERO;
+        invoice.prepaid_invoices.clear();
+        invoice.prepayment_note = None;
+        invoice
+    }
+
+    #[test]
+    fn a_closing_final_without_anything_left_is_a_zero_invoice() {
+        let xml = build_cii_xml(&sample_closing_final());
+        assert!(missing_requirements(&sample_closing_final()).is_empty());
+        assert!(
+            xml.contains("<ram:CategoryCode>S</ram:CategoryCode>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<ram:GrandTotalAmount>0.00</ram:GrandTotalAmount>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<ram:DuePayableAmount>0.00</ram:DuePayableAmount>"),
+            "{xml}"
+        );
+    }
+
     #[test]
     fn a_discounted_line_carries_its_allowance_and_the_totals_still_add_up() {
         // 2 × 180,00 at 10 %: 360,00 − 36,00 = 324,00 net, 61,56 VAT; plus
@@ -1700,6 +1743,7 @@ mod tests {
             sample_concierge_without_line_vat(),
             sample_final_fully_prepaid(),
             sample_discounted(),
+            sample_closing_final(),
         ] {
             assert!(missing_requirements(&invoice).is_empty());
             let path = std::path::Path::new(&dir).join(format!("{}.xml", invoice.number));

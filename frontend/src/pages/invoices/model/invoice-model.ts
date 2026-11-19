@@ -52,11 +52,12 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
   "cancelled",
 ];
 
-/** Status filter values of the invoice lists: stored statuses and `credited`. */
+/** Status filter values of the invoice lists: stored statuses, `credited` and `advance_covered` (QA2 S3). */
 export const INVOICE_FILTER_STATUSES: InvoiceDisplayStatus[] = [
   "draft",
   "sent",
   "partially_paid",
+  "advance_covered",
   "paid",
   "credited",
   "overdue",
