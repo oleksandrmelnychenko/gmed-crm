@@ -94,11 +94,29 @@ pub fn discount_percent_input(value: Option<&serde_json::Value>) -> Result<Decim
         Some(serde_json::Value::String(text)) if text.trim().is_empty() => {
             return Ok(Decimal::ZERO);
         }
+        // Digits with one decimal point or comma, as the order form takes
+        // them: «12,5» is 12.5 on purpose; «1e2», «+5» or «1.000,5» are
+        // refused (QA 2026-11-19).
+        Some(serde_json::Value::String(text)) if !plain_decimal_text(text.trim()) => {
+            return Err(INVALID);
+        }
         Some(serde_json::Value::String(text)) => text.trim().replace(',', ".").parse::<Decimal>(),
         Some(serde_json::Value::Number(number)) => number.to_string().parse::<Decimal>(),
         Some(_) => return Err(INVALID),
     };
     parsed.ok().and_then(valid_discount_percent).ok_or(INVALID)
+}
+
+/// `12`, `12.5` or `12,5`: digits with at most one decimal separator that has
+/// digits on both sides.
+fn plain_decimal_text(text: &str) -> bool {
+    let mut parts = text.splitn(2, ['.', ',']);
+    let whole = parts.next().unwrap_or_default();
+    let fraction = parts.next();
+    !whole.is_empty()
+        && whole.chars().all(|ch| ch.is_ascii_digit())
+        && fraction
+            .is_none_or(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 /// The discount percent a stored line (quote, invoice or document JSON)
@@ -719,6 +737,24 @@ mod tests {
             json_discount_percent(&serde_json::json!({"discount_percent": 150})),
             Decimal::ZERO
         );
+    }
+
+    /// QA 2026-11-19: «12,5» is 12.5 on purpose (the order form takes the
+    /// German comma); «1e2» and other notations are refused.
+    #[test]
+    fn a_discount_request_takes_plain_decimals_only() {
+        let input = |value: serde_json::Value| discount_percent_input(Some(&value));
+        assert_eq!(input(serde_json::json!("12,5")), Ok(dec("12.5")));
+        assert_eq!(input(serde_json::json!(" 12.5 ")), Ok(dec("12.5")));
+        assert_eq!(input(serde_json::json!("20")), Ok(dec("20")));
+        assert_eq!(input(serde_json::json!(33.33)), Ok(dec("33.33")));
+        assert_eq!(input(serde_json::json!("")), Ok(Decimal::ZERO));
+        assert_eq!(discount_percent_input(None), Ok(Decimal::ZERO));
+        for refused in [
+            "1e2", "1E1", "+5", "-5", "1.000,5", "12,", ",5", "abc", "100.5",
+        ] {
+            assert!(input(serde_json::json!(refused)).is_err(), "{refused}");
+        }
     }
 
     #[test]

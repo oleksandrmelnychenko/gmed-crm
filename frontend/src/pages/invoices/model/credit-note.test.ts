@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   creditedSupplierCostGross,
+  creditNoteLineIsPartial,
   creditNoteLimit,
   creditNoteSelectionPayload,
   creditableVatRates,
@@ -180,5 +181,15 @@ describe("credit-note selection", () => {
     expect(creditNoteSelectionPayload([], selection)).toEqual({ amount_gross: "400.00" });
     // An invoice with lines never sends the plain amount.
     expect(effectiveCreditNoteSelection(lines, null, selection).mode).toBe("lines");
+  });
+});
+
+describe("credited line label", () => {
+  it("calls a line credited in full not partial, also without a quantity", () => {
+    const invoice = [{ line_gross: "95.20" }, { line_gross: "200.00" }];
+    expect(creditNoteLineIsPartial({ invoice_line_index: 0, quantity: null, line_gross: "95.20" }, invoice)).toBe(false);
+    expect(creditNoteLineIsPartial({ invoice_line_index: 1, quantity: null, line_gross: "50.00" }, invoice)).toBe(true);
+    expect(creditNoteLineIsPartial({ invoice_line_index: 1, quantity: "1", line_gross: "200.00" }, invoice)).toBe(false);
+    expect(creditNoteLineIsPartial({ invoice_line_index: 5, quantity: null, line_gross: "1.00" }, invoice)).toBe(true);
   });
 });

@@ -652,6 +652,12 @@ export type QuoteOption = {
   /** The order's planned period: first and last appointment, else its start and end. */
   order_period_from?: string | null;
   order_period_to?: string | null;
+  /** The programme set on the order (start and end), not its visits. */
+  order_programme_from?: string | null;
+  order_programme_to?: string | null;
+  /** The order's first and last visit not cancelled. */
+  order_visits_from?: string | null;
+  order_visits_to?: string | null;
   /** Days a release without a due date adds to the invoice date. */
   payment_term_days?: number;
   total_gross: unknown;

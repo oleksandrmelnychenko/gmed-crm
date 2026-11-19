@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   blankReceivedPayment,
   createDocumentTermsPayload,
+  periodSuggestionLabel,
+  periodSuggestions,
   quotePeriodDefaults,
   receivedPaymentExcess,
   receivedPaymentExcessText,
@@ -68,11 +70,32 @@ describe("service period", () => {
       receivedPayment: { ...blankReceivedPayment(), enabled: true, receivedOn: "2026-11-15" },
       servicePeriod: null,
     };
-    expect(createDocumentTermsPayload(form, defaults)).toEqual({
+    expect(createDocumentTermsPayload(form)).toEqual({
       payment_received: { received_on: "2026-11-15", amount_gross: null, payment_method: "bank_transfer" },
     });
-    expect(createDocumentTermsPayload({ ...form, servicePeriod: { from: "2026-11-20", to: "2026-11-26" } }, defaults).service_period)
+    expect(createDocumentTermsPayload({ ...form, servicePeriod: { from: "2026-11-20", to: "2026-11-26" } }).service_period)
       .toEqual({ from: "2026-11-20", to: "2026-11-26" });
+    // A period taken from the pills is staff's choice too (QA 2026-11-19 S2).
+    expect(createDocumentTermsPayload({ ...form, servicePeriod: defaults }).service_period)
+      .toEqual({ from: "2026-11-20", to: "2026-11-25" });
+  });
+
+  it("offers the programme and, apart, the first and last visit", () => {
+    const quote = {
+      order_programme_from: "2026-11-23",
+      order_programme_to: "2026-12-04",
+      order_visits_from: "2026-11-19",
+      order_visits_to: "2026-12-04",
+    };
+    expect(periodSuggestions(quote, "from")).toEqual([
+      { kind: "programme", edge: "from", date: "2026-11-23" },
+      { kind: "visits", edge: "from", date: "2026-11-19" },
+    ]);
+    // The same day is offered once, as the programme's.
+    expect(periodSuggestions(quote, "to")).toEqual([{ kind: "programme", edge: "to", date: "2026-12-04" }]);
+    expect(periodSuggestions(null, "from")).toEqual([]);
+    expect(periodSuggestionLabel({ kind: "programme", edge: "from", date: "" }, false)).toBe("Начало программы");
+    expect(periodSuggestionLabel({ kind: "visits", edge: "to", date: "" }, false)).toBe("Последний приём");
   });
 });
 

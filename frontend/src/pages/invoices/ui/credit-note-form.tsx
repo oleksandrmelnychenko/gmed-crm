@@ -12,6 +12,7 @@ import { formatMoneyAmount, moneyInputText, toCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
+  creditNoteLineIsPartial,
   creditableVatRates,
   creditsByAmount,
   effectiveCreditNoteSelection,
@@ -351,9 +352,12 @@ export function CreditNoteForm({
 export function CreditNoteLinesSummary({
   credit,
   currency,
+  invoiceLines,
 }: {
   credit: InvoiceCreditNoteTransaction;
   currency: string;
+  /** The credited invoice's lines: a line credited in full is no «частично». */
+  invoiceLines?: ReadonlyArray<{ line_gross: string }> | null;
 }) {
   const { t } = useLang();
   const money = (value: unknown) => formatMoneyAmount(value, currency);
@@ -367,7 +371,7 @@ export function CreditNoteLinesSummary({
         <div key={`${line.invoice_line_index}-${line.line_gross}`} className="flex justify-between gap-3">
           <span className="min-w-0 truncate">
             {line.description}
-            {line.quantity === null ? ` · ${t.finance_credit_note_partial}` : ""}
+            {creditNoteLineIsPartial(line, invoiceLines) ? ` · ${t.finance_credit_note_partial}` : ""}
             {line.is_cost_passthrough ? ` · ${t.finance_credit_note_passthrough}` : ""}
           </span>
           <span className="shrink-0 tabular-nums">

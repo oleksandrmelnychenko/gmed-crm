@@ -46,7 +46,8 @@ import { appDateKey } from "@/lib/app-time-zone";
 import { INVOICE_PAYMENT_METHODS } from "../model/payment-correction";
 import {
   paymentMethodLabel,
-  quotePeriodDefaults,
+  periodSuggestionLabel,
+  periodSuggestions,
   receivedPaymentExcess,
   receivedPaymentExcessText,
   receivedPaymentProblem,
@@ -174,7 +175,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   // period of the lines or the order as before.
   const emptyPeriod: ServicePeriodForm = { from: "", to: "" };
   const period = form.servicePeriod ?? emptyPeriod;
-  const programPeriod = quotePeriodDefaults(selectedQuote);
+  const fromSuggestions = periodSuggestions(selectedQuote, "from");
+  const toSuggestions = periodSuggestions(selectedQuote, "to");
   const periodProblem = servicePeriodProblem(period);
   const received = form.receivedPayment;
   // Left empty, the amount is what the invoice leaves to pay at its release:
@@ -315,14 +317,19 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                           className={cn(inputClass, "w-full min-w-0")}
                           onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), from: event.target.value } }))} />
                       </FormField>
-                      {programPeriod.from ? (
-                        <button type="button" disabled={formBusy} data-testid="invoice-period-program-start"
-                          onClick={() => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), from: programPeriod.from } }))}
-                          className="rounded-full focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
-                          <StatusChip tone="info" className="cursor-pointer px-2 py-0 text-[11px] tabular-nums hover:bg-sky-100">
-                            {de ? "Programmbeginn" : "Начало программы"} {formatAppDate(programPeriod.from)}
-                          </StatusChip>
-                        </button>
+                      {fromSuggestions.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {fromSuggestions.map((suggestion) => (
+                            <button key={suggestion.kind} type="button" disabled={formBusy}
+                              data-testid={suggestion.kind === "programme" ? "invoice-period-program-start" : "invoice-period-first-visit"}
+                              onClick={() => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), from: suggestion.date } }))}
+                              className="rounded-full focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
+                              <StatusChip tone={suggestion.kind === "programme" ? "info" : "neutral"} className="cursor-pointer px-2 py-0 text-[11px] tabular-nums hover:bg-sky-100">
+                                {periodSuggestionLabel(suggestion, de)} {formatAppDate(suggestion.date)}
+                              </StatusChip>
+                            </button>
+                          ))}
+                        </div>
                       ) : null}
                     </div>
                     <div className="min-w-0 space-y-1.5">
@@ -331,14 +338,19 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                           className={cn(inputClass, "w-full min-w-0")}
                           onChange={(event) => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), to: event.target.value } }))} />
                       </FormField>
-                      {programPeriod.to ? (
-                        <button type="button" disabled={formBusy} data-testid="invoice-period-program-end"
-                          onClick={() => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), to: programPeriod.to } }))}
-                          className="rounded-full focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
-                          <StatusChip tone="info" className="cursor-pointer px-2 py-0 text-[11px] tabular-nums hover:bg-sky-100">
-                            {de ? "Programmende" : "Окончание"} {formatAppDate(programPeriod.to)}
-                          </StatusChip>
-                        </button>
+                      {toSuggestions.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {toSuggestions.map((suggestion) => (
+                            <button key={suggestion.kind} type="button" disabled={formBusy}
+                              data-testid={suggestion.kind === "programme" ? "invoice-period-program-end" : "invoice-period-last-visit"}
+                              onClick={() => onFormChange((current) => ({ ...current, servicePeriod: { ...(current.servicePeriod ?? emptyPeriod), to: suggestion.date } }))}
+                              className="rounded-full focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
+                              <StatusChip tone={suggestion.kind === "programme" ? "info" : "neutral"} className="cursor-pointer px-2 py-0 text-[11px] tabular-nums hover:bg-sky-100">
+                                {periodSuggestionLabel(suggestion, de)} {formatAppDate(suggestion.date)}
+                              </StatusChip>
+                            </button>
+                          ))}
+                        </div>
                       ) : null}
                     </div>
                   </div>

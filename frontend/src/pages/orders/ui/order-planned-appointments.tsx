@@ -30,6 +30,7 @@ import { AppointmentEntryRow, PlanningDoctorPicker } from "./order-appointment-e
 import { storedPlannerDraftCount } from "../model/order-visit-planner";
 import { OrderVisitPlanner } from "./order-visit-planner";
 import { appDateKey } from "@/lib/app-time-zone";
+import { formatCount } from "@/lib/i18n/plural";
 
 type OrderPlannedAppointmentsProps = {
   orderId: string;
@@ -430,8 +431,8 @@ export function OrderPlannedAppointments({
             <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
             <span>
               {tx(
-                `${outsideQuoteCount} приёмов вне подписанной сметы — при завершении появятся новые строки счёта. Добавьте их в смету («Добавить в смету» у приёма).`,
-                `${outsideQuoteCount} Termine außerhalb des unterschriebenen KV – beim Abschluss entstehen neue Rechnungszeilen. Über «In den KV aufnehmen» am Termin ergänzen.`,
+                `${formatCount("ru", outsideQuoteCount, { ru: ["приём", "приёма", "приёмов"], de: ["Termin", "Termine"] })} вне подписанной сметы — при завершении появятся новые строки счёта. Добавьте их в смету («Добавить в смету» у приёма).`,
+                `${formatCount("de", outsideQuoteCount, { ru: ["приём", "приёма", "приёмов"], de: ["Termin", "Termine"] })} außerhalb des unterschriebenen KV – beim Abschluss entstehen neue Rechnungszeilen. Über «In den KV aufnehmen» am Termin ergänzen.`,
               )}
             </span>
           </div>

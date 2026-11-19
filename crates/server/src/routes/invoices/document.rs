@@ -304,7 +304,8 @@ pub(super) async fn live_service_recipient_name(
 /// First and last day the invoiced services were rendered (Leistungszeitraum).
 ///
 /// The invoice's own lines date it first: order services by their medical
-/// appointment, else by the day they were delivered; Concierge services by
+/// appointment, else by the order's planned period, else by the day they were
+/// marked delivered; Concierge services by
 /// their service day; re-billed receipts and supplier invoices by their own
 /// invoice date. Only when no line carries a date do the order's appointments
 /// give the period (an advance invoice bills services still ahead) — never
@@ -321,11 +322,26 @@ pub(super) async fn load_invoice_service_period(
     let mut service_days = concierge_service_days(line_items);
     let source_line_ids = super::extract_source_line_ids(line_items);
     if !source_line_ids.is_empty() {
+        // A service without an appointment of its own is dated by the
+        // order's planned period (its visits, else its programme); only an
+        // order without either keeps the day the service was marked
+        // delivered. A draft left without a period printed the day staff
+        // clicked «оказано» instead of the programme (QA 2026-11-19 S3).
         let sql = format!(
-            r#"SELECT min(service_day) AS first_day, max(service_day) AS last_day
+            r#"SELECT min(days.first_day) AS first_day, max(days.last_day) AS last_day
                FROM (
-                   SELECT {ORDER_SERVICE_DAY_SQL} AS service_day
+                   SELECT COALESCE(dated.appointment_day, planned.first_day, dated.delivered_day)
+                              AS first_day,
+                          COALESCE(dated.appointment_day, planned.last_day, dated.delivered_day)
+                              AS last_day
                    FROM order_leistungen service
+                   LEFT JOIN orders o ON o.id = service.order_id
+                   CROSS JOIN LATERAL (
+                       SELECT {ORDER_SERVICE_APPOINTMENT_DAY_SQL} AS appointment_day,
+                              (service.delivered_at AT TIME ZONE 'Europe/Berlin')::date
+                                  AS delivered_day
+                   ) dated
+                   CROSS JOIN {ORDER_PLANNED_PERIOD_SQL}
                    WHERE service.id = ANY($1)
                ) days"#
         );
@@ -519,6 +535,24 @@ pub(crate) const ORDER_SERVICE_DAY_SQL: &str = r#"COALESCE(
       WHERE service_group.id = service.source_service_group_id
         AND appointment.status <> 'cancelled'),
     (service.delivered_at AT TIME ZONE 'Europe/Berlin')::date
+)"#;
+
+/// [`ORDER_SERVICE_DAY_SQL`] without the fallback to the day the service was
+/// marked delivered: NULL for a service without an appointment.
+const ORDER_SERVICE_APPOINTMENT_DAY_SQL: &str = r#"COALESCE(
+    (SELECT appointment.date FROM appointments appointment
+      WHERE appointment.id = service.source_medical_appointment_id
+        AND appointment.status <> 'cancelled'),
+    (SELECT appointment.date
+       FROM interpreter_reports report
+       JOIN appointments appointment ON appointment.id = report.appointment_id
+      WHERE report.id = service.source_interpreter_report_id
+        AND appointment.status <> 'cancelled'),
+    (SELECT appointment.date
+       FROM order_service_groups service_group
+       JOIN appointments appointment ON appointment.id = service_group.appointment_id
+      WHERE service_group.id = service.source_service_group_id
+        AND appointment.status <> 'cancelled')
 )"#;
 
 /// An order service (alias `service`) that was neither delivered nor approved

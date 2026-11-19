@@ -259,7 +259,7 @@ import {
 } from "./model/invoice-errors";
 import { GuardedDateInput } from "./ui/guarded-date-input";
 import { ReleaseDueDateField } from "./ui/release-due-date-field";
-import { createDocumentTermsPayload, paymentMethodLabel, quotePeriodDefaults } from "./model/document-terms";
+import { createDocumentTermsPayload, paymentMethodLabel } from "./model/document-terms";
 import { DunningBlockPanel, StornoDocumentCard } from "./ui/invoice-corrections-panel";
 import type {
   AccountingEntry,
@@ -1287,9 +1287,39 @@ function useStaffInvoicesPageContent() {
   // `?create=1` opens the dialog once: closed in any way, the flag leaves the
   // URL, so a later remount (e.g. after issuing) never reopens it (QA 2026-11-15, A-8).
   const createFlagInUrl = searchParams.get("create") === "1";
+  // A `?create=1` link that arrives while the page is already mounted (e.g.
+  // «Промежуточный счёт» from a patient with the invoices open) opens the
+  // dialog with its type too; before, the flag was dropped unopened (QA
+  // 2026-11-19: `?invoice_type=interim` opened the dialog unreliably).
+  const handledCreateLinkRef = useRef(initialCreateOpen ? searchParams.toString() : "");
   useEffect(() => {
-    if (!createOpen && createFlagInUrl) syncQuery({ create: null }, { replace: true });
-  }, [createOpen, createFlagInUrl]);
+    if (!createFlagInUrl) {
+      handledCreateLinkRef.current = "";
+      return;
+    }
+    const link = searchParams.toString();
+    if (handledCreateLinkRef.current !== link) {
+      handledCreateLinkRef.current = link;
+      // The open dialog keeps what staff entered when other parameters change.
+      if (createOpen) return;
+      const linkType = searchParams.get("invoice_type") as InvoiceType | null;
+      const linkQuoteId = searchParams.get("quote") ?? "";
+      setFilters((current) => ({
+        ...current,
+        patientId: searchParams.get("patient") ?? current.patientId,
+        orderId: searchParams.get("order") ?? current.orderId,
+        quoteId: linkQuoteId || current.quoteId,
+      }));
+      setCreateForm({
+        ...blankCreateForm(linkQuoteId),
+        invoiceType: linkType && NEW_INVOICE_TYPES.includes(linkType) ? linkType : "final",
+      });
+      setCreateError(null);
+      setCreateOpen(true);
+      return;
+    }
+    if (!createOpen) syncQuery({ create: null }, { replace: true });
+  }, [createOpen, createFlagInUrl, searchParams]);
 
   useEffect(() => {
     const firstAvailable = creditablePrepayments(detail?.available_prepayments)[0];
@@ -1890,6 +1920,8 @@ function useStaffInvoicesPageContent() {
   // (realtime events of other invoices trigger them) keeps the dunning note
   // being typed (QA 2026-11-15, A-8).
   const loadedInvoiceIdRef = useRef<string | null>(null);
+  const statusDialogOpenRef = useRef(statusDialogOpen);
+  statusDialogOpenRef.current = statusDialogOpen;
   const applyLoadedInvoiceDetail = useCallback((
     data: NonNullable<typeof detail>,
     dunning: typeof dunningEvents,
@@ -1897,12 +1929,18 @@ function useStaffInvoicesPageContent() {
     creditNotes: InvoiceCreditNoteTransaction[],
     refunds: InvoiceRefundTransaction[],
   ) => {
-    setStatusForm(invoiceToStatusForm(data));
-    // A refusal belongs to the invoice and attempt it was given for: it
-    // appeared in the status dialog of the next invoice (QA 2026-11-10, D-11).
-    setStatusError(null);
-    setStatusConfirmation(null);
-    setStornoConfirmOpen(false);
+    // A reload of the same invoice while its status dialog is open keeps the
+    // attempt and its refusal: the first «Выставить счёт» refused for a
+    // missing country fell back to «Черновик» without the error (QA
+    // 2026-11-19). A refusal belongs to the invoice and attempt it was given
+    // for: it appeared in the status dialog of the next invoice (QA
+    // 2026-11-10, D-11).
+    if (!(statusDialogOpenRef.current && loadedInvoiceIdRef.current === data.id)) {
+      setStatusForm(invoiceToStatusForm(data));
+      setStatusError(null);
+      setStatusConfirmation(null);
+      setStornoConfirmOpen(false);
+    }
     setVisibilityForm(invoiceToVisibilityForm(data));
     setPayerForm(invoiceToPayerForm(data));
     if (loadedInvoiceIdRef.current !== data.id) {
@@ -2099,13 +2137,9 @@ function useStaffInvoicesPageContent() {
     setCreateError(null);
     try {
       const selectedLines = invoiceLineSelectionPayload(createForm);
-      // A final proposes the period of its lines (preview); a period staff
-      // touched is sent as typed, an untouched one is computed the same way
-      // by the server (verify2-A S2-4).
-      const documentTerms = createDocumentTermsPayload(
-        createForm,
-        createForm.invoiceType === "final" ? { from: "", to: "" } : quotePeriodDefaults(selectedCreateQuote),
-      );
+      // A period staff entered is sent as entered; left empty, the server
+      // computes it (verify2-A S2-4).
+      const documentTerms = createDocumentTermsPayload(createForm);
       const created = await createInvoice(createForm.quoteId, prepaymentAdvance
         ? {
             invoice_type: "advance",
@@ -4026,7 +4060,7 @@ function useStaffInvoicesPageContent() {
                                   <div className="mt-1 text-xs text-muted-foreground">
                                     {credit.portal_visible ? t.finance_credit_note_visible_in_portal : t.finance_credit_note_staff_only}
                                   </div>
-                                  <CreditNoteLinesSummary credit={credit} currency={detail.currency ?? "EUR"} />
+                                  <CreditNoteLinesSummary credit={credit} currency={detail.currency ?? "EUR"} invoiceLines={detail.line_items} />
                                 </div>
                                 <div className="text-right">
                                   <div className={cn("font-mono font-semibold tabular-nums", isReversal ? "text-foreground" : "text-emerald-700")}>{isReversal ? "+" : "−"}{formatMoney(credit.amount_gross, detail?.currency)}</div>

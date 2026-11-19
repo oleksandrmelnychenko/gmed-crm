@@ -185,17 +185,58 @@ export function quotePeriodDefaults(
   return { from: quote?.order_period_from ?? "", to: quote?.order_period_to ?? "" };
 }
 
+export type PeriodSuggestion = { kind: "programme" | "visits"; edge: "from" | "to"; date: string };
+
+/**
+ * The pills under the empty period fields of «Новый счёт»: the programme set
+ * on the order («Начало программы» / «Окончание»), and the first and last
+ * visit when they are other days («Первый приём» / «Последний приём»). The
+ * programme pills showed the visits before (QA 2026-11-19 S2).
+ */
+export function periodSuggestions(
+  quote: {
+    order_programme_from?: string | null;
+    order_programme_to?: string | null;
+    order_visits_from?: string | null;
+    order_visits_to?: string | null;
+  } | null | undefined,
+  edge: "from" | "to",
+): PeriodSuggestion[] {
+  const programme = edge === "from" ? quote?.order_programme_from : quote?.order_programme_to;
+  const visit = edge === "from" ? quote?.order_visits_from : quote?.order_visits_to;
+  const suggestions: PeriodSuggestion[] = [];
+  if (programme) suggestions.push({ kind: "programme", edge, date: programme });
+  if (visit && visit !== programme) suggestions.push({ kind: "visits", edge, date: visit });
+  return suggestions;
+}
+
+export function periodSuggestionLabel(suggestion: PeriodSuggestion, de: boolean): string {
+  if (suggestion.kind === "programme") {
+    return suggestion.edge === "from"
+      ? (de ? "Programmbeginn" : "Начало программы")
+      : (de ? "Programmende" : "Окончание программы");
+  }
+  return suggestion.edge === "from"
+    ? (de ? "Erster Termin" : "Первый приём")
+    : (de ? "Letzter Termin" : "Последний приём");
+}
+
 export type DocumentTermsBody = { payment_received?: ReceivedPaymentPayload; service_period?: ServicePeriodPayload };
 
-/** What a new invoice sends beside its lines: the received payment and a period staff changed. */
+/**
+ * What a new invoice sends beside its lines: the received payment and the
+ * period staff entered. The fields start empty, so whatever they hold was
+ * chosen by staff and is sent — also when it equals a suggestion: an interim
+ * whose period was taken from the pills was stored without one and printed
+ * the day of its lines (QA 2026-11-19 S2).
+ */
 export function createDocumentTermsPayload(
   form: { receivedPayment: ReceivedPaymentForm; servicePeriod: ServicePeriodForm | null },
-  defaults: ServicePeriodForm,
 ): DocumentTermsBody {
   const body: DocumentTermsBody = {};
   const received = receivedPaymentPayload(form.receivedPayment);
   if (received) body.payment_received = received;
-  const period = form.servicePeriod ? servicePeriodPayload(form.servicePeriod, defaults) : null;
+  const period = form.servicePeriod ? servicePeriodPayload(form.servicePeriod, { from: "", to: "" }) : null;
   if (period) body.service_period = period;
   return body;
 }

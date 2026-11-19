@@ -401,6 +401,11 @@ export function DraftInvoiceEditorDialog({
                               <span className="block break-words text-foreground">{line.description}</span>
                               <span className="block text-xs text-muted-foreground">
                                 {money(line.unit_price)} · {line.is_cost_passthrough ? copy.passthroughGroup : `${line.vat_rate ?? "0"} %`}
+                                {Number(line.discount_percent ?? 0) > 0 ? (
+                                  <span data-testid="invoice-draft-line-discount">
+                                    {" · "}{lang === "de" ? "Rabatt" : "Скидка"} {formatQuantity(Number(line.discount_percent ?? 0))} %
+                                  </span>
+                                ) : null}
                                 {comparison ? null : <>{" · "}{copy.open}: {line.open_quantity.replace(".", ",")} / {line.quoted_quantity.replace(".", ",")}</>}
                               </span>
                               {comparison ? (

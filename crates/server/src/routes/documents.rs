@@ -7694,11 +7694,12 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                     .and_then(|value| serde_json::from_value(value.clone()).ok()),
                 localized_sections: Vec::new(),
                 description,
-                quantity: object
-                    .get("quantity")
-                    .and_then(Value::as_str)
-                    .unwrap_or("1")
-                    .to_string(),
+                quantity: quantity_text_de(
+                    object
+                        .get("quantity")
+                        .and_then(Value::as_str)
+                        .unwrap_or("1"),
+                ),
                 // A discounted line (owner 2026-11-18) prints its price with
                 // the discount; its amount below is the discounted net.
                 unit_price: match (
@@ -11440,7 +11441,9 @@ fn fc_bullet(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     );
 }
 
-/// Patient designation "Herr Max Mustermann" / "Frau …" / bare name.
+/// Patient designation after «zwischen»: "Herrn Max Mustermann" / "Frau …" /
+/// bare name, declined like the Einzelauftrag's (QA 2026-11-19: the
+/// Rahmenvertrag printed «zwischen Herr …»).
 fn fc_patient_salutation_name(context: &GeneratedFrameworkContractContext) -> String {
     DocPartyBlock {
         name: context.patient_name.clone(),
@@ -11448,7 +11451,7 @@ fn fc_patient_salutation_name(context: &GeneratedFrameworkContractContext) -> St
         birth_date: context.birth_date,
         ..DocPartyBlock::default()
     }
-    .name_with_salutation()
+    .name_with_salutation_declined()
 }
 
 /// The configured agency responsible person used in signatures and legal text.
@@ -18839,6 +18842,23 @@ async fn generate_document(
     } else {
         None
     };
+
+    // The Einzelauftrag and the Kostenvoranschlag print the order's quote:
+    // a changed order gets a new quote first, so a new version of an outdated
+    // document prints the order of now (QA 2026-11-19 S1), never the quote
+    // of the version it replaces.
+    if let Some(order_uuid) = order_id
+        && matches!(template.id, "single_order" | "order_cost_estimate")
+        && body
+            .bindings
+            .as_ref()
+            .is_none_or(|bindings| bindings.service_lines.is_empty())
+        && let Err(response) =
+            super::contracts::refresh_order_quote_for_document(&state, auth.user_id, order_uuid)
+                .await
+    {
+        return response;
+    }
 
     // The payer's copy of the cost estimate names the payer of the moment and
     // the client's estimate it was made from: it is made anew every time.
@@ -32620,6 +32640,20 @@ fn compute_line_item_totals(
     ))
 }
 
+/// A quantity as German documents print it: a stored `1.5` is `1,5` (QA
+/// 2026-11-19: the estimate printed «1.5»). Text that is no plain number
+/// stays as entered.
+fn quantity_text_de(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let plain = !trimmed.is_empty()
+        && trimmed.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
+        && trimmed.matches('.').count() <= 1;
+    match plain.then(|| trimmed.parse::<Decimal>().ok()).flatten() {
+        Some(value) => crate::order_document_texts::format_quantity_de(value),
+        None => trimmed.to_string(),
+    }
+}
+
 fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLineItem> {
     lines
         .iter()
@@ -32635,7 +32669,7 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
             description_items: line.description_items.clone(),
             localized_sections: Vec::new(),
             description: line.description.trim().to_string(),
-            quantity: line.quantity.clone().unwrap_or_default(),
+            quantity: quantity_text_de(line.quantity.as_deref().unwrap_or_default()),
             unit_price: discounted
                 .as_ref()
                 .map(|(fee, _)| fee.clone())
@@ -47838,6 +47872,16 @@ mod tests {
              "vat_rate": "0", "line_gross": "100.00"}
         ]));
         assert_eq!(quote[0].line_gross, "380");
+        assert_eq!(quote[0].quantity, "4");
+        // QA 2026-11-19: German quantities on the estimate.
+        let half = super::parse_quote_line_items(&json!([
+            {"description": "Koordination", "quantity": "1.5000", "unit_price": "100",
+             "vat_rate": "19", "line_net": "150"}
+        ]));
+        assert_eq!(half[0].quantity, "1,5");
+        assert_eq!(super::quantity_text_de("2,5"), "2,5");
+        assert_eq!(super::quantity_text_de("ca. 3"), "ca. 3");
+        assert_eq!(super::quantity_text_de(""), "");
         // A line stored before the amounts were split keeps what it has.
         assert_eq!(quote[1].line_gross, "100.00");
         let catalog = vec![("interpreter".to_string(), "interpreter_hours".to_string())];

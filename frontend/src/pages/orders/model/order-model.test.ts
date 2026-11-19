@@ -17,6 +17,7 @@ import {
   orderProcessGatesToForm,
   sumLeistungGross,
   summarizeLeistungMetrics,
+  supplierInvoiceServiceOptions,
   sumLeistungTotals,
   workflowChecklistErrorText,
 } from "./order-model";
@@ -256,5 +257,22 @@ describe("workflowChecklistErrorText (QA F-C10)", () => {
       body: { error: "Conflict", message: "reopen it first" },
     });
     expect(workflowChecklistErrorText(conflict, texts)).toBe(texts.fallback);
+  });
+});
+
+describe("supplier invoice service options", () => {
+  it("lists pass-through and clinic lines, not GMED's own catalogue services", () => {
+    const line = (id: string, extra: Partial<Leistung>) =>
+      ({ id, status: "planned", is_cost_passthrough: false, provider_id: null, agency_service_id: null, ...extra }) as Leistung;
+    const lines = [
+      line("own", { agency_service_id: "svc-interpreter" }),
+      line("passthrough", { is_cost_passthrough: true, agency_service_id: "svc-outlays" }),
+      line("clinic", { provider_id: "clinic-1", agency_service_id: "svc-mrt" }),
+      line("manual", {}),
+      line("cancelled", { is_cost_passthrough: true, status: "cancelled" }),
+    ];
+    expect(supplierInvoiceServiceOptions(lines).map((item) => item.id)).toEqual(["passthrough", "clinic", "manual"]);
+    // A line linked before stays selectable.
+    expect(supplierInvoiceServiceOptions(lines, "own").map((item) => item.id)).toEqual(["own", "passthrough", "clinic", "manual"]);
   });
 });

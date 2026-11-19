@@ -8,6 +8,7 @@ mod support;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
@@ -488,4 +489,249 @@ async fn an_upload_replaces_an_expired_scan_as_its_next_version() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+async fn pdf_text(app: &axum::Router, bearer: &str, id: &str) -> String {
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/documents/{id}/download"))
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap();
+    let raw = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `1234.5` as the documents print it: `1.234,50`.
+fn money_de(value: Decimal) -> String {
+    let fixed = format!("{:.2}", value.round_dp(2));
+    let (whole, cents) = fixed.split_once('.').unwrap();
+    let mut grouped = String::new();
+    for (index, digit) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
+            grouped.push('.');
+        }
+        grouped.push(digit);
+    }
+    format!("{grouped},{cents}")
+}
+
+async fn add_service(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    description: &str,
+    quantity: &str,
+    unit_price: &str,
+    discount: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               discount_percent
+           ) VALUES ($1, $2, $3, $4::numeric, $5::numeric, 'EUR', 19, $6::numeric)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(description)
+    .bind(quantity)
+    .bind(unit_price)
+    .bind(discount)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// QA 2026-11-19 S1: the new version of an outdated Kostenvoranschlag and
+/// Einzelauftrag re-printed the quote of the old version (V02 954,25 € for an
+/// order of 1.044,69 €, new discount lines missing) and the «Устарел» mark
+/// went away. The new version prints the order of now, through a new quote.
+#[tokio::test]
+async fn a_new_version_of_an_outdated_estimate_prints_the_current_order() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = ctx.pool.clone();
+    let app = ctx.app.clone();
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let tag = Uuid::new_v4().simple().to_string();
+    let today = gmed_server::app_time::today();
+    let valid_until = today + chrono::Days::new(30);
+    let patient_id = seed_patient(&pool, ctx.admin_id, &tag).await;
+    let (order_id, _) =
+        seed_order_with_quote(&pool, patient_id, ctx.admin_id, &tag, valid_until).await;
+    let coordination = add_service(
+        &pool,
+        order_id,
+        patient_id,
+        "Koordination",
+        "1.5",
+        "100",
+        "0",
+    )
+    .await;
+    add_service(
+        &pool,
+        order_id,
+        patient_id,
+        "Dolmetscherbetreuung",
+        "2",
+        "80",
+        "0",
+    )
+    .await;
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &ceo,
+        Some(json!({ "valid_until": valid_until.to_string(), "notes": "Angebot" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote}");
+    let first_quote = quote["quote_number"].as_str().unwrap().to_string();
+
+    let generate = |template: &'static str, replace: Option<String>| {
+        let mut body = json!({
+            "template_id": template,
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "language": "de",
+            "bindings": { "party_sign_place": "Paris" }
+        });
+        if let Some(replace) = replace {
+            body["replace_document_id"] = json!(replace);
+        }
+        let app = app.clone();
+        let ceo = ceo.clone();
+        async move { json_request(&app, "POST", "/api/v1/documents/generate", &ceo, Some(body)).await }
+    };
+    let order_gross = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Decimal>("SELECT order_service_total_gross($1)")
+                .bind(order_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let terms_current = |id: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<bool>>("SELECT document_terms_current($1::uuid)")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let printed_quote = |id: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT generated_bindings->>'_quote_number' FROM documents WHERE id = $1::uuid",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    let (status, estimate) = generate("order_cost_estimate", None).await;
+    assert_eq!(status, StatusCode::OK, "{estimate}");
+    let estimate_id = estimate["id"].as_str().unwrap().to_string();
+    let (status, single) = generate("single_order", None).await;
+    assert_eq!(status, StatusCode::OK, "{single}");
+    let single_id = single["id"].as_str().unwrap().to_string();
+    let before = order_gross().await;
+    let estimate_text = pdf_text(&app, &ceo, &estimate_id).await;
+    assert!(estimate_text.contains(&money_de(before)), "{estimate_text}");
+    // An unchanged order keeps its quote.
+    let open_quotes: Vec<String> = sqlx::query_scalar(
+        "SELECT quote_number FROM quotes WHERE order_id = $1 AND status <> 'superseded'",
+    )
+    .bind(order_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open_quotes, vec![first_quote.clone()]);
+
+    // The order changes after the estimate: a discount and a new discounted line.
+    sqlx::query("UPDATE order_leistungen SET discount_percent = 20 WHERE id = $1")
+        .bind(coordination)
+        .execute(&pool)
+        .await
+        .unwrap();
+    add_service(
+        &pool,
+        order_id,
+        patient_id,
+        "Begleitung",
+        "1",
+        "300",
+        "33.33",
+    )
+    .await;
+    sqlx::query("UPDATE orders SET client_terms_changed_at = now() WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(terms_current(estimate_id.clone()).await, Some(false));
+    let after = order_gross().await;
+    assert_ne!(before, after);
+
+    let (status, renewed) = generate("order_cost_estimate", Some(estimate_id.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{renewed}");
+    let renewed_id = renewed["id"].as_str().unwrap().to_string();
+    assert_eq!(renewed["version_number"], 2, "{renewed}");
+    let (current_quote, current_gross, current_valid_until, current_notes): (
+        String,
+        Decimal,
+        Option<NaiveDate>,
+        Option<String>,
+    ) = sqlx::query_as(
+        r#"SELECT quote_number, total_gross, valid_until, notes FROM quotes
+           WHERE order_id = $1 AND status <> 'superseded'"#,
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_ne!(current_quote, first_quote);
+    assert_eq!(current_gross, after);
+    // The new quote keeps the validity and the remark of the one it replaces.
+    assert_eq!(current_valid_until, Some(valid_until));
+    assert_eq!(current_notes.as_deref(), Some("Angebot"));
+    assert_eq!(
+        printed_quote(renewed_id.clone()).await.as_deref(),
+        Some(current_quote.as_str())
+    );
+    let renewed_text = pdf_text(&app, &ceo, &renewed_id).await;
+    assert!(renewed_text.contains(&money_de(after)), "{renewed_text}");
+    assert!(renewed_text.contains("Begleitung"), "{renewed_text}");
+    assert!(!renewed_text.contains(&money_de(before)), "{renewed_text}");
+    assert_eq!(terms_current(renewed_id).await, Some(true));
+
+    // The Einzelauftrag's new version names the same, current quote.
+    let (status, renewed_single) = generate("single_order", Some(single_id)).await;
+    assert_eq!(status, StatusCode::OK, "{renewed_single}");
+    let renewed_single_id = renewed_single["id"].as_str().unwrap().to_string();
+    let single_text = pdf_text(&app, &ceo, &renewed_single_id).await;
+    assert!(single_text.contains(&current_quote), "{single_text}");
+    let quotes: i64 = sqlx::query_scalar("SELECT count(*) FROM quotes WHERE order_id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // The seeded quote, the first API quote and the one the change needed.
+    assert_eq!(quotes, 3);
 }

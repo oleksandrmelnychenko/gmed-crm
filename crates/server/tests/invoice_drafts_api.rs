@@ -1485,6 +1485,95 @@ async fn the_service_period_comes_from_the_order_and_can_be_set_on_the_draft() {
     assert!(!text.contains("20.11.2026"), "{text}");
 }
 
+/// QA 2026-11-19: an interim keeps the period chosen in «Новый счёт» (S2),
+/// and a draft left without one states the order's programme, not the day
+/// its services were marked delivered (S3).
+#[tokio::test]
+async fn an_interim_keeps_its_chosen_period_and_an_empty_one_is_the_programme() {
+    let Some(fixture) = fixture("interim-period", SERVICES).await else {
+        return;
+    };
+    set_order_period(&fixture, "2026-11-23", "2026-12-04").await;
+    sqlx::query("UPDATE order_leistungen SET delivered_at = now() WHERE order_id = $1")
+        .bind(fixture.order_id)
+        .execute(&fixture.pool)
+        .await
+        .unwrap();
+
+    let (status, chosen) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 0, "quantity": 1 }],
+            "service_period": { "from": "2026-11-23", "to": "2026-12-04" }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chosen}");
+    let chosen_id = chosen["id"].as_str().unwrap().to_string();
+    let stored: (Option<chrono::NaiveDate>, Option<chrono::NaiveDate>) = sqlx::query_as(
+        "SELECT service_period_from, service_period_to FROM invoices WHERE id = $1::uuid",
+    )
+    .bind(&chosen_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (
+            chrono::NaiveDate::from_ymd_opt(2026, 11, 23),
+            chrono::NaiveDate::from_ymd_opt(2026, 12, 4)
+        )
+    );
+    let (status, editor) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{chosen_id}/draft"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{editor}");
+    assert_eq!(editor["service_period"]["from"], "2026-11-23", "{editor}");
+    assert_eq!(editor["service_period"]["to"], "2026-12-04", "{editor}");
+
+    let (status, empty) = create_invoice(
+        &fixture,
+        &fixture.billing,
+        json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 1, "quantity": 1 }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{empty}");
+    let empty_id = empty["id"].as_str().unwrap().to_string();
+    let (status, editor) = json_request(
+        &fixture.app,
+        "GET",
+        &format!("/api/v1/invoices/{empty_id}/draft"),
+        &fixture.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{editor}");
+    assert!(editor["service_period"].is_null(), "{editor}");
+    assert_eq!(
+        editor["service_period_default"]["from"], "2026-11-23",
+        "{editor}"
+    );
+    assert_eq!(
+        editor["service_period_default"]["to"], "2026-12-04",
+        "{editor}"
+    );
+    let text = pdf_text(&fixture, &empty_id).await;
+    assert!(
+        text.contains("23.11.2026") && text.contains("04.12.2026"),
+        "{text}"
+    );
+}
+
 #[tokio::test]
 async fn an_invoice_before_the_services_states_the_order_period_as_expected() {
     let Some(fixture) = fixture("expected-period", SERVICES).await else {

@@ -237,6 +237,22 @@ export function orderServiceTariff(
   };
 }
 
+/**
+ * The order lines a supplier invoice can be linked to («Связанная услуга»):
+ * pass-through costs and clinic lines, not GMED's own catalogue services,
+ * which no supplier bills (QA 2026-11-19). The line already linked stays.
+ */
+export function supplierInvoiceServiceOptions(
+  leistungen: readonly Leistung[] | undefined,
+  linkedId?: string | null,
+): Leistung[] {
+  return (leistungen ?? []).filter((line) => (
+    line.id === linkedId
+    || (line.status !== "cancelled"
+      && (line.is_cost_passthrough || Boolean(line.provider_id) || !line.agency_service_id))
+  ));
+}
+
 export function blankLeistungForm(): LeistungFormState {
   return {
     agencyServiceId: "",

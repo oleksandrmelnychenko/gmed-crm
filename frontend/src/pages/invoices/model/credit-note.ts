@@ -10,6 +10,22 @@ import type { InvoiceCreditableLine } from "./types";
  */
 export type CreditNoteMode = "lines" | "vat_rate" | "amount";
 
+/**
+ * A credited line is «частично» when it took less than the invoice line. The
+ * server leaves the quantity out also for a discounted line credited in full
+ * (its amount is not quantity × price), which was labelled «частично» (QA
+ * 2026-11-19), so the amount decides when the invoice line is known.
+ */
+export function creditNoteLineIsPartial(
+  line: { invoice_line_index: number; quantity: string | null; line_gross: string },
+  invoiceLines?: ReadonlyArray<{ line_gross: string }> | null,
+): boolean {
+  if (line.quantity !== null) return false;
+  const invoiceLine = invoiceLines?.[line.invoice_line_index];
+  if (!invoiceLine) return true;
+  return toCents(Number(line.line_gross)) !== toCents(Number(invoiceLine.line_gross));
+}
+
 export type CreditNoteLineDraft = {
   selected: boolean;
   /** Gross amount to credit; empty = what is left of the line. */

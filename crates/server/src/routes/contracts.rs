@@ -4794,6 +4794,16 @@ async fn list_quotes(
                         WHERE appointment.order_id = o.id AND appointment.status <> 'cancelled'),
                       CASE WHEN o.date_from IS NOT NULL THEN o.date_to END
                   ) AS order_period_to,
+                  -- «Новый счёт» offers the programme and the visits as
+                  -- separate pills (QA 2026-11-19 S2).
+                  o.date_from AS order_programme_from,
+                  o.date_to AS order_programme_to,
+                  (SELECT min(appointment.date) FROM appointments appointment
+                    WHERE appointment.order_id = o.id AND appointment.status <> 'cancelled'
+                  ) AS order_visits_from,
+                  (SELECT max(appointment.date) FROM appointments appointment
+                    WHERE appointment.order_id = o.id AND appointment.status <> 'cancelled'
+                  ) AS order_visits_to,
                   (SELECT value #>> '{}' FROM system_settings
                     WHERE key = 'invoice_payment_term_days') AS payment_term_days_setting,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
@@ -4929,6 +4939,10 @@ async fn list_quotes(
                         .map(decimal_to_string),
                     "order_period_from": row.try_get::<Option<NaiveDate>, _>("order_period_from").unwrap_or_default().map(|v| v.to_string()),
                     "order_period_to": row.try_get::<Option<NaiveDate>, _>("order_period_to").unwrap_or_default().map(|v| v.to_string()),
+                    "order_programme_from": row.try_get::<Option<NaiveDate>, _>("order_programme_from").unwrap_or_default().map(|v| v.to_string()),
+                    "order_programme_to": row.try_get::<Option<NaiveDate>, _>("order_programme_to").unwrap_or_default().map(|v| v.to_string()),
+                    "order_visits_from": row.try_get::<Option<NaiveDate>, _>("order_visits_from").unwrap_or_default().map(|v| v.to_string()),
+                    "order_visits_to": row.try_get::<Option<NaiveDate>, _>("order_visits_to").unwrap_or_default().map(|v| v.to_string()),
                     // Due date of a release without one: invoice date + term.
                     "payment_term_days": crate::routes::invoices::payment_term_days_from(
                         row.try_get::<Option<String>, _>("payment_term_days_setting").unwrap_or_default().as_deref(),
@@ -5045,6 +5059,86 @@ async fn create_quote(
             Err(_) => return crate::routes::invoices::internal_note_too_long(),
         };
 
+    create_order_quote(
+        &state,
+        auth.user_id,
+        order_id,
+        &order_ctx,
+        QuoteCreation {
+            valid_until,
+            notes: body.notes,
+            internal_note,
+            requested_line_items: body.line_items,
+            only_when_lines_changed: false,
+        },
+    )
+    .await
+}
+
+/// What a new quote of an order is made with (`create_quote`, or an order
+/// document that prints the quote, [`refresh_order_quote_for_document`]).
+struct QuoteCreation {
+    valid_until: Option<NaiveDate>,
+    notes: Option<String>,
+    internal_note: Option<String>,
+    requested_line_items: Option<Vec<QuoteLineItemInput>>,
+    /// The newest open quote is kept when it already holds the current order
+    /// services (204 without a body); a new one takes over its validity date
+    /// (when not passed) and its remarks. An order without open services
+    /// answers 204 as well: its documents print what they printed before.
+    only_when_lines_changed: bool,
+}
+
+/// Before an Einzelauftrag or a Kostenvoranschlag of an order prints the
+/// order's quote: the newest open quote must hold the order services of now.
+/// A new version of an outdated estimate re-printed the old quote and the
+/// «Устарел» mark went away although the printed amounts were those of
+/// before (QA 2026-11-19 S1: V02 printed 954,25 € for an order of
+/// 1.044,69 €, new discount lines missing). A changed order gets a new
+/// quote here, as the lead wizard asks for one before its documents.
+pub(crate) async fn refresh_order_quote_for_document(
+    state: &AppState,
+    user_id: Uuid,
+    order_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let Some(order_ctx) = load_order_access_context(state, order_id).await? else {
+        return Err(err(StatusCode::NOT_FOUND, "Order not found"));
+    };
+    let response = create_order_quote(
+        state,
+        user_id,
+        order_id,
+        &order_ctx,
+        QuoteCreation {
+            valid_until: None,
+            notes: None,
+            internal_note: None,
+            requested_line_items: None,
+            only_when_lines_changed: true,
+        },
+    )
+    .await;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(response)
+    }
+}
+
+async fn create_order_quote(
+    state: &AppState,
+    user_id: Uuid,
+    order_id: Uuid,
+    order_ctx: &OrderAccessContext,
+    request: QuoteCreation,
+) -> axum::response::Response {
+    let QuoteCreation {
+        mut valid_until,
+        mut notes,
+        mut internal_note,
+        requested_line_items,
+        only_when_lines_changed,
+    } = request;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -5109,6 +5203,7 @@ async fn create_quote(
     }
     let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id).await {
         Ok(items) if !items.is_empty() => items,
+        Ok(_) if only_when_lines_changed => return StatusCode::NO_CONTENT.into_response(),
         Ok(_) => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -5120,7 +5215,49 @@ async fn create_quote(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
         }
     };
-    if let Some(items) = body.line_items.as_ref().filter(|items| !items.is_empty()) {
+    if only_when_lines_changed {
+        // Read after the open quotes were locked: a concurrent document
+        // waits here and then finds the quote the first one made.
+        let latest = sqlx::query(
+            r#"SELECT line_items, valid_until, notes, internal_note
+               FROM quotes
+               WHERE order_id = $1 AND status <> 'superseded'
+               ORDER BY created_at DESC, id DESC
+               LIMIT 1"#,
+        )
+        .bind(order_id)
+        .fetch_optional(&mut *tx)
+        .await;
+        match latest {
+            Ok(Some(latest)) => {
+                if latest
+                    .try_get::<Value, _>("line_items")
+                    .is_ok_and(|stored| quote_lines_match_persisted(&stored, &persisted_line_items))
+                {
+                    return StatusCode::NO_CONTENT.into_response();
+                }
+                valid_until = latest
+                    .try_get::<Option<NaiveDate>, _>("valid_until")
+                    .ok()
+                    .flatten()
+                    .filter(|date| !quote_validity_passed(Some(*date), crate::app_time::today()));
+                notes = latest.try_get::<Option<String>, _>("notes").ok().flatten();
+                internal_note = latest
+                    .try_get::<Option<String>, _>("internal_note")
+                    .ok()
+                    .flatten();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(%error, %order_id, "load the order quote a document prints");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+            }
+        }
+    }
+    if let Some(items) = requested_line_items
+        .as_ref()
+        .filter(|items| !items.is_empty())
+    {
         let requested = match normalize_custom_line_items(items) {
             Ok(items) => items,
             Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
@@ -5144,7 +5281,7 @@ async fn create_quote(
             AND valid_until IS NOT DISTINCT FROM $3 AND notes IS NOT DISTINCT FROM $4
             AND q.id=(SELECT latest.id FROM quotes latest WHERE latest.order_id=$1 AND latest.status<>'superseded' ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
             AND status NOT IN ('rejected','expired','superseded') ORDER BY created_at DESC,id DESC LIMIT 1")
-            .bind(order_id).bind(serde_json::to_value(&line_items).unwrap_or_default()).bind(valid_until).bind(&body.notes)
+            .bind(order_id).bind(serde_json::to_value(&line_items).unwrap_or_default()).bind(valid_until).bind(&notes)
             .fetch_optional(&mut *tx).await;
         match replay {
             Ok(Some(value)) => return Json(value).into_response(),
@@ -5241,8 +5378,8 @@ async fn create_quote(
     .bind(carried_paid_amount)
     .bind(carried_paid_at)
     .bind(line_items_value.clone())
-    .bind(body.notes.clone())
-    .bind(auth.user_id)
+    .bind(notes.clone())
+    .bind(user_id)
     .bind(&internal_note)
     .fetch_one(&mut *tx)
     .await
@@ -5267,9 +5404,9 @@ async fn create_quote(
         paid_amount: carried_paid_amount,
         paid_at: carried_paid_at,
         line_items: line_items_value,
-        notes: body.notes.clone(),
+        notes: notes.clone(),
         change_reason: Some("initial_snapshot".to_string()),
-        created_by: Some(auth.user_id),
+        created_by: Some(user_id),
     };
 
     if let Err(e) = insert_quote_version_snapshot(&mut tx, &snapshot).await {
@@ -5315,7 +5452,7 @@ async fn create_quote(
     }
 
     let superseded =
-        match supersede_open_order_quotes_tx(&mut tx, order_id, quote_id, auth.user_id).await {
+        match supersede_open_order_quotes_tx(&mut tx, order_id, quote_id, user_id).await {
             Ok(value) => value,
             Err(error) => {
                 tracing::error!(%error, %quote_id, %order_id, "supersede older order quotes");
@@ -5343,7 +5480,7 @@ async fn create_quote(
            FROM jsonb_to_recordset($7::jsonb)
                 AS superseded(id uuid, quote_number text, previous_status text)"#,
     )
-    .bind(auth.user_id)
+    .bind(user_id)
     .bind(quote_id)
     .bind(serde_json::json!({
         "quote_number": quote_number,
@@ -5372,7 +5509,7 @@ async fn create_quote(
 
     crate::realtime::publish_quote_event(
         &state,
-        Some(auth.user_id),
+        Some(user_id),
         "quote.created",
         quote_id,
         serde_json::json!({
@@ -5391,7 +5528,7 @@ async fn create_quote(
     for closed in &superseded {
         crate::realtime::publish_quote_event(
             &state,
-            Some(auth.user_id),
+            Some(user_id),
             "quote.status_changed",
             closed.id,
             serde_json::json!({
@@ -5422,7 +5559,7 @@ async fn create_quote(
             "paid_amount": decimal_to_string(carried_paid_amount),
             "paid_at": carried_paid_at.map(|value| value.to_rfc3339()),
             "line_items": line_items,
-            "notes": body.notes,
+            "notes": notes,
             "internal_note": internal_note,
             "version_count": 1,
             "current_version_number": 1,

@@ -797,6 +797,13 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               >
                 {lang === "de" ? "Rechnung erstellen" : "Создать счёт"}
               </StaffLink>
+              <StaffLink
+                to={`/invoices?create=1&patient=${encodeURIComponent(id ?? "")}&invoice_type=interim`}
+                data-testid="patient-header-interim-invoice"
+                className="rounded-md border border-border px-1.5 py-0.5 text-[11px] font-semibold text-foreground hover:bg-muted"
+              >
+                {lang === "de" ? "Zwischenrechnung" : "Промежуточный"}
+              </StaffLink>
             </span>
           </div>
         ) : null}

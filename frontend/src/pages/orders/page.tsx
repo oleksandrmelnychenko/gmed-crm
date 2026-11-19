@@ -305,6 +305,7 @@ import {
   leistungLineAmounts,
   leistungVatLabel,
   summarizeLeistungMetrics,
+  supplierInvoiceServiceOptions,
   useOrderLabels,
 } from "./model/order-model";
 import type {
@@ -1222,6 +1223,8 @@ function useOrdersPageContent() {
   const workspaceLoadedAtRef = useRef(Date.now());
   // «Переводчики по дням» hides itself while the order has no appointment.
   const [interpreterDaysEmpty, setInterpreterDaysEmpty] = useState(false);
+  // The catalogue name is edited in German, as documents print it (QA 2026-11-19).
+  const [serviceDescriptionFocused, setServiceDescriptionFocused] = useState(false);
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   // The change of signed terms asks in the app's own dialog, never the
   // browser's confirm() (QA 2026-10-31, R3-4), as «Отменить услугу» does.
@@ -7937,7 +7940,7 @@ function useOrdersPageContent() {
                                             <option value="">
                                               {lang === "de" ? "Keine Leistung zugeordnet" : "Услуга не привязана"}
                                             </option>
-                                            {orderDetail.leistungen.map((leistung) => (
+                                            {supplierInvoiceServiceOptions(orderDetail.leistungen, invoice.order_leistung_id).map((leistung) => (
                                               <option key={leistung.id} value={leistung.id}>
                                                 {normalizeLeistungDescription(leistung.description)}
                                               </option>
@@ -8564,7 +8567,7 @@ function useOrdersPageContent() {
                       <option value="">
                         {lang === "de" ? "Noch keiner Leistung zugeordnet" : "Пока не связана с услугой"}
                       </option>
-                      {(orderDetail?.leistungen ?? []).map((leistung) => (
+                      {supplierInvoiceServiceOptions(orderDetail?.leistungen, externalInvoiceForm.orderLeistungId).map((leistung) => (
                         <option key={leistung.id} value={leistung.id}>
                           {normalizeLeistungDescription(leistung.description)}
                         </option>
@@ -9580,17 +9583,25 @@ function useOrdersPageContent() {
                   const displayValue = showsCatalogName && selectedLeistungAgencyService
                     ? agencyCatalogItemName(selectedLeistungAgencyService, t, lang)
                     : leistungForm.description;
+                  // Focused, the field holds the German name the documents
+                  // print: an edit of the Russian display text was stored and
+                  // printed on German PDFs (QA 2026-11-19).
+                  const fieldValue = serviceDescriptionFocused ? leistungForm.description : displayValue;
                   return (
                     <Field htmlFor="order-service-description" label={t.orders_service_description} className="md:col-span-2">
                       <Input
                         required
                         id="order-service-description"
-                        value={displayValue}
+                        value={fieldValue}
+                        onFocus={() => setServiceDescriptionFocused(true)}
+                        onBlur={() => setServiceDescriptionFocused(false)}
                         onChange={(event) => {
                           const typed = event.target.value;
                           setLeistungForm((current) => ({
                             ...current,
-                            description: showsCatalogName && typed === displayValue ? current.description : typed,
+                            description: !serviceDescriptionFocused && showsCatalogName && typed === displayValue
+                              ? current.description
+                              : typed,
                           }));
                         }}
                         className={inputClassName}
