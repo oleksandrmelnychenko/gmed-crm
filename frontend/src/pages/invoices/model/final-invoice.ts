@@ -125,21 +125,21 @@ export function finalLineComparison(
 ) {
   const estimate = numberOf(line.quantity);
   const own = finalLineQuantity(form, index);
-  const siblings = extras
-    .filter((extra) => extra.quote_line_index === index)
-    .reduce((sum, extra) => {
-      const quantity = finalServiceQuantity(form, extra.order_leistung_id);
-      return sum + (Number.isFinite(quantity) ? quantity : 0);
-    }, 0);
-  const actual = roundCents(numberOf(line.invoiced_quantity) + (Number.isFinite(own) ? own : 0) + siblings);
+  // A service added during the order is a line of its own («добавлено в ходе
+  // заказа»): its quantity is not the estimate line's actual, or following
+  // the pill bills it twice (QA 2026-11-19, B S2-2 / D S2-3).
+  void extras;
+  const actual = roundCents(numberOf(line.invoiced_quantity) + (Number.isFinite(own) ? own : 0));
   const difference = roundCents(actual - estimate);
-  const unitGross = moneyLineAmounts(1, numberOf(line.unit_price), numberOf(line.vat_rate), numberOf(line.discount_percent)).gross;
+  // The difference priced as one line (VAT on its net), as the invoice prices
+  // a line: −2,5 h is −254,36, not 2,5 × a rounded unit gross (QA 2026-11-19).
+  const differenceLineGross = moneyLineAmounts(Math.abs(difference), numberOf(line.unit_price), numberOf(line.vat_rate), numberOf(line.discount_percent)).gross;
   const sign = difference < 0 ? -1 : 1;
   return {
     estimate,
     actual,
     difference,
-    differenceGross: sign * roundCents(Math.abs(difference) * unitGross),
+    differenceGross: sign * differenceLineGross,
     recorded: line.delivery_basis !== "estimate",
     notDelivered: actual <= 0,
     aboveEstimate: toCents(actual) > toCents(estimate),

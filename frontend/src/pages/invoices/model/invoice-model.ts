@@ -70,15 +70,16 @@ export function invoiceDisplayStatus(
 ): string {
   const status = invoice.display_status || invoice.status;
   // A settlement invoice the order's advances cover in full reads paid, not
-  // part paid (money QA 2026-11-15, D-03).
+  // part paid (money QA 2026-11-15, D-03), once the advance is set off on it.
+  // Covered only by advance money not yet set off, it is not paid yet (QA
+  // 2026-11-19, S2-3: an interim read «Оплачен» with 0,00 paid).
   if (
     ["partially_paid", "sent", "overdue"].includes(status)
     && invoice.amount_to_pay !== undefined && invoice.amount_to_pay !== null
     && toCents(Number(invoice.amount_to_pay)) <= 0
-    && (toCents(Number(invoice.prepayment_applied_amount ?? 0)) > 0
-      || toCents(Number(invoice.advance_credit_available ?? 0)) > 0)
   ) {
-    return "paid";
+    if (toCents(Number(invoice.prepayment_applied_amount ?? 0)) > 0) return "paid";
+    if (toCents(Number(invoice.advance_credit_available ?? 0)) > 0) return "advance_covered";
   }
   return status;
 }
@@ -704,6 +705,19 @@ export function invoiceToStatusForm(invoice: InvoiceItem): StatusForm {
     notes: invoice.notes ?? "",
     reason: "",
   };
+}
+
+/**
+ * Whether the status form asks the server for a change. A reason alone
+ * changes nothing (it explains a status change): the server answers such a
+ * request with the invoice unchanged, which read as done (QA 2026-11-19, S2-2).
+ */
+export function statusFormChanges(form: StatusForm, invoice: InvoiceItem): boolean {
+  const current = invoiceToStatusForm(invoice);
+  return form.status !== current.status
+    || form.dueDate !== current.dueDate
+    // The printed remark is fixed with the release.
+    || (!isInvoiceReleased(invoice) && form.notes.trim() !== current.notes.trim());
 }
 
 export function invoiceToVisibilityForm(invoice: InvoiceItem): VisibilityForm {

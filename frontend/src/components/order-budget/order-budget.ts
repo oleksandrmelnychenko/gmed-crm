@@ -1,7 +1,7 @@
 import { apiFetch } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
-import { formatMoneyLabel, parseMoneyInput, roundCents } from "@/lib/money";
+import { formatMoneyLabel, moneyLineAmounts, parseDiscountPercent, parseMoneyInput, roundCents } from "@/lib/money";
 
 function moneyNumber(value: string | number | null | undefined): number {
   const numeric = typeof value === "number" ? value : Number(String(value ?? "").trim());
@@ -146,22 +146,24 @@ export function plannedVisitsDeltaGross(budget: OrderBudget, visits: number): nu
 }
 
 /**
- * Own-service gross of a typed service line (quantity × unit price + VAT, per
- * line like quotes and invoices); 0 for a pass-through line or unreadable input.
+ * Own-service gross of a typed service line (quantity × unit price less the
+ * line's discount, + VAT, per line like quotes, invoices and the order header:
+ * `moneyLineAmounts`); 0 for a pass-through line or unreadable input.
  */
 export function serviceLineDeltaGross(line: {
   quantity: string;
   unitPrice: string;
   vatRate: string;
+  discountPercent?: string;
   isCostPassthrough?: boolean;
 }): number {
   if (line.isCostPassthrough) return 0;
   const quantity = Number(line.quantity.replace(",", "."));
   const unitPrice = parseMoneyInput(line.unitPrice);
   const vatRate = Number(line.vatRate.replace(",", ".") || "0");
-  if (![quantity, unitPrice, vatRate].every(Number.isFinite) || quantity <= 0 || unitPrice < 0) return 0;
-  const net = roundCents(quantity * unitPrice);
-  return roundCents(net + roundCents((net * vatRate) / 100));
+  const discount = parseDiscountPercent(line.discountPercent ?? "");
+  if (![quantity, unitPrice, vatRate].every(Number.isFinite) || quantity <= 0 || unitPrice < 0 || discount === null) return 0;
+  return moneyLineAmounts(quantity, unitPrice, vatRate, discount).gross;
 }
 
 /**

@@ -24884,7 +24884,7 @@ fn contract_vat_groups<'a>(
 }
 
 /// Label of the VAT total: the rate when every taxed service uses the same
-/// one ("MWSt. 19%"), plain "MWSt." otherwise.
+/// one ("MwSt. 19%"), plain "MwSt." otherwise.
 fn contract_vat_total_label(items: &[&GeneratedContractLineItem]) -> String {
     let taxed_rates = contract_vat_groups(items)
         .into_iter()
@@ -24894,8 +24894,8 @@ fn contract_vat_total_label(items: &[&GeneratedContractLineItem]) -> String {
         })
         .collect::<Vec<_>>();
     match taxed_rates.as_slice() {
-        [rate] => format!("MWSt. {}%", fmt_vat_rate(*rate)),
-        _ => "MWSt.".to_string(),
+        [rate] => format!("MwSt. {}%", fmt_vat_rate(*rate)),
+        _ => "MwSt.".to_string(),
     }
 }
 
@@ -44239,7 +44239,7 @@ mod tests {
             "Dolmetscher- und Übersetzungsleistungen",
             "300,00 €",
             "Nettowert: 1.800,00 €",
-            "MWSt. 19%: 342,00 €",
+            "MwSt. 19%: 342,00 €",
             "Voraussichtliche Auslagen: 50,00 €",
             "Gesamtsumme: 2.192,00 €",
             super::PAYER_COST_ESTIMATE_PRIVACY_SENTENCE,
@@ -47640,7 +47640,7 @@ mod tests {
         assert!(estimate_text.contains("HONORAR PRO EINHEIT"));
         assert!(estimate_text.contains("VORAUSSICHTLICHER AUFWAND (IN EINHEITEN)"));
         assert!(estimate_text.contains("Nettowert:"));
-        assert!(estimate_text.contains("MWSt. 19%:"));
+        assert!(estimate_text.contains("MwSt. 19%:"));
         // The listed services are all taxed at 19 % and the outlays have
         // their own row, so no per-service VAT note is printed.
         assert!(
@@ -47666,7 +47666,7 @@ mod tests {
             "estimated outlays must be rendered once in the totals block"
         );
         let net_position = estimate_text.find("Nettowert:").unwrap();
-        let vat_position = estimate_text.find("MWSt. 19%:").unwrap();
+        let vat_position = estimate_text.find("MwSt. 19%:").unwrap();
         let outlays_position = estimate_text.find("Voraussichtliche Auslagen:").unwrap();
         let gross_position = estimate_text.find("Gesamtsumme:").unwrap();
         assert!(net_position < vat_position);
@@ -47862,7 +47862,7 @@ mod tests {
             "Alle angegebenen Preise zzgl. MwSt. 19 %."
         );
         assert_eq!(super::mixed_contract_vat_note(&taxed), None);
-        assert_eq!(super::contract_vat_total_label(&taxed), "MWSt. 19%");
+        assert_eq!(super::contract_vat_total_label(&taxed), "MwSt. 19%");
 
         // The QA order: every rate is named, 0 % lines carry the reason the
         // invoice prints (§ 4 Nr. 14 UStG) or the e-invoice uses (§ 10 UStG).
@@ -47874,7 +47874,7 @@ mod tests {
                 "{MIXED_VAT_NOTE}; 0 % – Voraussichtliche Auslagen (Durchlaufender Posten gemäß § 10 Abs. 1 Satz 5 UStG)."
             )
         );
-        assert_eq!(super::contract_vat_total_label(&all), "MWSt. 19%");
+        assert_eq!(super::contract_vat_total_label(&all), "MwSt. 19%");
         // The lead wizard's Einzelauftrag lists the services without outlays.
         assert_eq!(
             super::contract_vat_note(&all[..3]),
@@ -47899,7 +47899,7 @@ mod tests {
             super::contract_vat_note(&two_rates),
             "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: 19 % – Airport transfer; 7 % – Fachliteratur."
         );
-        assert_eq!(super::contract_vat_total_label(&two_rates), "MWSt.");
+        assert_eq!(super::contract_vat_total_label(&two_rates), "MwSt.");
     }
 
     /// QA 2026-11-01: a stored quote keeps net and gross per line; 452,20 stood
@@ -48055,7 +48055,7 @@ mod tests {
             "KV-2026-0010",
         );
         assert!(estimate_text.contains("Nettowert: 1.670,00 €"));
-        assert!(estimate_text.contains("MWSt. 19%: 212,80 €"));
+        assert!(estimate_text.contains("MwSt. 19%: 212,80 €"));
         assert!(estimate_text.contains("Voraussichtliche Auslagen: 1.200,00 €"));
         assert!(estimate_text.contains("Gesamtsumme: 3.082,80 €"));
         // The outlays have their own row; the note covers the listed services.
@@ -48106,7 +48106,7 @@ mod tests {
             "{coverage_text}"
         );
         assert!(!coverage_text.contains("zzgl. MwSt. 19 %"));
-        assert!(coverage_text.contains("MWSt. 19%: 212,80 €"));
+        assert!(coverage_text.contains("MwSt. 19%: 212,80 €"));
         // Section 5 lists service types and amounts, the annex the totals; the
         // client's lines, their quantities and the reason of a 0 % line stay
         // out of the payer's declaration (QA 2026-10-31).

@@ -181,22 +181,27 @@ export function moneyLinePartAmounts(part: {
   discountPercent?: number;
 }): MoneyLineAmounts {
   const own = moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0);
-  if (![part.lineNet, part.lineGross, part.lineQuantity].every(Number.isFinite)) return own;
+  if (![part.lineNet, part.lineQuantity].every(Number.isFinite)) return own;
   const billedNet = Number.isFinite(part.billedNet) ? part.billedNet : 0;
-  const billedGross = Number.isFinite(part.billedGross) ? part.billedGross : 0;
   const billedQuantity = Number.isFinite(part.billedQuantity) ? part.billedQuantity : 0;
   const restNet = Math.max(roundCents(part.lineNet - billedNet), 0);
-  const restGross = Math.max(roundCents(part.lineGross - billedGross), restNet);
-  const rest = { net: restNet, vat: roundCents(restGross - restNet), gross: restGross };
-  if (toCents(billedQuantity + part.quantity) >= toCents(part.lineQuantity)) return rest;
-  return toCents(own.net) <= toCents(rest.net) && toCents(own.gross) <= toCents(rest.gross) ? own : rest;
+  const completes = toCents(billedQuantity + part.quantity) >= toCents(part.lineQuantity);
+  const net = completes ? restNet : Math.min(own.net, restNet);
+  return amountsOfNet(net, part.vatRatePercent);
+}
+
+/** Net, VAT = round(net × rate), gross of an invoice line with this net. */
+function amountsOfNet(net: number, vatRatePercent: number): MoneyLineAmounts {
+  const vat = roundCents((net * vatRatePercent) / 100);
+  return { net, vat, gross: roundCents(net + vat) };
 }
 
 /**
  * What a final invoice bills of a quote line, as the server bills it
  * (`money::final_line_part_amounts`, owner 2026-11-17): up to the quote like
  * `moneyLinePartAmounts`; a line billed for the first time priced as a whole;
- * otherwise the quantity beyond the quote added at the unit price.
+ * otherwise the net left of the line plus the net beyond it. The VAT is the
+ * line's own (QA 2026-11-19, S1-4).
  */
 export function moneyFinalLinePartAmounts(part: Parameters<typeof moneyLinePartAmounts>[0]): MoneyLineAmounts {
   const billedQuantity = Number.isFinite(part.billedQuantity) ? part.billedQuantity : 0;
@@ -204,15 +209,14 @@ export function moneyFinalLinePartAmounts(part: Parameters<typeof moneyLinePartA
   if (!Number.isFinite(part.lineQuantity) || total <= toCents(part.lineQuantity)) return moneyLinePartAmounts(part);
   if (billedQuantity <= 0) return moneyLineAmounts(part.quantity, part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0);
   const within = Math.max(0, roundCents(part.lineQuantity - billedQuantity));
-  const rest = within > 0
-    ? moneyLinePartAmounts({ ...part, quantity: within })
-    : { net: 0, vat: 0, gross: 0 };
-  const excess = moneyLineAmounts(roundCents(part.quantity - within), part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0);
-  return {
-    net: roundCents(rest.net + excess.net),
-    vat: roundCents(rest.vat + excess.vat),
-    gross: roundCents(rest.gross + excess.gross),
-  };
+  const billedNet = Number.isFinite(part.billedNet) ? part.billedNet : 0;
+  const restNet = within > 0 && Number.isFinite(part.lineNet)
+    ? Math.max(roundCents(part.lineNet - billedNet), 0)
+    : within > 0
+      ? moneyLineAmounts(within, part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0).net
+      : 0;
+  const excessNet = moneyLineAmounts(roundCents(part.quantity - within), part.unitPriceNet, part.vatRatePercent, part.discountPercent ?? 0).net;
+  return amountsOfNet(roundCents(restNet + excessNet), part.vatRatePercent);
 }
 
 function moneyNumber(value: unknown): number {

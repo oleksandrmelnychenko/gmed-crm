@@ -399,8 +399,8 @@ const CODES: Record<string, Pair> = {
     "Счёт или документ корректировки нельзя выпустить: не указаны Steuernummer и USt-IdNr. GMED. Заполнить их может только CEO («Системные настройки» → «Профиль агентства для документов»); черновики сохранены, ничего не проведено.",
   ],
   recipient_address_incomplete: [
-    "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land).",
-    "Для выпуска счёта нужны имя и полный адрес получателя счёта: улица, индекс, город и страна.",
+    "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land). Die Anschrift des Patienten ergänzen der CEO oder der Patient Manager in der Patientenkarte; einen Zahler mit eigener Anschrift hinterlegt Billing im Rechnungsempfänger.",
+    "Для выпуска счёта нужны имя и полный адрес получателя счёта: улица, индекс, город и страна. Адрес пациента дополняют CEO или менеджер пациента в карточке пациента; плательщика со своим адресом Billing указывает в получателе счёта.",
   ],
   minor_patient_recipient: [
     "Die Rechnung ist an einen minderjährigen Patienten adressiert. Bitte einen Zahler (z. B. einen Elternteil) hinterlegen oder die Ausstellung bestätigen.",

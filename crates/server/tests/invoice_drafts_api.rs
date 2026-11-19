@@ -1586,10 +1586,18 @@ async fn an_invoice_before_the_services_states_the_order_period_as_expected() {
         .execute(&fixture.pool)
         .await
         .unwrap();
+    // Planned services propose nothing on a final (QA 2026-11-19, S1-2):
+    // billing them ahead takes the quantities typed by staff.
     let (status, draft) = create_invoice(
         &fixture,
         &fixture.billing,
-        json!({ "invoice_type": "final" }),
+        json!({
+            "invoice_type": "final",
+            "line_items": [
+                { "line_index": 0, "quantity": 2 },
+                { "line_index": 1, "quantity": 1 },
+            ],
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{draft}");

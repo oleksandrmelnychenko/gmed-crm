@@ -49,10 +49,27 @@ pub(super) struct EInvoiceLine {
     pub line_vat: Option<Decimal>,
     pub vat_rate: Decimal,
     pub is_cost_passthrough: bool,
+    /// UN/ECE Rec. 20 unit code of the quantity (BT-130), see [`unit_code`].
+    pub unit_code: &'static str,
     /// The line's discount (owner 2026-11-18): a line allowance (BG-27) of
     /// `amount` (BT-136) at `percent` (BT-138) on the list net (BT-137), so
     /// that quantity × net price − allowance = line net (BT-131).
     pub discount: Option<LineDiscount>,
+}
+
+/// UN/ECE Rec. 20 code of a line's unit label (QA 2026-11-19, S3-9): hours
+/// `HUR`, days `DAY`, anything else one piece `C62`.
+pub(super) fn unit_code(label: Option<&str>) -> &'static str {
+    match label
+        .map(|label| label.trim().trim_end_matches('.').to_lowercase())
+        .as_deref()
+    {
+        Some("hour" | "hours" | "stunde" | "stunden" | "std" | "h" | "час" | "часа" | "часов" | "ч") => {
+            "HUR"
+        }
+        Some("day" | "days" | "tag" | "tage" | "день" | "дня" | "дней") => "DAY",
+        _ => "C62",
+    }
 }
 
 /// Discount of one invoice line, see [`EInvoiceLine::discount`].
@@ -501,7 +518,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
                 "<ram:AssociatedDocumentLineDocument><ram:LineID>{id}</ram:LineID>{note}</ram:AssociatedDocumentLineDocument>",
                 "<ram:SpecifiedTradeProduct><ram:Name>{name}</ram:Name></ram:SpecifiedTradeProduct>",
                 "<ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice><ram:ChargeAmount>{price}</ram:ChargeAmount></ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>",
-                "<ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode=\"C62\">{quantity}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>",
+                "<ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode=\"{unit}\">{quantity}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>",
                 "<ram:SpecifiedLineTradeSettlement>",
                 "<ram:ApplicableTradeTax><ram:TypeCode>VAT</ram:TypeCode><ram:CategoryCode>{category}</ram:CategoryCode><ram:RateApplicablePercent>{rate}</ram:RateApplicablePercent></ram:ApplicableTradeTax>",
                 "{allowance}",
@@ -514,6 +531,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
             name = escape(line.name.trim()),
             price = plain(line.unit_net),
             quantity = plain(line.quantity),
+            unit = line.unit_code,
             category = category,
             rate = plain(line.vat_rate),
             allowance = line_allowance_xml(line),
@@ -920,6 +938,7 @@ mod tests {
                     line_vat: Some(dec("19")),
                     vat_rate: dec("19"),
                     is_cost_passthrough: false,
+                    unit_code: "C62",
                     discount: None,
                     note: Some("2. & 3. Quartal 2026".to_string()),
                 },
@@ -931,6 +950,7 @@ mod tests {
                     line_vat: Some(Decimal::ZERO),
                     vat_rate: dec("0"),
                     is_cost_passthrough: true,
+                    unit_code: "C62",
                     discount: None,
                     note: None,
                 },
@@ -1014,6 +1034,7 @@ mod tests {
                 line_vat: Some(dec("1.91")),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                unit_code: "C62",
                 discount: None,
             })
             .collect();
@@ -1086,6 +1107,7 @@ mod tests {
             line_vat: Some(dec("45.13")),
             vat_rate: dec("19"),
             is_cost_passthrough: false,
+            unit_code: "C62",
             discount: None,
             note: None,
         }];
@@ -1110,6 +1132,7 @@ mod tests {
             line_vat: Some(dec("61.56")),
             vat_rate: dec("19"),
             is_cost_passthrough: false,
+            unit_code: "C62",
             discount: Some(LineDiscount {
                 percent: dec("10"),
                 amount: dec("36"),
@@ -1282,6 +1305,7 @@ mod tests {
                 line_vat: None,
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                unit_code: "C62",
                 discount: None,
                 note: None,
             },
@@ -1293,6 +1317,7 @@ mod tests {
                 line_vat: None,
                 vat_rate: dec("0"),
                 is_cost_passthrough: true,
+                unit_code: "C62",
                 discount: None,
                 note: None,
             },
@@ -1339,6 +1364,7 @@ mod tests {
                 line_vat: Some(dec("248.90")),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                unit_code: "C62",
                 discount: None,
                 note: None,
             },
@@ -1350,6 +1376,7 @@ mod tests {
                 line_vat: Some(Decimal::ZERO),
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                unit_code: "C62",
                 discount: None,
                 note: None,
             },
@@ -1387,6 +1414,7 @@ mod tests {
                 line_vat: Some(dec("59.85")),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                unit_code: "C62",
                 discount: None,
             },
             EInvoiceLine {
@@ -1398,6 +1426,7 @@ mod tests {
                 line_vat: Some(Decimal::ZERO),
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                unit_code: "C62",
                 discount: None,
             },
         ];

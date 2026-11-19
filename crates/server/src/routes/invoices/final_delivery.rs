@@ -12,7 +12,8 @@
 //! * delivered services of the same catalogue service that no estimate line
 //!   links ("siblings": the second report, the appointment units) are
 //!   proposed as lines of their own under that estimate line;
-//! * a line without any such record keeps the estimate quantity
+//! * a line whose service is still planned proposes nothing (not delivered,
+//!   QA 2026-11-19); only a line linking no service keeps the estimate
 //!   («по смете»);
 //! * delivered services matching no estimate line are proposed as lines
 //!   outside the estimate.
@@ -109,6 +110,10 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                     .filter_map(|id| json_uuid(Some(id)))
                     .collect::<Vec<_>>()
             };
+            let is_cost_passthrough = item
+                .get("is_cost_passthrough")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             Some(OrderServiceFact {
                 id: json_uuid(item.get("id"))?,
                 status: text("status"),
@@ -125,14 +130,16 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                 unit_price: json_decimal(item.get("unit_price"))
                     .unwrap_or(Decimal::ZERO)
                     .round_cents(),
-                vat_rate: json_decimal(item.get("vat_rate"))
-                    .unwrap_or(Decimal::ZERO)
-                    .round_commercial(2),
+                // A pass-through service stores its purchase rate; the
+                // patient is billed 0 % (QA 2026-11-19, S1-1).
+                vat_rate: money::billed_vat_rate(
+                    is_cost_passthrough,
+                    json_decimal(item.get("vat_rate"))
+                        .unwrap_or(Decimal::ZERO)
+                        .round_commercial(2),
+                ),
                 discount_percent: money::json_discount_percent(item),
-                is_cost_passthrough: item
-                    .get("is_cost_passthrough")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                is_cost_passthrough,
                 billing_invoice_ids: ids("billing_invoice_ids"),
                 credited_invoice_ids: ids("credited_invoice_ids"),
                 waived: item.get("waived").and_then(Value::as_bool).unwrap_or(false),
@@ -177,11 +184,15 @@ impl LineDelivery {
         if let Some(actual) = self.linked_actual {
             return actual.round_commercial(2);
         }
-        if self.tracked_by_siblings {
+        // A service the order still has planned was not delivered: the
+        // final invoice proposes nothing for it, also for the estimated
+        // outlays («Voraussichtliche Auslagen»); staff may still type a
+        // quantity (QA 2026-11-19, S1-2). Only a line linking no service at
+        // all (a legacy quote) keeps the estimate.
+        if self.tracked_by_siblings || self.linked_quantity.is_some() {
             return Decimal::ZERO;
         }
-        self.linked_quantity
-            .map_or(quoted, |quantity| quantity.round_commercial(2).min(quoted))
+        quoted
     }
 }
 
@@ -311,18 +322,14 @@ pub(crate) fn extra_service_line(
     quantity: Decimal,
     comment: Option<String>,
 ) -> (Value, money::LineAmounts) {
-    let amounts = money::line_amounts(
-        quantity,
-        fact.unit_price,
-        fact.vat_rate,
-        fact.discount_percent,
-    );
+    let vat_rate = money::billed_vat_rate(fact.is_cost_passthrough, fact.vat_rate);
+    let amounts = money::line_amounts(quantity, fact.unit_price, vat_rate, fact.discount_percent);
     let mut line = json!({
         "description": fact.description,
         "quantity": money::money_string(quantity),
         "unit": fact.unit.clone().unwrap_or_else(|| "unit".to_string()),
         "unit_price": money::money_string(fact.unit_price),
-        "vat_rate": money::money_string(fact.vat_rate),
+        "vat_rate": money::money_string(vat_rate),
         "line_net": money::money_string(amounts.net),
         "line_vat": money::money_string(amounts.vat),
         "line_gross": money::money_string(amounts.gross),
@@ -349,6 +356,10 @@ pub(crate) fn extra_service_line(
 /// Error code: a picked service is not a delivered, unbilled service of the
 /// order outside the quote.
 pub(super) const ORDER_SERVICE_NOT_BILLABLE: &str = "final_order_service_not_billable";
+
+/// Error code: an estimate line bills more than its own service delivered
+/// while the rest of the delivery is billed on a separate line.
+pub(super) const FINAL_LINE_COUNTS_SEPARATE_SERVICE: &str = "final_line_counts_separate_service";
 
 /// Adds the picked services outside the estimate to a final invoice. Returns
 /// the services the lines bill, for [`ensure_order_services_unbilled_tx`].
@@ -419,6 +430,40 @@ pub(super) fn append_order_service_lines(
         };
         let comment = super::line_comments::normalize_line_comment(selection.comment.as_deref())
             .map_err(|message| super::err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+        // The hours of a separate line of the same service are billed on that
+        // line: its estimate line bills no more than its own service's
+        // delivery, or they are billed twice (QA 2026-11-19, D S2-3: 4 h +
+        // 2 h delivered, the estimate line set to 6 h billed 8 h).
+        if let Some(index) = extra.quote_line_index {
+            let own_delivered = plan.lines.get(index).map(|delivery| {
+                let quoted = quote_lines
+                    .get(index)
+                    .and_then(|line| json_decimal(line.get("quantity")))
+                    .unwrap_or(Decimal::ZERO)
+                    .round_commercial(2);
+                delivery.final_total(quoted)
+            });
+            let estimate_quantity = lines
+                .iter()
+                .filter(|line| {
+                    !is_order_service_line(line)
+                        && line.get("quote_line_index").and_then(Value::as_u64)
+                            == u64::try_from(index).ok()
+                })
+                .filter_map(|line| json_decimal(line.get("quantity")))
+                .sum::<Decimal>();
+            if let Some(own_delivered) = own_delivered
+                && plan.lines[index].linked_actual.is_some()
+                && estimate_quantity > own_delivered
+            {
+                return Err(super::coded_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    FINAL_LINE_COUNTS_SEPARATE_SERVICE,
+                    "The estimate line bills hours another line of this invoice already bills",
+                    json!({ "quote_line_index": index, "order_leistung_id": extra.fact.id }),
+                ));
+            }
+        }
         let (line, amounts) = extra_service_line(&extra.fact, quantity, comment);
         lines.push(line);
         snapshot.total_net = (snapshot.total_net + amounts.net).round_cents();
@@ -710,10 +755,37 @@ mod tests {
     }
 
     #[test]
-    fn a_planned_line_keeps_the_estimate() {
-        let plan = delivery_plan(&[line(1, "3")], &[fact(1, "planned", "3", Some(100))], None);
+    fn a_line_whose_service_is_still_planned_proposes_nothing() {
+        // QA 2026-11-19, S1-2: «Voraussichtliche Auslagen» never delivered.
+        let plan = delivery_plan(&[line(1, "1")], &[fact(1, "planned", "1", Some(100))], None);
         assert!(!plan.lines[0].tracked());
-        assert_eq!(plan.lines[0].final_total(dec("3")), dec("3"));
+        assert_eq!(plan.lines[0].final_total(dec("1")), Decimal::ZERO);
+    }
+
+    #[test]
+    fn a_line_linking_no_service_keeps_the_estimate() {
+        let unlinked = json!({ "description": "Altes Angebot", "quantity": "2" });
+        let plan = delivery_plan(&[unlinked], &[fact(1, "planned", "3", Some(100))], None);
+        assert_eq!(plan.lines[0].final_total(dec("2")), dec("2"));
+    }
+
+    #[test]
+    fn a_pass_through_service_bills_zero_vat() {
+        // QA 2026-11-19, S1-1: the service keeps its purchase rate (19 %).
+        let facts = parse_facts(&json!([{
+            "id": Uuid::from_u128(9).to_string(),
+            "status": "delivered",
+            "quantity": "1",
+            "description": "Klinik MRT",
+            "unit_price": "1200",
+            "vat_rate": "19",
+            "is_cost_passthrough": true,
+        }]));
+        assert_eq!(facts[0].vat_rate, Decimal::ZERO);
+        let (line, amounts) = extra_service_line(&facts[0], dec("1"), None);
+        assert_eq!(line["vat_rate"], "0");
+        assert_eq!(amounts.vat, Decimal::ZERO);
+        assert_eq!(amounts.gross, dec("1200"));
     }
 
     #[test]

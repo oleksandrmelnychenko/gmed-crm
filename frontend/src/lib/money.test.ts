@@ -143,7 +143,15 @@ describe("commercial money rounding", () => {
     expect(first).toEqual({ net: 22.22, vat: 4.22, gross: 26.44 });
     const last = moneyLinePartAmounts({ quantity: 2, unitPriceNet: 33.33, vatRatePercent: 19, discountPercent: 33.33,
       lineQuantity: 3, billedQuantity: 1, lineNet: line.net, lineGross: line.gross, billedNet: first.net, billedGross: first.gross });
-    expect(roundCents(first.gross + last.gross)).toBe(line.gross);
+    // The nets add up to the line; each part's VAT is its own (QA 2026-11-19).
+    expect(roundCents(first.net + last.net)).toBe(line.net);
+    expect(last).toEqual({ net: 44.44, vat: 8.44, gross: 52.88 });
+    // 6 h × 95,00 at 10 %: the second 3 h are 256,50 + 48,74, not the rest 48,73.
+    const hours = moneyLineAmounts(6, 95, 19, 10);
+    const interim = moneyLineAmounts(3, 95, 19, 10);
+    expect(moneyLinePartAmounts({ quantity: 3, unitPriceNet: 95, vatRatePercent: 19, discountPercent: 10,
+      lineQuantity: 6, billedQuantity: 3, lineNet: hours.net, lineGross: hours.gross, billedNet: interim.net, billedGross: interim.gross }))
+      .toEqual({ net: 256.5, vat: 48.74, gross: 305.24 });
     const quoted = moneyLineAmounts(3, 60, 19, 10);
     expect(moneyFinalLinePartAmounts({ quantity: 5, unitPriceNet: 60, vatRatePercent: 19, discountPercent: 10,
       lineQuantity: 3, billedQuantity: 0, lineNet: quoted.net, lineGross: quoted.gross, billedNet: 0, billedGross: 0 }))

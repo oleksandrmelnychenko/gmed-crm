@@ -195,13 +195,17 @@ async fn a_stale_draft_is_not_released_and_hours_above_the_quote_go_on_the_final
     let (_, _, service_id, quote_id) =
         seed_quoted_order(&ctx.app, &ctx.pool, ctx.admin_id, &ceo).await;
 
-    // The draft was made before the report came in.
+    // The draft was made before the report came in; the service still
+    // planned proposes nothing (QA 2026-11-19, S1-2), staff typed 4 h.
     let (status, draft) = call(
         &ctx.app,
         "POST",
         &format!("/api/v1/quotes/{quote_id}/invoices"),
         &ceo,
-        Some(json!({ "invoice_type": "final" })),
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [{ "line_index": 0, "quantity": "4" }],
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{draft:?}");
@@ -325,7 +329,11 @@ async fn a_fully_credited_final_invoice_leaves_the_quote_open_for_a_new_invoice(
             "POST",
             &format!("/api/v1/quotes/{quote_id}/invoices"),
             &token,
-            Some(json!({ "invoice_type": "final" })),
+            // The 4 h still planned are billed as typed (QA 2026-11-19, S1-2).
+            Some(json!({
+                "invoice_type": "final",
+                "line_items": [{ "line_index": 0, "quantity": 4 }],
+            })),
         )
         .await
     };
@@ -589,7 +597,10 @@ async fn a_payment_below_a_cent_is_refused() {
         "POST",
         &format!("/api/v1/quotes/{quote_id}/invoices"),
         &ceo,
-        Some(json!({ "invoice_type": "final" })),
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [{ "line_index": 0, "quantity": 4 }],
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
@@ -665,6 +676,19 @@ async fn interpreter_case_with_tariff(
     tariff_price: Option<Decimal>,
     discount_percent: Decimal,
 ) -> InterpreterCase {
+    interpreter_case_with_outlays(ctx, token, planned, tariff_price, discount_percent, None).await
+}
+
+/// [`interpreter_case_with_tariff`] whose quote also names estimated
+/// outlays: a planned pass-through line «Voraussichtliche Auslagen».
+async fn interpreter_case_with_outlays(
+    ctx: &support::TestSuiteContext,
+    token: &str,
+    planned: i64,
+    tariff_price: Option<Decimal>,
+    discount_percent: Decimal,
+    outlays: Option<Decimal>,
+) -> InterpreterCase {
     seed_issuer(&ctx.pool, ctx.admin_id).await;
     let (catalog_id, catalog_price): (Uuid, Decimal) = sqlx::query_as(
         r#"SELECT id, unit_price FROM agency_service_catalog
@@ -718,6 +742,20 @@ async fn interpreter_case_with_tariff(
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
+    if let Some(outlays) = outlays {
+        sqlx::query(
+            r#"INSERT INTO order_leistungen (
+                   order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+                   is_cost_passthrough
+               ) VALUES ($1, $2, 'Voraussichtliche Auslagen', 1, $3, 'EUR', 0, TRUE)"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(outlays)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    }
     let (status, quote) = call(
         &ctx.app,
         "POST",
@@ -2300,4 +2338,215 @@ async fn advance_interim_and_final_of_a_discounted_line_settle_to_the_cent() {
         money(&interim["balance_due"]) + money(&released["balance_due"]),
         whole.gross - advance_paid
     );
+}
+
+fn line_by_description<'a>(invoice: &'a Value, description: &str) -> &'a Value {
+    invoice["line_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| line["description"] == description)
+        .unwrap_or_else(|| panic!("no line {description}: {invoice:?}"))
+}
+
+/// QA 2026-11-19, S1-1 / S1-2: a clinic cost added during the order as a
+/// pass-through bills 0 % (its 19 % is the purchase VAT), and the estimated
+/// outlays never delivered are not proposed on the final invoice.
+#[tokio::test]
+async fn a_final_bills_a_pass_through_added_later_at_zero_and_skips_undelivered_outlays() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case_with_outlays(
+        &ctx,
+        &ceo,
+        3,
+        Some(Decimal::from(95)),
+        Decimal::ZERO,
+        Some(Decimal::from(3000)),
+    )
+    .await;
+    report_hours(&ctx, &ceo, &case, 3.0, 1).await;
+    let clinic_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               is_cost_passthrough, vat_source, status, delivered_at
+           ) VALUES ($1, $2, 'Klinik MRT Zusatz', 1, 1200, 'EUR', 19, TRUE, 'manual',
+                     'delivered', now())
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let quote = get_quote(&ctx, &ceo, &case.quote_id).await;
+    let outlays = line_by_description(&quote, "Voraussichtliche Auslagen").clone();
+    assert_eq!(
+        money(&outlays["final_quantity"]),
+        Decimal::ZERO,
+        "{outlays:?}"
+    );
+    let outlays_index = quote["line_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|line| line["description"] == "Voraussichtliche Auslagen")
+        .unwrap();
+    let hours_index = 1 - outlays_index;
+    let extra = quote["delivered_services_outside_quote"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|extra| extra["order_leistung_id"] == clinic_id.to_string())
+        .unwrap()
+        .clone();
+    assert_eq!(money(&extra["vat_rate"]), Decimal::ZERO, "{extra:?}");
+
+    // Without a selection: the delivered hours only, no outlays.
+    let (status, proposal) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{proposal:?}");
+    assert_eq!(
+        proposal["line_items"].as_array().unwrap().len(),
+        1,
+        "{proposal:?}"
+    );
+    assert_eq!(
+        money(&proposal["total_gross"]),
+        gross_of(Decimal::from(3), Decimal::from(95))
+    );
+    let (status, cancelled) = call(
+        &ctx.app,
+        "POST",
+        &format!(
+            "/api/v1/invoices/{}/status",
+            proposal["id"].as_str().unwrap()
+        ),
+        &ceo,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [
+                { "line_index": hours_index, "quantity": 3 },
+                { "line_index": outlays_index, "quantity": 0 },
+            ],
+            "order_services": [{ "order_leistung_id": clinic_id, "quantity": 1 }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    let clinic = line_by_description(&invoice, "Klinik MRT Zusatz");
+    assert_eq!(clinic["is_cost_passthrough"], true);
+    assert_eq!(money(&clinic["vat_rate"]), Decimal::ZERO, "{clinic:?}");
+    assert_eq!(money(&clinic["line_vat"]), Decimal::ZERO);
+    assert_eq!(money(&clinic["line_gross"]), Decimal::from(1200));
+    assert_eq!(
+        money(&invoice["total_gross"]),
+        gross_of(Decimal::from(3), Decimal::from(95)) + Decimal::from(1200)
+    );
+    let released = release_invoice(&ctx, &ceo, invoice["id"].as_str().unwrap()).await;
+    // VAT only on the 3 h: 285,00 × 19 % = 54,15.
+    assert_eq!(
+        money(&released["total_vat"]),
+        Decimal::new(5415, 2),
+        "{released:?}"
+    );
+}
+
+/// QA 2026-11-19, S1-4: 6 h × 95,00 at 10 %; the interim bills 3 h, the
+/// final the other 3 h. Both are 256,50 + 48,74 = 305,24 (VAT per line),
+/// not the quote's rest 305,23.
+#[tokio::test]
+async fn the_rest_of_a_line_on_the_final_rounds_its_vat_per_line() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case =
+        interpreter_case_with_tariff(&ctx, &ceo, 6, Some(Decimal::from(95)), Decimal::from(10))
+            .await;
+    let (status, interim) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({ "invoice_type": "interim", "line_items": [{ "line_index": 0, "quantity": 3 }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{interim:?}");
+    assert_eq!(money(&interim["total_gross"]), Decimal::new(30524, 2));
+    release_invoice(&ctx, &ceo, interim["id"].as_str().unwrap()).await;
+    report_hours(&ctx, &ceo, &case, 6.0, 1).await;
+
+    let quote = get_quote(&ctx, &ceo, &case.quote_id).await;
+    assert_eq!(
+        money(&quote["line_items"][0]["final_quantity"]),
+        Decimal::from(3)
+    );
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    let line = &invoice["line_items"][0];
+    assert_eq!(money(&line["line_net"]), Decimal::new(25650, 2), "{line:?}");
+    assert_eq!(money(&line["line_vat"]), Decimal::new(4874, 2), "{line:?}");
+    assert_eq!(
+        money(&line["line_gross"]),
+        Decimal::new(30524, 2),
+        "{line:?}"
+    );
+    assert_eq!(money(&invoice["total_vat"]), Decimal::new(4874, 2));
+    assert_eq!(money(&invoice["total_gross"]), Decimal::new(30524, 2));
+    release_invoice(&ctx, &ceo, invoice["id"].as_str().unwrap()).await;
+}
+
+/// QA 2026-11-19, B S2-1: 1,5 h delivered, staff bill 2 h on the final. The
+/// dialog allows it, so the release does too (owner 2026-11-17).
+#[tokio::test]
+async fn a_final_above_the_recorded_delivery_is_released() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case(&ctx, &ceo, 3).await;
+    report_hours(&ctx, &ceo, &case, 1.5, 1).await;
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(
+            json!({ "invoice_type": "final", "line_items": [{ "line_index": 0, "quantity": 2 }] }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    assert_eq!(
+        money(&invoice["total_gross"]),
+        gross_of(Decimal::from(2), case.unit_price)
+    );
+    release_invoice(&ctx, &ceo, invoice["id"].as_str().unwrap()).await;
 }

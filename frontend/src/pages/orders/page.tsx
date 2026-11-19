@@ -9679,7 +9679,12 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field htmlFor="order-service-vatRate" label={t.orders_service_vat_percent}>
+                <Field
+                  htmlFor="order-service-vatRate"
+                  label={leistungForm.isCostPassthrough
+                    ? (lang === "de" ? "MwSt. Einkauf, % · Patient 0 %" : "НДС закупки, % · пациенту 0 %")
+                    : t.orders_service_vat_percent}
+                >
                   <Input
                     id="order-service-vatRate"
                     value={leistungForm.vatRate}

@@ -6,6 +6,8 @@ const AGENCY_SERVICE_NAME_LABEL_KEYS: Partial<Record<string, TranslationKey>> = 
   interpreter_hours: "revenue_agency_service_catalog_interpreter_hours",
   airport_transfer: "revenue_agency_service_catalog_airport_transfer",
   concierge_companion: "revenue_agency_service_catalog_concierge_companion",
+  // The pass-through estimate the lead wizard adds (QA 2026-11-19, S3-11).
+  estimated_outlays: "revenue_estimated_outlays",
 };
 
 // Names the seeded catalogue items carry or carried (English demo texts, the
@@ -26,6 +28,8 @@ const AGENCY_SERVICE_NAME_TO_KEY: Partial<Record<string, string>> = {
   "companion support": "concierge_companion",
   "concierge-begleitung": "concierge_companion",
   "сопровождение консьержа": "concierge_companion",
+  "voraussichtliche auslagen": "estimated_outlays",
+  "предполагаемые расходы": "estimated_outlays",
 };
 
 // Descriptions of the seeded catalogue items in every language they were

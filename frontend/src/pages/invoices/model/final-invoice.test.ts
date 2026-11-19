@@ -108,11 +108,13 @@ describe("final invoice proposal", () => {
     expect(finalInvoiceSummary({ line_items: lines }, current)).toEqual({ estimate: 333.2, actual: 142.8, difference: -190.4 });
   });
 
-  it("counts delivered units outside the estimate under their line", () => {
+  it("keeps delivered units outside the estimate on their own line", () => {
+    // QA 2026-11-19 (B S2-2, D S2-3): the separate line is not the estimate
+    // line's actual, or following the pill bills it twice.
     const lines = [hours({ final_quantity: "0" })];
     const sibling = { ...extraVisit, unit_price: "60", quantity: "2", quote_line_index: 0 };
     const current = form(lines, [sibling]);
-    expect(finalLineComparison(lines[0], 0, current, [sibling])).toMatchObject({ actual: 2, difference: -1 });
+    expect(finalLineComparison(lines[0], 0, current, [sibling])).toMatchObject({ actual: 0, difference: -3, notDelivered: true });
     expect(finalOrderServicesPayload(current, [sibling])).toEqual([{ order_leistung_id: "svc-1", quantity: 2 }]);
   });
 
@@ -173,5 +175,12 @@ describe("finalOwnExtrasGross", () => {
     expect(finalOwnExtrasGross(form([hours()], extras), extras)).toBe(119);
     const none = { ...form([hours()], extras), orderServiceQuantities: { "svc-1": "0", "svc-2": "1" } };
     expect(finalOwnExtrasGross(none, extras)).toBe(0);
+  });
+
+  it("prices the difference pill as one line, like the invoice line (QA 2026-11-19)", () => {
+    // 3 h × 95,00 at 10 %: 256,50 + 48,74 = 305,24, not 3 × 101,75 = 305,25.
+    const line = hours({ quantity: "6", unit_price: "95", discount_percent: "10", line_net: "513", line_vat: "97.47", line_gross: "610.47", final_quantity: "3" });
+    const current = form([line]);
+    expect(finalLineComparison(line, 0, current).differenceGross).toBe(-305.24);
   });
 });

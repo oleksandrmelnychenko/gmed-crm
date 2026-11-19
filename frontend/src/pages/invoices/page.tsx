@@ -230,6 +230,7 @@ import {
   formatDate,
   formatDateTime,
   invoiceToStatusForm,
+  statusFormChanges,
   invoiceToPayerForm,
   invoiceToVisibilityForm,
   invoiceDisplayNumber,
@@ -372,6 +373,7 @@ const INVOICE_STATUS_LABEL_KEYS = {
   overdue: "revenue_invoice_status_overdue",
   cancelled: "revenue_invoice_status_cancelled",
   credited: "revenue_invoice_status_credited",
+  advance_covered: "revenue_invoice_status_advance_covered",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const INVOICE_TYPE_LABEL_KEYS = {
@@ -1920,6 +1922,7 @@ function useStaffInvoicesPageContent() {
   const loadedInvoiceIdRef = useRef<string | null>(null);
   const statusDialogOpenRef = useRef(statusDialogOpen);
   statusDialogOpenRef.current = statusDialogOpen;
+  const keepStatusFormRef = useRef(false);
   const applyLoadedInvoiceDetail = useCallback((
     data: NonNullable<typeof detail>,
     dunning: typeof dunningEvents,
@@ -2421,7 +2424,12 @@ function useStaffInvoicesPageContent() {
     }
   }
 
-  const statusDirty = Boolean(detail && hasFormChanges(statusForm, invoiceToStatusForm(detail)));
+  const statusDirty = Boolean(detail && statusFormChanges(statusForm, detail));
+  // An open status dialog with input (a Storno reason being typed) survives
+  // background reloads of the same invoice (QA 2026-11-19, S2-2).
+  keepStatusFormRef.current = Boolean(
+    statusDialogOpen && detail && hasFormChanges(statusForm, invoiceToStatusForm(detail)),
+  );
   const statusFormProblem = detail
     ? invoiceStatusFormProblem(detail, statusForm, new Date())
     : null;

@@ -47,6 +47,19 @@ pub fn vat_amount(net: Decimal, vat_rate_percent: Decimal) -> Decimal {
     round_cents(net * vat_rate_percent / Decimal::ONE_HUNDRED)
 }
 
+/// VAT rate a line bills the patient with. A pass-through cost
+/// (durchlaufender Posten) is re-billed at 0 % whatever VAT its purchase
+/// carried: the order service keeps the purchase rate in its `vat_rate`
+/// («0 % (закупка 19 %)»), every quote and invoice line built from it bills
+/// 0 % (QA 2026-11-19, S1-1).
+pub fn billed_vat_rate(is_cost_passthrough: bool, vat_rate: Decimal) -> Decimal {
+    if is_cost_passthrough {
+        Decimal::ZERO
+    } else {
+        vat_rate
+    }
+}
+
 /// Rounded net, VAT and gross amounts of one document line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineAmounts {
@@ -179,11 +192,14 @@ pub fn line_amounts(
 }
 
 /// Amounts of one part of a line billed in parts (e.g. 2,5 h and 0,5 h of a
-/// 3 h quote line). The part that completes the line's quantity takes exactly
-/// what the line total has left after the parts billed before; any other part
-/// is rounded on its own but never takes more than that rest. So the parts of
-/// a line never add up to more than the line, and all of them add up to it
-/// exactly (QA 2026-11-15, A-1).
+/// 3 h quote line). The NET of the part that completes the line's quantity is
+/// exactly what the line's net has left after the parts billed before; any
+/// other part's net is rounded on its own but never more than that rest, so
+/// the nets of the parts add up to the line's net (QA 2026-11-15, A-1). The
+/// VAT of every part is its own: round(part net × rate), each invoice on its
+/// own, no remainder of the estimate's VAT (owner money rule, QA 2026-11-19
+/// S1-4 / D S1-1: 3 h of 6 h × 85,50 is 256,50 + 48,74 on both invoices).
+/// The grosses of the parts may therefore differ from the line's by a cent.
 #[allow(clippy::too_many_arguments)]
 pub fn line_part_amounts(
     part_quantity: Decimal,
@@ -196,27 +212,28 @@ pub fn line_part_amounts(
     billed: LineAmounts,
 ) -> LineAmounts {
     let rest_net = (line.net - billed.net).max(Decimal::ZERO);
-    let rest_gross = (line.gross - billed.gross).max(rest_net);
-    let rest = LineAmounts {
-        net: rest_net,
-        vat: rest_gross - rest_net,
-        gross: rest_gross,
-    };
-    if billed_quantity + part_quantity >= line_quantity {
-        return rest;
-    }
-    let own = line_amounts(part_quantity, unit_price_net, vat_rate, discount_percent);
-    if own.net <= rest.net && own.gross <= rest.gross {
-        own
+    let net = if billed_quantity + part_quantity >= line_quantity {
+        rest_net
     } else {
-        rest
+        line_amounts(part_quantity, unit_price_net, vat_rate, discount_percent)
+            .net
+            .min(rest_net)
+    };
+    let vat = vat_amount(net, vat_rate);
+    LineAmounts {
+        net,
+        vat,
+        gross: round_cents(net + vat),
     }
 }
 
 /// Amounts a final invoice bills of a quote line: the delivered quantity,
 /// which may pass the quoted one (owner 2026-11-17). Up to the quote it is
 /// [`line_part_amounts`]; a line billed for the first time is priced as a
-/// whole; otherwise the quantity beyond the quote is added at the unit price.
+/// whole; otherwise the net left of the line plus the net of the quantity
+/// beyond it. The VAT is always that of the invoice line's own net (QA
+/// 2026-11-19, S1-4: 3 h × 85,50 is 256,50 + 48,74 = 305,24 whether an interim
+/// invoice billed part of the line before or not).
 #[allow(clippy::too_many_arguments)]
 pub fn final_line_part_amounts(
     part_quantity: Decimal,
@@ -245,34 +262,24 @@ pub fn final_line_part_amounts(
         return line_amounts(part_quantity, unit_price_net, vat_rate, discount_percent);
     }
     let within = (line_quantity - billed_quantity).max(Decimal::ZERO);
-    let rest = if within > Decimal::ZERO {
-        line_part_amounts(
-            within,
-            billed_quantity,
-            line_quantity,
-            unit_price_net,
-            vat_rate,
-            discount_percent,
-            line,
-            billed,
-        )
+    let rest_net = if within > Decimal::ZERO {
+        (line.net - billed.net).max(Decimal::ZERO)
     } else {
-        LineAmounts {
-            net: Decimal::ZERO,
-            vat: Decimal::ZERO,
-            gross: Decimal::ZERO,
-        }
+        Decimal::ZERO
     };
-    let excess = line_amounts(
+    let excess_net = line_amounts(
         part_quantity - within,
         unit_price_net,
         vat_rate,
         discount_percent,
-    );
+    )
+    .net;
+    let net = rest_net + excess_net;
+    let vat = vat_amount(net, vat_rate);
     LineAmounts {
-        net: rest.net + excess.net,
-        vat: rest.vat + excess.vat,
-        gross: rest.gross + excess.gross,
+        net,
+        vat,
+        gross: round_cents(net + vat),
     }
 }
 
@@ -455,6 +462,44 @@ mod tests {
     }
 
     #[test]
+    fn a_final_part_rounds_its_vat_as_a_line_of_its_own() {
+        // QA 2026-11-19, S1-4: 6 h × 95,00 at 10 % = 513,00 + 97,47. The
+        // interim billed 3 h (256,50 + 48,74); the final's 3 h are
+        // 256,50 + 48,74 = 305,24 as well, not the quote's rest 305,23.
+        let discount = dec("10");
+        let line = line_amounts(dec("6"), dec("95"), dec("19"), discount);
+        assert_eq!((line.net, line.vat), (dec("513.00"), dec("97.47")));
+        let billed = line_amounts(dec("3"), dec("95"), dec("19"), discount);
+        assert_eq!(billed.gross, dec("305.24"));
+        let rest = final_line_part_amounts(
+            dec("3"),
+            dec("3"),
+            dec("6"),
+            dec("95"),
+            dec("19"),
+            discount,
+            line,
+            billed,
+        );
+        assert_eq!(
+            (rest.net, rest.vat, rest.gross),
+            (dec("256.50"), dec("48.74"), dec("305.24"))
+        );
+        // The whole line billed at once keeps the quote's amounts.
+        let whole = final_line_part_amounts(
+            dec("6"),
+            Decimal::ZERO,
+            dec("6"),
+            dec("95"),
+            dec("19"),
+            discount,
+            line,
+            line_amounts(Decimal::ZERO, dec("95"), dec("19"), discount),
+        );
+        assert_eq!(whole, line);
+    }
+
+    #[test]
     fn non_negative_amounts_are_read_as_typed() {
         for (raw, expected) in [
             ("500", "500"),
@@ -611,10 +656,11 @@ mod tests {
                 let amounts = part(quantity, &billed_quantity.to_string(), line, billed);
                 billed = plus(billed, amounts);
                 billed_quantity += dec(quantity);
-                assert!(billed.net <= line.net && billed.gross <= line.gross);
+                assert!(billed.net <= line.net);
+                assert_eq!(amounts.vat, vat_amount(amounts.net, dec("19")));
                 assert!(amounts.vat >= Decimal::ZERO);
             }
-            assert_eq!(billed, line);
+            assert_eq!(billed.net, line.net);
         }
     }
 
@@ -638,9 +684,10 @@ mod tests {
             );
             billed = plus(billed, amounts);
             billed_quantity += Decimal::ONE;
-            assert!(billed.net <= line.net && billed.gross <= line.gross);
+            assert!(billed.net <= line.net);
+            assert_eq!(amounts.vat, vat_amount(amounts.net, dec("19")));
         }
-        assert_eq!(billed, line);
+        assert_eq!(billed.net, line.net);
     }
 
     #[test]
@@ -784,10 +831,11 @@ mod tests {
                 );
                 billed = plus(billed, amounts);
                 billed_quantity += dec(quantity);
-                assert!(billed.net <= line.net && billed.gross <= line.gross);
+                assert!(billed.net <= line.net);
+                assert_eq!(amounts.vat, vat_amount(amounts.net, dec("19")));
                 assert!(amounts.vat >= Decimal::ZERO);
             }
-            assert_eq!(billed, line);
+            assert_eq!(billed.net, line.net);
         }
         // A first part is priced with the discount: 1 h of 33,33 at 33,33 %
         // is 33,33 − 11,11 = 22,22 net.

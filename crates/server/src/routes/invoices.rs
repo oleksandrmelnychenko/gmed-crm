@@ -4010,7 +4010,28 @@ async fn enrich_invoice_line_items(
                     }
                     // A service without a classified source, billed from the
                     // quote: the line's VAT is the quote's.
-                    if map.get("vat_source").and_then(Value::as_str) == Some("legacy")
+                    // A pass-through cost bills 0 %; the service's own
+                    // (purchase) VAT source does not explain the line.
+                    if map
+                        .get("is_cost_passthrough")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        let vat_rate = map
+                            .get("vat_rate")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned);
+                        map.insert("vat_source".to_string(), json!("pass_through"));
+                        map.insert(
+                            "vat_source_explanation".to_string(),
+                            json!(vat_source_explanation(
+                                "pass_through",
+                                None,
+                                None,
+                                vat_rate.as_deref()
+                            )),
+                        );
+                    } else if map.get("vat_source").and_then(Value::as_str) == Some("legacy")
                         && fallback_vat_source(map) == "quote"
                     {
                         let vat_rate = map
@@ -4304,10 +4325,11 @@ pub(super) async fn ensure_quote_line_parts_within_totals(
         else {
             continue;
         };
+        // Nets add up to the line; each part's VAT is rounded on its own net
+        // (QA 2026-11-19, D S1-1), so the grosses may pass it by cents.
         let totals = quote_line_amounts(line);
         let net = row.try_get::<Decimal, _>("net").unwrap_or(Decimal::ZERO);
-        let gross = row.try_get::<Decimal, _>("gross").unwrap_or(Decimal::ZERO);
-        if net > totals.net || gross > totals.gross {
+        if net > totals.net {
             return Err(err(
                 StatusCode::CONFLICT,
                 "Invoice quantity changed; reload the quote and try again",
@@ -15247,6 +15269,7 @@ async fn load_einvoice(
                 line_vat: Some(decimal(line.get("line_vat")).unwrap_or(vat)),
                 vat_rate,
                 is_cost_passthrough,
+                unit_code: zugferd::unit_code(line.get("unit").and_then(Value::as_str)),
                 // The printed position's «Rabatt» line (XML = PDF, fix-99).
                 discount: zugferd::stored_line_discount(line),
             }
@@ -17206,6 +17229,24 @@ async fn update_invoice_status(
                         "Failed to update invoice",
                     );
                 }
+            }
+        }
+        match release::passthrough_lines_with_vat(&mut transaction, invoice_id).await {
+            Ok(lines) if lines.is_empty() => {}
+            Ok(lines) => {
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    release::PASSTHROUGH_WITH_VAT,
+                    "A pass-through cost is billed with VAT; cancel the draft and make a new invoice",
+                    json!({ "services_label": lines.join(", ") }),
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "check the pass-through lines of a draft");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
             }
         }
         if locked_invoice_type != "advance" {

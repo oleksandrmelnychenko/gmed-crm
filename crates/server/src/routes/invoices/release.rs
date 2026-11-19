@@ -213,18 +213,26 @@ pub(super) async fn services_billed_above_actuals(
         r#"SELECT service.description
            FROM order_leistungen service
            WHERE service.status <> 'cancelled'
-             -- A final invoice may bill more than a service still planned:
-             -- staff set the quantity no record holds yet (owner 2026-11-17).
-             -- Above a recorded delivery the draft is stale and refused.
+             -- A final invoice bills what staff set as actually delivered,
+             -- above the order's record too (owner 2026-11-17: 3 h planned,
+             -- 5 h actual is billable); the dialog allows it, so the release
+             -- does not refuse it (QA 2026-11-19, B S2-1). Only a draft made
+             -- before the delivery was recorded is stale and refused. A
+             -- termination settlement keeps the check.
              AND NOT (
-                 service.status = 'planned'
-                 AND EXISTS (
+                 EXISTS (
                      SELECT 1 FROM invoices releasing
                      WHERE releasing.id = $1 AND releasing.invoice_type = 'final'
                        AND NOT EXISTS (
                            SELECT 1 FROM order_termination_settlements settlement
                            WHERE settlement.final_invoice_id = releasing.id
                        )
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM invoice_order_line_allocations own
+                     WHERE own.invoice_id = $1
+                       AND own.order_leistung_id = service.id
+                       AND GREATEST(service.delivered_at, service.approved_at) > own.created_at
                  )
              )
              AND service.id IN (
@@ -242,6 +250,38 @@ pub(super) async fn services_billed_above_actuals(
                    AND NOT invoice_quote_line_credited(invoice.id, allocation.quote_line_index)
              ) > round(service.quantity, 2)
            ORDER BY service.created_at, service.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(conn)
+    .await
+}
+
+/// Error code of a release refused because a pass-through line carries VAT.
+pub(super) const PASSTHROUGH_WITH_VAT: &str = "invoice_passthrough_line_with_vat";
+
+/// Descriptions of the draft's pass-through lines billed with VAT. A
+/// durchlaufender Posten is billed at 0 %; the VAT of its purchase is not the
+/// patient's (QA 2026-11-19, S1-1). A draft made before the fix is refused
+/// instead of being numbered with 19 %.
+pub(super) async fn passthrough_lines_with_vat(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT COALESCE(line.value ->> 'description', '')
+           FROM invoices invoice
+           CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
+                    THEN invoice.line_items ELSE '[]'::jsonb END
+           ) AS line(value)
+           WHERE invoice.id = $1
+             AND line.value -> 'is_cost_passthrough' = 'true'::jsonb
+             AND (
+                 CASE WHEN BTRIM(line.value ->> 'vat_rate') ~ '^-?[0-9]+(\.[0-9]+)?$'
+                      THEN BTRIM(line.value ->> 'vat_rate')::NUMERIC <> 0 ELSE FALSE END
+                 OR CASE WHEN BTRIM(line.value ->> 'line_vat') ~ '^-?[0-9]+(\.[0-9]+)?$'
+                      THEN BTRIM(line.value ->> 'line_vat')::NUMERIC <> 0 ELSE FALSE END
+             )"#,
     )
     .bind(invoice_id)
     .fetch_all(conn)

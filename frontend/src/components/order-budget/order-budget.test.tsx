@@ -7,6 +7,7 @@ import {
   orderBudgetState,
   orderBudgetText,
   plannedVisitsDeltaGross,
+  serviceLineDeltaGross,
   type OrderBudget,
 } from "./order-budget";
 import { OrderBudgetLine } from "./order-budget-indicator";
@@ -174,5 +175,12 @@ describe("order budget indicator", () => {
     expect(html).not.toContain("title=");
     expect(orderBudgetSourceText(totals, "ru")).toBeNull();
     expect(plannedVisitsDeltaGross(totals, 2)).toBe(0);
+  });
+
+  it("previews a typed service with its discount (QA 2026-11-19, S1-3)", () => {
+    // 3 h × 95,00 at 10 %: 256,50 + 48,74 = 305,24, not 339,15.
+    expect(serviceLineDeltaGross({ quantity: "3", unitPrice: "95", vatRate: "19", discountPercent: "10" })).toBe(305.24);
+    expect(serviceLineDeltaGross({ quantity: "3", unitPrice: "95", vatRate: "19", discountPercent: "" })).toBe(339.15);
+    expect(serviceLineDeltaGross({ quantity: "1", unitPrice: "1200", vatRate: "19", isCostPassthrough: true })).toBe(0);
   });
 });

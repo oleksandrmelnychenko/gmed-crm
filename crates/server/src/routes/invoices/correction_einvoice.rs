@@ -162,6 +162,8 @@ fn line(line: &CreditNoteLine) -> EInvoiceLine {
         line_vat: Some(round_cents(line.vat)),
         vat_rate: line.vat_rate.normalize(),
         is_cost_passthrough: line.is_cost_passthrough,
+        // A credited part is one piece; a whole line keeps no unit label here.
+        unit_code: "C62",
         // A credited part is one unit of its (already discounted) amount.
         discount: None,
     }

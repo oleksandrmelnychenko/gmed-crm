@@ -21,6 +21,7 @@ import {
   defaultReleaseDueDate,
   dunningLetterFileName,
   invoiceDisplayNumber,
+  invoiceDisplayStatus,
   invoiceIssuedAt,
   invoiceDocumentState,
   invoiceStatusFormProblem,
@@ -28,6 +29,7 @@ import {
   invoiceRecipientAddressLines,
   invoiceToPayerForm,
   knownPayerRole,
+  statusFormChanges,
   payerFormToPayload,
   payerRelationOptionLabel,
   payerRoleLabel,
@@ -745,5 +747,28 @@ describe("canStornoInvoice", () => {
     expect(canStornoInvoice({ ...final, paid_amount: "87.77", release_advance_rest_gross: "87.77" })).toBe(true);
     expect(canStornoInvoice({ ...final, prepayment_applied_amount: "0", paid_amount: "87.77", release_advance_rest_gross: "87.77" })).toBe(true);
     expect(canStornoInvoice({ ...final, paid_amount: "100.00", release_advance_rest_gross: "87.77" })).toBe(false);
+  });
+});
+
+describe("display status of an invoice covered by an advance", () => {
+  // QA 2026-11-19, S2-3: an interim read «Оплачен» with 0,00 paid.
+  it("reads paid only once the advance is set off on it", () => {
+    const interim = { status: "sent", display_status: null, amount_to_pay: "0", prepayment_applied_amount: "0", advance_credit_available: "548" };
+    expect(invoiceDisplayStatus(interim)).toBe("advance_covered");
+    expect(invoiceDisplayStatus({ ...interim, prepayment_applied_amount: "548", advance_credit_available: "0" })).toBe("paid");
+    expect(invoiceDisplayStatus({ ...interim, amount_to_pay: "10" })).toBe("sent");
+  });
+});
+
+describe("status form changes", () => {
+  // QA 2026-11-19, S2-2: a reason alone changed nothing and answered 200.
+  it("sends only a status, due date or (before the release) remark change", () => {
+    const sent = { status: "sent", due_date: "2026-12-01", notes: "Bemerkung", released_at: "2026-11-19T10:00:00Z" } as unknown as InvoiceItem;
+    const form = { status: "sent", dueDate: "2026-12-01", notes: "Bemerkung", reason: "" } as const;
+    expect(statusFormChanges({ ...form, reason: "Fehler" }, sent)).toBe(false);
+    expect(statusFormChanges({ ...form, status: "cancelled", reason: "Fehler" }, sent)).toBe(true);
+    expect(statusFormChanges({ ...form, notes: "neu" }, sent)).toBe(false);
+    const draft = { ...sent, status: "draft", released_at: null } as unknown as InvoiceItem;
+    expect(statusFormChanges({ ...form, status: "draft", notes: "neu" }, draft)).toBe(true);
   });
 });
