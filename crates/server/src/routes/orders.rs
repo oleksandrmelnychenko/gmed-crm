@@ -2115,7 +2115,8 @@ async fn load_order_process_readiness(
                   package_coverage_decided_by,
                   package_coverage_decided_at,
                   signed_patient,
-                  signed_agency
+                  signed_agency,
+                  (client_signed_terms IS NOT NULL AND NOT signed_patient) AS signature_reset
            FROM orders
            WHERE id = $1"#,
     )
@@ -2208,6 +2209,9 @@ async fn load_order_process_readiness(
         .unwrap_or_default();
     let signed_patient: bool = gate_row.try_get("signed_patient").unwrap_or(false);
     let signed_agency: bool = gate_row.try_get("signed_agency").unwrap_or(false);
+    // The client had signed; a later change of the services reset both
+    // signatures (owner 2026-11-19: keeps resetting) — the to-do names it.
+    let signature_reset: bool = gate_row.try_get("signature_reset").unwrap_or(false);
     let overdue_invoice_count: i64 = finance_row
         .try_get("overdue_invoice_count")
         .unwrap_or_default();
@@ -2265,7 +2269,11 @@ async fn load_order_process_readiness(
         blocking_reasons.push(reason);
     }
     if !contract_gate_ready {
-        blocking_reasons.push("Order signatures are still incomplete".to_string());
+        blocking_reasons.push(if signature_reset {
+            SIGNATURE_RESET_REASON.to_string()
+        } else {
+            "Order signatures are still incomplete".to_string()
+        });
     }
     // Payment progress is tracked and notified independently of operational access.
 
@@ -4368,6 +4376,8 @@ async fn get_order(
                   ol.source_medical_appointment_id, ol.source_order_amendment_id, ol.agency_service_id,
                   ol.agency_service_price_version_id,
                   ol.external_document_id,
+                  ol.tax_profile_id, line_tp.name AS tax_profile_name,
+                  line_tp.profile_key AS tax_profile_key, line_tp.vat_category AS tax_profile_category,
                   pr.name AS provider_name, d.name AS doctor_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
                   provider_taxonomy.code AS provider_taxonomy_node_code,
@@ -4411,6 +4421,7 @@ async fn get_order(
                LIMIT 1
            ) provider_taxonomy ON true
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           LEFT JOIN tax_profiles line_tp ON line_tp.id = ol.tax_profile_id
            LEFT JOIN LATERAL (
                -- An invoice whose line for this service is credited in full
                -- (the whole invoice, or the line by a line credit note) no
@@ -4578,6 +4589,10 @@ async fn get_order(
             "currency": l.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
             "vat_rate": l.try_get::<rust_decimal::Decimal, _>("vat_rate").unwrap_or(rust_decimal::Decimal::ZERO),
             "discount_percent": l.try_get::<rust_decimal::Decimal, _>("discount_percent").unwrap_or(rust_decimal::Decimal::ZERO),
+            "tax_profile_id": l.try_get::<Option<Uuid>, _>("tax_profile_id").unwrap_or_default(),
+            "tax_profile_name": l.try_get::<Option<String>, _>("tax_profile_name").unwrap_or_default(),
+            "tax_profile_key": l.try_get::<Option<String>, _>("tax_profile_key").unwrap_or_default(),
+            "tax_profile_category": l.try_get::<Option<String>, _>("tax_profile_category").unwrap_or_default(),
             "is_cost_passthrough": l.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
             "status": l.try_get::<String, _>("status").unwrap_or_default(),
             "delivered_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|v| v.to_rfc3339()),
@@ -10804,6 +10819,8 @@ async fn list_leistungen(
                   ol.source_interpreter_report_id, ol.source_medical_appointment_id, ol.source_order_amendment_id,
                   ol.agency_service_id, ol.agency_service_price_version_id,
                   ol.external_document_id,
+                  ol.tax_profile_id, line_tp.name AS tax_profile_name,
+                  line_tp.profile_key AS tax_profile_key, line_tp.vat_category AS tax_profile_category,
                   pr.name AS provider_name, d.name AS doctor_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
                   provider_taxonomy.code AS provider_taxonomy_node_code,
@@ -10835,6 +10852,7 @@ async fn list_leistungen(
                LIMIT 1
            ) provider_taxonomy ON true
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           LEFT JOIN tax_profiles line_tp ON line_tp.id = ol.tax_profile_id
            LEFT JOIN documents doc ON doc.id = ol.external_document_id
            WHERE ol.order_id = $1
            ORDER BY ol.created_at"#,
@@ -10864,6 +10882,10 @@ async fn list_leistungen(
                     "currency": r.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "vat_rate": r.try_get::<rust_decimal::Decimal, _>("vat_rate").unwrap_or(rust_decimal::Decimal::ZERO),
                     "discount_percent": r.try_get::<rust_decimal::Decimal, _>("discount_percent").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "tax_profile_id": r.try_get::<Option<Uuid>, _>("tax_profile_id").unwrap_or_default(),
+                    "tax_profile_name": r.try_get::<Option<String>, _>("tax_profile_name").unwrap_or_default(),
+                    "tax_profile_key": r.try_get::<Option<String>, _>("tax_profile_key").unwrap_or_default(),
+                    "tax_profile_category": r.try_get::<Option<String>, _>("tax_profile_category").unwrap_or_default(),
                     "is_cost_passthrough": r.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
                     "cancelled_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default(),
@@ -10911,6 +10933,12 @@ async fn list_leistungen(
         }
     }
 }
+
+/// The order changed after the client signed and both signatures were reset
+/// (owner 2026-11-19): the Einzelauftrag and the cost estimate are signed
+/// again. Frontend: `SIGNATURE_RESET_REASON` in `blocking-reasons.ts`.
+pub(crate) const SIGNATURE_RESET_REASON: &str =
+    "Services changed after signing: the Einzelauftrag and the cost estimate must be signed again";
 
 /// VAT source of a new order line (`tax_profile_id`, `vat_source`): a catalog
 /// service takes its rate from the catalog (or the catalog's tax profile), any
@@ -11218,42 +11246,28 @@ async fn add_leistung(
     // The position's tax profile (owner 2026-11-19): the one staff chose,
     // else the catalogue's, the pass-through profile for a pass-through cost
     // or the one profile of the typed rate. Its rate is the position's VAT.
-    let chosen_profile = match body.tax_profile_id {
-        Some(profile_id) => match line_tax::active_profile(&state.db, profile_id).await {
-            Ok(Some(profile)) => Some(profile),
-            Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "The tax profile is not active",
-                );
-            }
-            Err(error) => {
-                tracing::error!(%error, %order_id, "load the tax profile of a service");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to add service");
-            }
-        },
-        None => None,
+    let resolved_profile = match state.db.acquire().await {
+        Ok(mut conn) => {
+            line_tax::resolve(
+                &mut conn,
+                body.tax_profile_id,
+                passthrough,
+                tax_profile_id,
+                vat,
+            )
+            .await
+        }
+        Err(error) => Err(error),
     };
-    let fallback_profile = if chosen_profile.is_some() {
-        Ok(None)
-    } else if passthrough {
-        line_tax::pass_through_profile(&state.db).await
-    } else if let Some(catalog_profile) = tax_profile_id {
-        line_tax::active_profile(&state.db, catalog_profile).await
-    } else {
-        line_tax::unique_profile_for_rate(&state.db, vat).await
-    };
-    let profile = match fallback_profile {
-        Ok(fallback) => chosen_profile.or(fallback),
+    let profile = match resolved_profile {
+        Ok(Ok(profile)) => profile,
+        Ok(Err(message)) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
         Err(error) => {
             tracing::error!(%error, %order_id, "resolve the tax profile of a service");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to add service");
         }
     };
     if let Some(profile) = profile {
-        if let Some(message) = line_tax::mismatch(&profile, passthrough) {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, message);
-        }
         tax_profile_id = Some(profile.id);
         vat_source = "tax_profile";
         vat = profile.vat_rate;
@@ -12817,11 +12831,13 @@ async fn resolve_amendment_vat(
     treatment: &'static str,
 ) -> Result<AmendmentVat, sqlx::Error> {
     if treatment == "cost_passthrough" {
+        // «Durchlaufender Posten 0 %» (owner 2026-11-19).
+        let profile = line_tax::pass_through_profile(&mut *conn).await?;
         return Ok(AmendmentVat {
             treatment,
             vat_rate: rust_decimal::Decimal::ZERO,
             is_cost_passthrough: true,
-            tax_profile_id: None,
+            tax_profile_id: profile.map(|profile| profile.id),
         });
     }
     let profile = sqlx::query(

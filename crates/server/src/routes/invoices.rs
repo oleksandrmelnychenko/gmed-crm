@@ -34,6 +34,7 @@ use gmed_domain::role::Role;
 pub(crate) mod advance_application;
 mod advance_rows;
 pub(crate) mod advance_settlement;
+mod closing_final;
 mod concierge_lines;
 mod correction_einvoice;
 mod credit_note_pdf;
@@ -1383,10 +1384,7 @@ fn invoice_passthrough_totals(line_items: &Value) -> (Decimal, Decimal, Decimal)
     items.iter().fold(
         (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
         |(net, vat, gross), item| {
-            let is_cost_passthrough = item
-                .get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let is_cost_passthrough = crate::money::json_line_pass_through(&item);
             if !is_cost_passthrough {
                 return (net, vat, gross);
             }
@@ -3356,18 +3354,18 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "item_quantity") => "Кол-во",
         ("en", "item_quantity") => "Qty",
         (_, "item_quantity") => "Menge",
-        ("uk", "item_unit_price") => "Ціна",
-        ("ru", "item_unit_price") => "Цена",
-        ("en", "item_unit_price") => "Unit price",
-        (_, "item_unit_price") => "Einzelpreis",
+        ("uk", "item_unit_price") => "Ціна нетто",
+        ("ru", "item_unit_price") => "Цена нетто",
+        ("en", "item_unit_price") => "Unit price net",
+        (_, "item_unit_price") => "Einzelpreis netto",
         ("uk", "item_vat_rate") => "Ставка ПДВ",
         ("ru", "item_vat_rate") => "Ставка НДС",
         ("en", "item_vat_rate") => "VAT rate",
         (_, "item_vat_rate") => "MwSt.-Satz",
-        ("uk", "item_total") => "Сума",
-        ("ru", "item_total") => "Сумма",
-        ("en", "item_total") => "Total",
-        (_, "item_total") => "Gesamt",
+        ("uk", "item_total") => "Сума брутто",
+        ("ru", "item_total") => "Сумма брутто",
+        ("en", "item_total") => "Total gross",
+        (_, "item_total") => "Gesamt brutto",
         ("uk", "item_net") => "Нетто рядка",
         ("ru", "item_net") => "Нетто позиции",
         ("en", "item_net") => "Line net",
@@ -3540,10 +3538,7 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
                 unit_price: invoice_pdf_value_to_string(item.get("unit_price")),
                 vat_rate: invoice_pdf_value_to_string(item.get("vat_rate")),
                 vat_rate_value,
-                is_cost_passthrough: item
-                    .get("is_cost_passthrough")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                is_cost_passthrough: crate::money::json_line_pass_through(&item),
                 line_gross: invoice_pdf_value_to_string(item.get("line_gross")),
                 line_net,
                 line_vat,
@@ -4025,11 +4020,7 @@ async fn enrich_invoice_line_items(
                     // quote: the line's VAT is the quote's.
                     // A pass-through cost bills 0 %; the service's own
                     // (purchase) VAT source does not explain the line.
-                    if map
-                        .get("is_cost_passthrough")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                    {
+                    if crate::money::json_line_pass_through(&*map) {
                         let vat_rate = map
                             .get("vat_rate")
                             .and_then(Value::as_str)
@@ -4977,10 +4968,7 @@ async fn advance_shares_exceed_open_groups(
         .iter()
         .filter(|line| line.get("source").and_then(Value::as_str) == Some("advance_prepayment"))
         .map(|line| {
-            let passthrough = line
-                .get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let passthrough = crate::money::json_line_pass_through(&line);
             let rate = invoice_json_decimal(line, "vat_rate").unwrap_or(Decimal::ZERO);
             let gross = invoice_json_decimal(line, "line_gross").unwrap_or(Decimal::ZERO);
             (advance_rows::category_for(passthrough, rate), gross)
@@ -5173,10 +5161,7 @@ async fn load_prepayment_advance_groups(
         if gross <= Decimal::ZERO {
             continue;
         }
-        let is_cost_passthrough = item
-            .get("is_cost_passthrough")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let is_cost_passthrough = crate::money::json_line_pass_through(&item);
         let vat_rate = if is_cost_passthrough {
             Decimal::ZERO
         } else {
@@ -9230,6 +9215,42 @@ async fn create_patient_billing_invoice(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    // A final invoice after interim invoices billed every estimate line
+    // closes the order with one informational line at 0,00 € (QA2 D S2-2).
+    if invoice_type == "final"
+        && snapshot.line_items.as_array().is_none_or(Vec::is_empty)
+        && external_ids.is_empty()
+        && concierge_ids.is_empty()
+        && body.order_services.is_empty()
+        && body
+            .line_items
+            .as_ref()
+            .is_none_or(|items| items.is_empty())
+        && let Some(context) = quote_context.as_ref()
+    {
+        match closing_final::closing_interims(&state.db, context).await {
+            Ok(Some(interims)) => {
+                let quote_lines = context
+                    .line_items
+                    .as_array()
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                snapshot.line_items = Value::Array(vec![closing_final::closing_line(
+                    quote_lines,
+                    &context.order_number,
+                    &interims,
+                )]);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(%error, %patient_id, "check a closing final invoice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+        }
+    }
     if snapshot.line_items.as_array().is_none_or(Vec::is_empty)
         && external_ids.is_empty()
         && concierge_ids.is_empty()
@@ -9463,6 +9484,10 @@ async fn create_patient_billing_invoice(
             "line_vat": "0",
             "line_gross": decimal_to_string(remaining),
             "is_cost_passthrough": true,
+            // Re-billed supplier costs are «Durchlaufender Posten 0 %»
+            // (owner 2026-11-19).
+            "vat_category": "pass_through",
+            "tax_profile_key": crate::routes::orders::line_tax::PASS_THROUGH_PROFILE_KEY,
             "source": "external_invoice",
             "source_external_invoice_id": external_id,
             "source_document_id": source.try_get::<Option<Uuid>, _>("source_document_id").unwrap_or_default(),
@@ -9779,7 +9804,7 @@ async fn preview_prepayment_advance(
             .unwrap_or_default()
             .iter()
             .map(|line| json!({
-                "is_cost_passthrough": line.get("is_cost_passthrough").and_then(Value::as_bool).unwrap_or(false),
+                "is_cost_passthrough": crate::money::json_line_pass_through(&line),
                 "vat_rate": line.get("vat_rate").cloned().unwrap_or(json!("0")),
                 "net": line.get("line_net").cloned().unwrap_or(json!("0")),
                 "vat": line.get("line_vat").cloned().unwrap_or(json!("0")),
@@ -9901,6 +9926,42 @@ async fn create_invoice_from_quote(
         validate_invoice_creation_for_quote(&state, &ctx, &invoice_type, prepayment_basis).await
     {
         return resp;
+    }
+    // A final invoice after interim invoices billed every estimate line
+    // closes the order with one informational line at 0,00 € (QA2 D S2-2).
+    if invoice_type == "final"
+        && invoice_snapshot
+            .line_items
+            .as_array()
+            .is_none_or(Vec::is_empty)
+        && body.order_services.is_empty()
+        && body
+            .line_items
+            .as_ref()
+            .is_none_or(|items| items.is_empty())
+    {
+        match closing_final::closing_interims(&state.db, &ctx).await {
+            Ok(Some(interims)) => {
+                let quote_lines = ctx
+                    .line_items
+                    .as_array()
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                invoice_snapshot.line_items = Value::Array(vec![closing_final::closing_line(
+                    quote_lines,
+                    &ctx.order_number,
+                    &interims,
+                )]);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(%error, %quote_id, "check a closing final invoice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+        }
     }
     if invoice_snapshot
         .line_items
@@ -15330,10 +15391,7 @@ async fn load_einvoice(
             let quantity = decimal(line.get("quantity")).unwrap_or(Decimal::ONE);
             let unit_net = decimal(line.get("unit_price")).unwrap_or(Decimal::ZERO);
             let vat_rate = decimal(line.get("vat_rate")).unwrap_or(Decimal::ZERO);
-            let is_cost_passthrough = line
-                .get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let is_cost_passthrough = crate::money::json_line_pass_through(&line);
             let description = line
                 .get("description")
                 .and_then(Value::as_str)
@@ -19262,6 +19320,7 @@ mod invoice_cash_target_tests {
                 unit_price: None,
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                discount_percent: Decimal::ZERO,
                 net: dec("190"),
                 vat: dec("36.10"),
                 gross: dec("226.10"),

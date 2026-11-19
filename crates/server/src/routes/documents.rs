@@ -7733,10 +7733,7 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                     .get("vat_rate")
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned),
-                is_cost_passthrough: object
-                    .get("is_cost_passthrough")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                is_cost_passthrough: crate::money::json_line_pass_through(&object),
                 notes: object
                     .get("notes")
                     .and_then(Value::as_str)
@@ -24529,11 +24526,22 @@ fn build_order_cost_estimate_pdf_with_terms(
         "{}:",
         contract_vat_total_label(&context.line_items.iter().collect::<Vec<_>>())
     );
+    let zero_vat = contract_zero_vat_total(&context.line_items.iter().collect::<Vec<_>>());
+    let zero_vat_label = zero_vat
+        .as_ref()
+        .map(|(label, _)| format!("{label}:"))
+        .unwrap_or_default();
     let totals = [
         ("Nettowert:", displayed_net.as_deref(), false, false),
         (
             vat_label.as_str(),
             context.total_vat.as_deref(),
+            false,
+            false,
+        ),
+        (
+            zero_vat_label.as_str(),
+            zero_vat.as_ref().map(|(_, value)| *value),
             false,
             false,
         ),
@@ -24897,6 +24905,19 @@ fn contract_vat_total_label(items: &[&GeneratedContractLineItem]) -> String {
         [rate] => format!("MwSt. {}%", fmt_vat_rate(*rate)),
         _ => "MwSt.".to_string(),
     }
+}
+
+/// The 0 % line of the totals (QA2 S3): «MwSt. 0%» with 0,00 € when a
+/// service of the document is VAT-free (§ 4 Nr. 14 or exempt).
+fn contract_zero_vat_total(items: &[&GeneratedContractLineItem]) -> Option<(String, &'static str)> {
+    let groups = contract_vat_groups(items);
+    let exempt = groups
+        .iter()
+        .any(|(treatment, _)| matches!(treatment, ContractLineVat::Exempt));
+    let taxed = groups
+        .iter()
+        .any(|(treatment, _)| matches!(treatment, ContractLineVat::Taxed(_)));
+    (exempt && taxed).then(|| ("MwSt. 0%".to_string(), "0,00 €"))
 }
 
 /// VAT note for services that are not all taxed at one rate: names the rate
@@ -25367,9 +25388,18 @@ fn build_cost_coverage_pdf(
         net_without_estimated_outlays(context.total_net.as_deref(), estimated_outlays);
     let displayed_outlays = estimated_outlays.map(format_eur);
     let vat_label = contract_vat_total_label(&context.line_items.iter().collect::<Vec<_>>());
+    let zero_vat = contract_zero_vat_total(&context.line_items.iter().collect::<Vec<_>>());
+    let zero_vat_label = zero_vat
+        .as_ref()
+        .map(|(label, _)| label.clone())
+        .unwrap_or_default();
     for (label, value) in [
         ("Nettowert", displayed_net.as_deref()),
         (vat_label.as_str(), context.total_vat.as_deref()),
+        (
+            zero_vat_label.as_str(),
+            zero_vat.as_ref().map(|(_, value)| *value),
+        ),
         (ESTIMATED_OUTLAYS_DESCRIPTION, displayed_outlays.as_deref()),
         ("Gesamtsumme", context.total_gross.as_deref()),
     ] {
@@ -28583,11 +28613,22 @@ fn build_payer_cost_estimate_pdf_with_terms(
         "{}:",
         contract_vat_total_label(&context.line_items.iter().collect::<Vec<_>>())
     );
+    let zero_vat = contract_zero_vat_total(&context.line_items.iter().collect::<Vec<_>>());
+    let zero_vat_label = zero_vat
+        .as_ref()
+        .map(|(label, _)| format!("{label}:"))
+        .unwrap_or_default();
     let totals = [
         ("Nettowert:", displayed_net.as_deref(), false, false),
         (
             vat_label.as_str(),
             context.total_vat.as_deref(),
+            false,
+            false,
+        ),
+        (
+            zero_vat_label.as_str(),
+            zero_vat.as_ref().map(|(_, value)| *value),
             false,
             false,
         ),

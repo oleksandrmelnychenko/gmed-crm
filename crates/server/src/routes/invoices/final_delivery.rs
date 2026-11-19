@@ -49,6 +49,9 @@ pub(crate) struct OrderServiceFact {
     /// The line's discount in percent (owner 2026-11-18).
     pub discount_percent: Decimal,
     pub is_cost_passthrough: bool,
+    /// The position's tax profile and its category (owner 2026-11-19).
+    pub tax_profile_id: Option<Uuid>,
+    pub vat_category: Option<String>,
     /// Active settlement invoices that bill the service (allocation or line).
     pub billing_invoice_ids: Vec<Uuid>,
     /// Invoices that billed the service and are credited in full.
@@ -110,10 +113,21 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                     .filter_map(|id| json_uuid(Some(id)))
                     .collect::<Vec<_>>()
             };
-            let is_cost_passthrough = item
-                .get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let is_cost_passthrough = crate::money::json_line_pass_through(item)
+                || item
+                    .get("is_cost_passthrough")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+            let tax_profile_id = json_uuid(item.get("tax_profile_id"));
+            let vat_category = tax_profile_id
+                .and(crate::money::json_line_vat_category(item))
+                .map(ToOwned::to_owned);
+            // The profile's rate is the position's rate (owner 2026-11-19).
+            let stored_rate = tax_profile_id
+                .and(json_decimal(item.get("tax_profile_vat_rate")))
+                .or_else(|| json_decimal(item.get("vat_rate")))
+                .unwrap_or(Decimal::ZERO)
+                .round_commercial(2);
             Some(OrderServiceFact {
                 id: json_uuid(item.get("id"))?,
                 status: text("status"),
@@ -132,14 +146,11 @@ pub(crate) fn parse_facts(value: &Value) -> Vec<OrderServiceFact> {
                     .round_cents(),
                 // A pass-through service stores its purchase rate; the
                 // patient is billed 0 % (QA 2026-11-19, S1-1).
-                vat_rate: money::billed_vat_rate(
-                    is_cost_passthrough,
-                    json_decimal(item.get("vat_rate"))
-                        .unwrap_or(Decimal::ZERO)
-                        .round_commercial(2),
-                ),
+                vat_rate: money::billed_vat_rate(is_cost_passthrough, stored_rate),
                 discount_percent: money::json_discount_percent(item),
                 is_cost_passthrough,
+                tax_profile_id,
+                vat_category,
                 billing_invoice_ids: ids("billing_invoice_ids"),
                 credited_invoice_ids: ids("credited_invoice_ids"),
                 waived: item.get("waived").and_then(Value::as_bool).unwrap_or(false),
@@ -338,6 +349,12 @@ pub(crate) fn extra_service_line(
         "source_order_leistung_id": fact.id,
         "quoted_quantity": "0",
     });
+    if let (Some(profile_id), Some(map)) = (fact.tax_profile_id, line.as_object_mut()) {
+        map.insert("tax_profile_id".to_string(), json!(profile_id));
+        if let Some(category) = fact.vat_category.as_deref() {
+            map.insert("vat_category".to_string(), json!(category));
+        }
+    }
     if fact.discount_percent > Decimal::ZERO
         && let Some(map) = line.as_object_mut()
     {
@@ -724,6 +741,8 @@ mod tests {
             vat_rate: Decimal::from(19),
             discount_percent: Decimal::ZERO,
             is_cost_passthrough: false,
+            tax_profile_id: None,
+            vat_category: None,
             billing_invoice_ids: Vec::new(),
             credited_invoice_ids: Vec::new(),
             waived: false,

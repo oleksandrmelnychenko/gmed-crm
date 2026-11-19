@@ -157,6 +157,10 @@ struct Line {
     discount_percent: String,
     agency_service_id: Option<Uuid>,
     agency_service_price_version_id: Option<Uuid>,
+    /// The position's tax profile staff chose (owner 2026-11-19); none takes
+    /// the catalogue's or the one profile of the rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tax_profile_id: Option<Uuid>,
 }
 
 /// The discount of an intake line: empty is none, else 0–100 % with two
@@ -828,6 +832,44 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
             }
         }
         let discount = line_discount(l)?;
+        // The position's tax profile (owner 2026-11-19): staff's choice, else
+        // the catalogue item's, else the one of the rate.
+        let catalog_profile = match l.agency_service_id {
+            Some(service) => sqlx::query_scalar::<_, Option<Uuid>>(
+                "SELECT tax_profile_id FROM agency_service_catalog WHERE id = $1",
+            )
+            .bind(service)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(db_error)?
+            .flatten(),
+            None => None,
+        };
+        let profile = match crate::routes::orders::line_tax::resolve(
+            &mut *conn,
+            l.tax_profile_id,
+            false,
+            catalog_profile,
+            vat,
+        )
+        .await
+        .map_err(db_error)?
+        {
+            Ok(profile) => profile,
+            Err(message) => return Err(invalid(message)),
+        };
+        let line_rate = crate::money::round_commercial(vat, 2);
+        if let Some(profile) = profile.as_ref()
+            && l.tax_profile_id.is_some()
+            && profile.vat_rate != line_rate
+        {
+            return Err(invalid("The VAT rate does not match the tax profile"));
+        }
+        // A catalogue profile whose rate is not the line's (an older price)
+        // is not forced onto it: the INSERT trigger takes the one of the rate.
+        let profile_id = profile
+            .filter(|profile| l.tax_profile_id.is_some() || profile.vat_rate == line_rate)
+            .map(|profile| profile.id);
         total += crate::money::line_amounts(qty, price, vat, discount).gross;
         let key = format!("order-intake:{id}:{}", l.id);
         let note = d.catalog_snapshot["services"]
@@ -855,14 +897,14 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
             });
         // vat_source: a catalog line's rate comes from the catalog, any other
         // line was priced in the wizard (not the "legacy" column default).
-        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes,vat_source,discount_percent)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1),$9,CASE WHEN $7::uuid IS NULL THEN 'manual' ELSE 'catalog' END,$10) ON CONFLICT(order_id,client_reference)
+        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes,vat_source,discount_percent,tax_profile_id)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1),$9,CASE WHEN $11::uuid IS NOT NULL THEN 'tax_profile' WHEN $7::uuid IS NULL THEN 'manual' ELSE 'catalog' END,$10,$11) ON CONFLICT(order_id,client_reference)
             DO UPDATE SET description=EXCLUDED.description,quantity=EXCLUDED.quantity,unit_price=EXCLUDED.unit_price,vat_rate=EXCLUDED.vat_rate,discount_percent=EXCLUDED.discount_percent,
                 agency_service_id=EXCLUDED.agency_service_id,agency_service_price_version_id=EXCLUDED.agency_service_price_version_id,notes=EXCLUDED.notes,
-                vat_source=EXCLUDED.vat_source
+                vat_source=EXCLUDED.vat_source,tax_profile_id=EXCLUDED.tax_profile_id
             RETURNING id")
             .bind(id).bind(l.description.trim()).bind(qty).bind(price).bind(vat).bind(key)
-            .bind(l.agency_service_id).bind(l.agency_service_price_version_id).bind(note).bind(discount)
+            .bind(l.agency_service_id).bind(l.agency_service_price_version_id).bind(note).bind(discount).bind(profile_id)
             .fetch_one(&mut *conn).await.map_err(db_error)?;
         ids.push(service_id);
     }

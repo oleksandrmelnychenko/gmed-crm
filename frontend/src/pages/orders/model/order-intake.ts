@@ -16,6 +16,8 @@ export type IntakeLine = {
   agency_service_id: string | null; agency_service_price_version_id: string | null;
   /** Discount in percent (owner 2026-11-18); empty or absent is none. */
   discount_percent?: string;
+  /** The position's tax profile (owner 2026-11-19); absent: the catalogue's. */
+  tax_profile_id?: string | null;
 };
 export type IntakeDraft = {
   step: number; facts: IntakeFacts; needs_description: string;

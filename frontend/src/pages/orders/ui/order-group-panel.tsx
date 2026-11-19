@@ -100,9 +100,12 @@ export function OrderGroupPanel({
   orderId,
   canManage = true,
   onPayerSaved,
+  refreshKey,
 }: {
   orderId: string;
   canManage?: boolean;
+  /** Changes when the order's positions change: the group total is read again (QA2 A S3-1). */
+  refreshKey?: string;
   /** The order view reloads: a new payer is screened and may hold the order (QA C2-07). */
   onPayerSaved?: () => void;
 }) {
@@ -166,7 +169,7 @@ export function OrderGroupPanel({
     return () => {
       active = false;
     };
-  }, [orderId]);
+  }, [orderId, refreshKey]);
 
   async function run(
     action: () => Promise<unknown>,

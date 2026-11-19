@@ -40,8 +40,8 @@ fn from_row(row: &sqlx::postgres::PgRow) -> LineTaxProfile {
 }
 
 /// An active, currently valid profile by id.
-pub(crate) async fn active_profile(
-    db: &sqlx::PgPool,
+pub(crate) async fn active_profile<'e>(
+    db: impl sqlx::PgExecutor<'e>,
     id: Uuid,
 ) -> Result<Option<LineTaxProfile>, sqlx::Error> {
     Ok(sqlx::query(
@@ -58,8 +58,8 @@ pub(crate) async fn active_profile(
 }
 
 /// The pass-through profile.
-pub(crate) async fn pass_through_profile(
-    db: &sqlx::PgPool,
+pub(crate) async fn pass_through_profile<'e>(
+    db: impl sqlx::PgExecutor<'e>,
 ) -> Result<Option<LineTaxProfile>, sqlx::Error> {
     Ok(sqlx::query(
         "SELECT id, vat_rate, vat_category FROM tax_profiles WHERE profile_key = $1 AND is_active",
@@ -73,8 +73,8 @@ pub(crate) async fn pass_through_profile(
 
 /// The one active profile (not pass-through) with this rate; `None` when
 /// none or several match (0 % is both § 4 Nr. 14 and «exempt»: staff pick).
-pub(crate) async fn unique_profile_for_rate(
-    db: &sqlx::PgPool,
+pub(crate) async fn unique_profile_for_rate<'e>(
+    db: impl sqlx::PgExecutor<'e>,
     vat_rate: Decimal,
 ) -> Result<Option<LineTaxProfile>, sqlx::Error> {
     let rows = sqlx::query(
@@ -92,6 +92,48 @@ pub(crate) async fn unique_profile_for_rate(
         [row] => Some(from_row(row)),
         _ => None,
     })
+}
+
+/// The profile of a position a staff path creates (service form, lead
+/// wizard, order wizard): the one staff chose, else the pass-through profile
+/// for a pass-through cost, else the catalogue item's, else
+/// the one profile of the typed rate. `Ok(Err(message))` is the 422 answer:
+/// a chosen profile that is inactive or does not fit the position. The
+/// automatic paths get the same profile from the INSERT trigger
+/// `resolve_order_line_tax_profile` (migration 20261119180000).
+pub(crate) async fn resolve(
+    conn: &mut sqlx::PgConnection,
+    chosen: Option<Uuid>,
+    is_cost_passthrough: bool,
+    catalog_profile: Option<Uuid>,
+    vat_rate: Decimal,
+) -> Result<Result<Option<LineTaxProfile>, &'static str>, sqlx::Error> {
+    let profile = if let Some(id) = chosen {
+        match active_profile(&mut *conn, id).await? {
+            Some(profile) => Some(profile),
+            None => return Ok(Err("The tax profile is not active")),
+        }
+    } else if is_cost_passthrough {
+        pass_through_profile(&mut *conn).await?
+    } else {
+        let catalog = match catalog_profile {
+            Some(id) => active_profile(&mut *conn, id)
+                .await?
+                .filter(|profile| !profile.pass_through),
+            None => None,
+        };
+        match catalog {
+            Some(profile) => Some(profile),
+            None => unique_profile_for_rate(&mut *conn, vat_rate).await?,
+        }
+    };
+    if let Some(message) = profile
+        .as_ref()
+        .and_then(|profile| mismatch(profile, is_cost_passthrough))
+    {
+        return Ok(Err(message));
+    }
+    Ok(Ok(profile))
 }
 
 /// Why a profile does not fit the position, for the 422 answer.

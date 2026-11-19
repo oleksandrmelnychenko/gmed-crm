@@ -7756,6 +7756,7 @@ function useOrdersPageContent() {
                     >
                       <OrderGroupPanel
                         orderId={orderDetail.id}
+                        refreshKey={`${String(orderDetail.total_estimated ?? "")}|${orderDetail.leistungen?.length ?? 0}`}
                         canManage={canManageOrderGroupAndAmendments}
                         onPayerSaved={() => setReloadNonce((current) => current + 1)}
                       />

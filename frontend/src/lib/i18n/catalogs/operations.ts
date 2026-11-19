@@ -386,6 +386,7 @@ export interface OperationsTranslations {
   lead_readiness_reason_lead_must_be_qualified: string;
   lead_readiness_reason_already_converted: string;
   lead_readiness_check_address_present: string;
+  lead_readiness_check_address_country_present: string;
   lead_readiness_check_specialties_present: string;
   lead_readiness_check_identity_document_verified: string;
   lead_readiness_check_dsgvo_document_signed: string;
@@ -406,6 +407,7 @@ export interface OperationsTranslations {
   lead_readiness_check_debt_clear: string;
   lead_readiness_check_prepayment_ready: string;
   lead_readiness_reason_address_incomplete: string;
+  lead_readiness_reason_address_country_missing: string;
   lead_readiness_reason_city_zip_incomplete: string;
   lead_readiness_reason_specialty_missing: string;
   lead_readiness_reason_anamnesis_incomplete: string;
@@ -1010,6 +1012,7 @@ export const operationsRu: OperationsTranslations = {
     "Перед созданием пациента лид должен быть квалифицирован",
   lead_readiness_reason_already_converted: "Лид уже конвертирован",
   lead_readiness_check_address_present: "Адрес заполнен (при медицинском согласии)",
+  lead_readiness_check_address_country_present: "Страна адреса указана",
   lead_readiness_check_specialties_present: "Специализация выбрана",
   lead_readiness_check_identity_document_verified: "Документ, удостоверяющий личность, проверен",
   lead_readiness_check_dsgvo_document_signed: "Документ DSGVO подписан",
@@ -1035,6 +1038,7 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_check_debt_clear: "Нет просроченных счетов",
   lead_readiness_check_prepayment_ready: "Требуемая предоплата получена",
   lead_readiness_reason_address_incomplete: "Заполните улицу, город и почтовый индекс",
+  lead_readiness_reason_address_country_missing: "Укажите страну адреса: без неё счёт не выставить",
   lead_readiness_reason_city_zip_incomplete: "Заполните город и почтовый индекс",
   lead_readiness_reason_specialty_missing: "Не выбрана специализация",
   lead_readiness_reason_anamnesis_incomplete: "Анамнез заполнен не полностью",
@@ -1660,6 +1664,7 @@ export const operationsDe: OperationsTranslations = {
     "Vor dem Anlegen eines Patienten muss der Lead qualifiziert sein",
   lead_readiness_reason_already_converted: "Lead ist bereits konvertiert",
   lead_readiness_check_address_present: "Adresse erfasst (bei medizinischer Einwilligung)",
+  lead_readiness_check_address_country_present: "Land der Adresse erfasst",
   lead_readiness_check_specialties_present: "Gewünschte Fachrichtung ausgewählt",
   lead_readiness_check_identity_document_verified: "Ausweisdokument geprüft",
   lead_readiness_check_dsgvo_document_signed: "DSGVO-Dokument unterschrieben",
@@ -1686,6 +1691,7 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_check_debt_clear: "Keine überfälligen Rechnungen",
   lead_readiness_check_prepayment_ready: "Erforderliche Vorauszahlung erhalten",
   lead_readiness_reason_address_incomplete: "Straße, Ort und Postleitzahl vervollständigen",
+  lead_readiness_reason_address_country_missing: "Land der Adresse angeben: ohne es keine Rechnung",
   lead_readiness_reason_city_zip_incomplete: "Ort und Postleitzahl vervollständigen",
   lead_readiness_reason_specialty_missing: "Gewünschte Fachrichtung fehlt",
   lead_readiness_reason_anamnesis_incomplete: "Anamnese ist unvollständig",

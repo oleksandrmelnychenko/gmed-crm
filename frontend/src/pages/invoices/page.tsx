@@ -225,6 +225,7 @@ import {
   effectiveAdvanceBasis,
   invoiceLineSelectionPayload,
   isOverageOnlyInvoice,
+  isClosingFinalPossible,
   isInvoiceSelectionValid,
   formatCurrency,
   formatDate,
@@ -2129,8 +2130,9 @@ function useStaffInvoicesPageContent() {
     const prepaymentAdvance =
       effectiveAdvanceBasis(createForm, selectedCreateQuote) === "prepayment";
     const overageOnly = isOverageOnlyInvoice(selectedCreateQuote, createForm);
+    const closingFinal = isClosingFinalPossible(selectedCreateQuote, createForm);
     const deliveredServices = selectedCreateQuote.delivered_services_outside_quote ?? [];
-    if (!prepaymentAdvance && !overageOnly && !isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm, deliveredServices)) {
+    if (!prepaymentAdvance && !overageOnly && !closingFinal && !isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm, deliveredServices)) {
       setCreateError(lang === "de" ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.");
       return;
     }
@@ -2156,7 +2158,7 @@ function useStaffInvoicesPageContent() {
             due_date: createForm.dueDate || null,
             notes: createForm.notes.trim() || null,
             internal_note: createForm.internalNote.trim() || null,
-            ...(overageOnly ? {} : { line_items: selectedLines }),
+            ...(overageOnly || closingFinal ? {} : { line_items: selectedLines }),
             ...documentTerms,
             ...(createForm.invoiceType === "final"
               ? { order_services: finalOrderServicesPayload(createForm, deliveredServices) }

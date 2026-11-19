@@ -12,6 +12,7 @@ import { agencyServiceLineDisplayDescription, agencyServiceLineDisplayName } fro
 import { listAgencyServicePriceChoices } from "@/pages/contracts/model/contracts-model";
 import type { AgencyServiceItem } from "@/pages/contracts/model/types";
 import type { ServiceLine } from "../model/order-service-line";
+import type { PositionTaxProfile } from "../model/order-model";
 import { money, germanDateLabel, formatMoneyValue, priceVersionDisplayName, serviceBillingUnitLabel, serviceBillingUnitBadgeLabel, serviceBillingUnitBadgeClass } from "../model/order-service-presentation";
 type Tx = (ru: string, de: string) => string;
 const inputString = (value: unknown) => String(value ?? "");
@@ -26,7 +27,17 @@ function serviceLineNet(line: ServiceLine): number {
   return moneyLineAmounts(money(line.quantity), money(line.price), 0, serviceLineDiscount(line)).net;
 }
 
-export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDiscountChange, onDelete, totals, lineLocked }: {
+/** The profiles a line may carry: the pass-through profile for a pass-through cost only. */
+export function taxProfilesForLine(line: Pick<ServiceLine, "isCostPassthrough">, profiles: readonly PositionTaxProfile[]) {
+  return profiles.filter((profile) => (profile.vat_category === "pass_through") === (line.isCostPassthrough === true));
+}
+
+/** «Standard VAT · 19 %»: the profile as a pill or option. */
+export function taxProfileLabel(profile: Pick<PositionTaxProfile, "name" | "vat_rate">) {
+  return `${profile.name} · ${String(Number(profile.vat_rate))} %`;
+}
+
+export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDiscountChange, onTaxProfileChange, taxProfiles = [], onDelete, totals, lineLocked }: {
   lines: ServiceLine[]; catalogById: ReadonlyMap<string, AgencyServiceItem>; effectiveOn?: string; lang: Lang; tx: Tx; disabled: boolean;
   describe: (line: ServiceLine) => string;
   selectedPriceId: (line: ServiceLine, service: AgencyServiceItem) => string;
@@ -34,6 +45,9 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
   onPriceChange: (line: ServiceLine, service: AgencyServiceItem, priceId: string) => void;
   /** Without it the discount is shown, not edited. */
   onDiscountChange?: (line: ServiceLine, value: string) => void;
+  /** The position's tax profile picked (owner 2026-11-19); without it the profile is a pill. */
+  onTaxProfileChange?: (line: ServiceLine, profile: PositionTaxProfile | null) => void;
+  taxProfiles?: readonly PositionTaxProfile[];
   onDelete: (line: ServiceLine) => void;
   totals: { net: number; vat: number; gross: number };
   /** A line this table shows but does not change (the lead wizard: one the order workspace added). */
@@ -266,8 +280,35 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
       accessor: (line) => money(line.vat),
       sortable: false,
       align: "right",
-      width: 100,
-      render: (line) => <span className="whitespace-nowrap">{formatMoneyValue(money(line.vat), lang)}%</span>,
+      width: 200,
+      render: (line) => {
+        const rate = <span className="whitespace-nowrap font-mono tabular-nums">{formatMoneyValue(money(line.vat), lang)}%</span>;
+        const choices = taxProfilesForLine(line, taxProfiles);
+        const current = taxProfiles.find((profile) => profile.id === line.taxProfileId);
+        if (onTaxProfileChange && choices.length && !disabled && !locked(line)) {
+          return (
+            <span className="flex flex-col items-end gap-0.5">
+              {rate}
+              <NativeComboboxSelect
+                aria-label={`${tx("Налоговый профиль", "Steuerprofil")}: ${line.description}`}
+                value={line.taxProfileId ?? ""}
+                onChange={(event) => onTaxProfileChange(line, choices.find((profile) => profile.id === event.target.value) ?? null)}
+                className="h-6 max-w-44 rounded-md px-1.5 text-[11px]"
+              >
+                <option value="">{tx("По каталогу", "Standard des Katalogs")}</option>
+                {choices.map((profile) => <option key={profile.id} value={profile.id}>{taxProfileLabel(profile)}</option>)}
+              </NativeComboboxSelect>
+            </span>
+          );
+        }
+        const name = current ? taxProfileLabel(current) : line.taxProfileName;
+        return (
+          <span className="flex flex-col items-end gap-0.5">
+            {rate}
+            {name ? <Badge variant="outline" className="h-auto max-w-44 truncate px-1.5 py-0 text-[10px] font-normal" title={name}>{name}</Badge> : null}
+          </span>
+        );
+      },
     },
     {
       id: "total",

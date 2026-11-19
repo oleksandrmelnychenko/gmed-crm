@@ -2932,6 +2932,8 @@ struct LeadConversionReadinessInput {
     street_address: Option<String>,
     city: Option<String>,
     zip_code: Option<String>,
+    /// The address country: every invoice to the patient needs it (QA2 S2-1).
+    address_country: Option<String>,
     // The reason of the request (staff `primary_concern_text` or the lead's
     // own `request_reason`) is optional since 2026-10-19 (owner) and is not
     // part of the readiness.
@@ -3020,6 +3022,9 @@ struct LeadConversionReadinessInput {
     uncounted_parents_unacknowledged: Vec<String>,
 }
 
+/// Conversion blocker: the address country is missing (QA2 S2-1).
+const ADDRESS_COUNTRY_MISSING: &str = "Address country is missing";
+
 fn evaluate_lead_conversion_readiness(
     input: &LeadConversionReadinessInput,
 ) -> LeadConversionReadiness {
@@ -3049,6 +3054,12 @@ fn evaluate_lead_conversion_readiness(
                 .is_some_and(|value| !value.trim().is_empty())
         });
     let address_ready = !input.consent_healthcare || address_present;
+    // Invoices to the patient need the address country (QA2 S2-1): asked
+    // before the conversion, not first at «Выставить счёт».
+    let address_country_present = input
+        .address_country
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
     let specialties_present = match &input.requested_specialties {
         Value::Array(items) => items.iter().any(|value| match value {
             Value::String(value) => !value.trim().is_empty(),
@@ -3169,6 +3180,14 @@ fn evaluate_lead_conversion_readiness(
             "passed": address_ready,
             "blocking_for": "conversion",
             "stage": "master_data",
+        }),
+        json!({
+            "key": "address_country_present",
+            "label": "Address country captured",
+            "passed": address_country_present,
+            "blocking_for": "conversion",
+            "stage": "master_data",
+            "field": "country",
         }),
         json!({
             "key": "specialties_present",
@@ -3356,6 +3375,9 @@ fn evaluate_lead_conversion_readiness(
     if input.consent_healthcare && !address_present {
         conversion_reasons.push("Complete street, city and postal code".to_string());
     }
+    if !address_country_present {
+        conversion_reasons.push(ADDRESS_COUNTRY_MISSING.to_string());
+    }
     if !specialties_present {
         conversion_reasons.push("Requested specialty is missing".to_string());
     }
@@ -3522,6 +3544,7 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         street_address: row.try_get("street_address").unwrap_or_default(),
         city: row.try_get("city").unwrap_or_default(),
         zip_code: row.try_get("zip_code").unwrap_or_default(),
+        address_country: row.try_get("country").unwrap_or_default(),
         requested_specialties: row
             .try_get("requested_specialties")
             .unwrap_or_else(|_| json!([])),
@@ -14970,6 +14993,7 @@ mod lead_conversion_readiness_tests {
             street_address: Some("Hauptstr. 1".to_string()),
             city: Some("Berlin".to_string()),
             zip_code: Some("10115".to_string()),
+            address_country: Some("DE".to_string()),
             requested_specialties: json!(["orthopedics"]),
             consent_privacy_practices: true,
             consent_healthcare: true,

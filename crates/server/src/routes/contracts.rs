@@ -269,6 +269,12 @@ struct QuoteLineItem {
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     notes: Option<String>,
+    /// The order position's tax profile and its category (owner
+    /// 2026-11-19): invoices bill this profile's rate and category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tax_profile_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vat_category: Option<String>,
 }
 
 /// `discount_percent` and `discount_amount` of a stored line: both only when
@@ -736,9 +742,7 @@ fn stored_quote_line_signatures(value: &Value) -> Option<Vec<String>> {
             strict_quote_decimal_value(item.get("quantity"))?,
             strict_quote_decimal_value(item.get("unit_price"))?,
             strict_quote_decimal_value(item.get("vat_rate"))?,
-            item.get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            crate::money::json_line_pass_through(&item),
             money::json_discount_percent(&Value::Object(item.clone())),
         ));
     }
@@ -4321,6 +4325,8 @@ fn normalize_custom_line_items(
             provider_id: item.provider_id,
             doctor_id: item.doctor_id,
             notes: item.notes.clone(),
+            tax_profile_id: None,
+            vat_category: None,
         });
     }
 
@@ -4337,11 +4343,27 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
         let unit_price = row
             .try_get::<Decimal, _>("unit_price")
             .unwrap_or(Decimal::ZERO);
+        // The position's tax profile decides rate and category (owner
+        // 2026-11-19); a line without one keeps its stored rate.
+        let tax_profile_id = row
+            .try_get::<Option<Uuid>, _>("tax_profile_id")
+            .unwrap_or_default();
+        let vat_category = row
+            .try_get::<Option<String>, _>("tax_profile_category")
+            .unwrap_or_default()
+            .filter(|_| tax_profile_id.is_some());
         let is_cost_passthrough = row
             .try_get::<bool, _>("is_cost_passthrough")
-            .unwrap_or(false);
+            .unwrap_or(false)
+            || vat_category.as_deref() == Some("pass_through");
+        let profile_rate = row
+            .try_get::<Option<Decimal>, _>("tax_profile_vat_rate")
+            .unwrap_or_default()
+            .filter(|_| tax_profile_id.is_some());
         let vat_rate = if is_cost_passthrough {
             Decimal::ZERO
+        } else if let Some(rate) = profile_rate {
+            rate
         } else {
             row.try_get::<Decimal, _>("vat_rate")
                 .unwrap_or(Decimal::ZERO)
@@ -4403,6 +4425,8 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
                 .try_get::<Option<Uuid>, _>("doctor_id")
                 .unwrap_or_default(),
             notes,
+            tax_profile_id,
+            vat_category,
         });
     }
 
@@ -4414,16 +4438,20 @@ async fn load_quote_line_items_from_order_tx(
     order_id: Uuid,
 ) -> Result<Vec<QuoteLineItem>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT id, description, agency_service_description_snapshot, agency_service_description_items_snapshot,
-                  quantity, unit_price_snapshot AS unit_price,
-                  vat_rate_snapshot AS vat_rate, is_cost_passthrough, discount_percent,
-                  external_document_id, provider_id, doctor_id, notes
-           FROM order_leistungen
-           WHERE order_id = $1
-             AND status NOT IN ('invoiced', 'cancelled')
-           ORDER BY (is_cost_passthrough AND description = 'Voraussichtliche Auslagen'),
-                    created_at, id
-           FOR SHARE"#,
+        r#"SELECT line.id, line.description, line.agency_service_description_snapshot,
+                  line.agency_service_description_items_snapshot,
+                  line.quantity, line.unit_price_snapshot AS unit_price,
+                  line.vat_rate_snapshot AS vat_rate, line.is_cost_passthrough, line.discount_percent,
+                  line.external_document_id, line.provider_id, line.doctor_id, line.notes,
+                  line.tax_profile_id, profile.vat_category AS tax_profile_category,
+                  profile.vat_rate AS tax_profile_vat_rate
+           FROM order_leistungen line
+           LEFT JOIN tax_profiles profile ON profile.id = line.tax_profile_id
+           WHERE line.order_id = $1
+             AND line.status NOT IN ('invoiced', 'cancelled')
+           ORDER BY (line.is_cost_passthrough AND line.description = 'Voraussichtliche Auslagen'),
+                    line.created_at, line.id
+           FOR SHARE OF line"#,
     )
     .bind(order_id)
     .fetch_all(&mut **tx)

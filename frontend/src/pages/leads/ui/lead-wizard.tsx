@@ -36,6 +36,7 @@ import { orderPeriodWarnings } from "../model/order-period-warnings";
 import { createNewestLoadGuard, type NewestLoadGuard } from "../model/newest-load-guard";
 import { repeatConsentNote, requestConsentStatus } from "../model/request-consents";
 import { OrderCatalogServicesTable, serviceLineDiscount } from "@/pages/orders/ui/order-catalog-services-table";
+import { usePositionTaxProfiles } from "@/pages/orders/data/use-position-tax-profiles";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
 import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeLabel, serviceBillingUnitBadgeClass, formatMoneyValue, priceVersionDisplayName, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 export { resolveServiceDescriptionTemplate, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
@@ -1099,6 +1100,10 @@ const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "insuranceProvider",
   "insuranceNumber",
 ];
+
+/** The address country (QA2 S2-1: invoices need it, asked before the conversion). */
+const ADDRESS_COUNTRY_FIELD_ID = "lead-wizard-country";
+const ADDRESS_COUNTRY_MISSING_REASON = "Address country is missing";
 
 const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
   referrerPatientId: "lead-wizard-referrer-patient",
@@ -2621,6 +2626,8 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
     quantity: String(item.quantity ?? "1"),
     price: String(item.unit_price_snapshot ?? item.unit_price ?? ""),
     discount: money(item.discount_percent) > 0 ? String(money(item.discount_percent)) : "",
+    taxProfileId: item.tax_profile_id ?? null,
+    taxProfileName: item.tax_profile_name ?? null,
     vat: String(
       item.is_cost_passthrough
         ? 0
@@ -2956,6 +2963,7 @@ function readinessReasonStep(reason: string): StepId {
     "Healthcare consent is missing": "documents",
     "Complete street, city and postal code": "master_data",
     "Complete city and postal code": "master_data",
+    [ADDRESS_COUNTRY_MISSING_REASON]: "master_data",
     "Requested specialty is missing": "order",
     "Identity document is not verified": "documents",
     "Signed DSGVO document is missing": "documents",
@@ -3041,6 +3049,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Privacy practices consent is missing": PRIVACY_CONSENT_ID,
     "Healthcare consent is missing": HEALTHCARE_CONSENT_ID,
     "Requested specialty is missing": SERVICE_SPECIALTIES_ID,
+    [ADDRESS_COUNTRY_MISSING_REASON]: ADDRESS_COUNTRY_FIELD_ID,
     "Identity document is not verified": IDENTITY_DOCUMENT_ID,
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
     "Compliance is not signed yet": PRIVACY_DOCUMENT_ID,
@@ -4491,6 +4500,7 @@ export function LeadWizard({
     [lang, selectedSpecializationItems],
   );
   const estimatedOutlaysLine = lines.find(isEstimatedOutlaysLine) ?? null;
+  const positionTaxProfiles = usePositionTaxProfiles(lines.length > 0);
   const orderServiceLines = useMemo(
     () => lines.filter((line) => !isEstimatedOutlaysLine(line)),
     [lines],
@@ -7902,6 +7912,8 @@ ${serviceCommentLines.join("\n")}`
               vat_rate: money(line.vat),
               discount_percent: serviceLineDiscount(line),
               is_cost_passthrough: line.isCostPassthrough === true,
+              // The profile staff chose; none: the server keeps the catalogue's (owner 2026-11-19).
+              ...(line.taxProfileId ? { tax_profile_id: line.taxProfileId } : {}),
               client_reference: clientReference,
               confirm_signature_reset: confirmSignatureReset,
             }),
@@ -10132,8 +10144,9 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("state", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Страна проживания", "Wohnsitzland")} portalField="country">
+                <Field htmlFor={ADDRESS_COUNTRY_FIELD_ID} label={tx("Страна проживания", "Wohnsitzland")} portalField="country">
                   <CountrySelect
+                    id={ADDRESS_COUNTRY_FIELD_ID}
                     value={draft.country}
                     lang={lang}
                     className={selectClass}
@@ -12122,6 +12135,14 @@ ${serviceCommentLines.join("\n")}`
                     describe={resolvedServiceCatalogDescription} selectedPriceId={selectedAgencyServicePriceId}
                     onQuantityChange={(line, quantity) => { setCommercialSaveFeedback(null); updateLine(line.id, { quantity }); }}
                     onDiscountChange={(line, discount) => { setCommercialSaveFeedback(null); updateLine(line.id, { discount }); }}
+                    taxProfiles={positionTaxProfiles}
+                    onTaxProfileChange={(line, profile) => {
+                      setCommercialSaveFeedback(null);
+                      // The profile's rate is the position's VAT (owner 2026-11-19).
+                      updateLine(line.id, profile
+                        ? { taxProfileId: profile.id, taxProfileName: profile.name, vat: String(Number(profile.vat_rate)) }
+                        : { taxProfileId: null, taxProfileName: null });
+                    }}
                     onPriceChange={(line, service, priceId) => applyAgencyServicePrice(line.id, service, priceId)}
                     onDelete={setDeleteServiceLine} totals={orderServicesEstimate}
                     lineLocked={(line) => line.managedByWizard === false} />

@@ -450,9 +450,50 @@ export function isQuoteClosedForInvoicing(status: string | null | undefined) {
 
 // Paid advances still need a settlement invoice. Availability is determined by
 // the unbilled scope and active invoice types, not the quote's payment total.
+/**
+ * Interim invoices billed every estimate line and nothing outside it waits:
+ * a final invoice without positions closes the order with one line at
+ * 0,00 € naming the interim invoices (QA2 D S2-2).
+ */
+export function isClosingFinalPossible(
+  quote: QuoteOption | null | undefined,
+  form: Pick<CreateForm, "invoiceType">,
+) {
+  return form.invoiceType === "final"
+    && Boolean(quote?.patient_id)
+    && !isQuoteClosedForInvoicing(quote?.status)
+    && !quote?.active_invoice_types?.includes("final")
+    && Boolean(quote?.active_invoice_types?.includes("interim"))
+    && Boolean(quote?.line_items.length)
+    && Boolean(quote?.line_items.every((line) => invoiceLineQuantityAvailable(line, "final") === 0))
+    && !quote?.delivered_services_outside_quote?.length;
+}
+
+/**
+ * Why a quote cannot take this invoice type although it is still open, for a
+ * disabled option in the select (QA2 D S2-4): a second positions advance.
+ */
+export function quoteUnavailableReason(
+  quote: QuoteOption,
+  invoiceType: InvoiceType,
+  lang: "de" | "ru",
+): string | null {
+  if (isQuoteAvailableForInvoice(quote, invoiceType)) return null;
+  if (!quote.patient_id || isQuoteClosedForInvoicing(quote.status)) return null;
+  if (invoiceType === "advance" && quote.active_invoice_types?.includes("advance")
+    && !quote.active_invoice_types?.includes("final")
+    && quote.line_items.some((line) => invoiceLineQuantityAvailable(line, "final") > 0)) {
+    return lang === "de"
+      ? "Abschlag bereits gestellt – Rest per Zwischen- oder Schlussrechnung"
+      : "аванс уже выставлен – остаток промежуточным или финальным счётом";
+  }
+  return null;
+}
+
 export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: InvoiceType) {
   if (!quote.patient_id || isQuoteClosedForInvoicing(quote.status)) return false;
   if (isOverageOnlyInvoice(quote, { invoiceType })) return true;
+  if (isClosingFinalPossible(quote, { invoiceType })) return true;
   // Beside an active final invoice only an interim invoice is possible, for
   // the quantity of a line credited in full (QA 2026-11-01, R3 BUG-2).
   if (quote.active_invoice_types?.includes("final")) {

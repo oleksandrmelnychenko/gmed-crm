@@ -32,9 +32,15 @@ export function isOrderReadinessGateApplicable(
 export const ESTIMATE_OUTDATED_REASON =
   "The signed cost estimate no longer matches the order; a new estimate must be signed";
 
+/** The server's reason after a change reset the signatures (orders.rs `SIGNATURE_RESET_REASON`). */
+export const SIGNATURE_RESET_REASON =
+  "Services changed after signing: the Einzelauftrag and the cost estimate must be signed again";
+
 const EXACT_REASON_KEYS: Record<string, string> = {
   "Order signatures are still incomplete":
     "orders_blocking_signatures_incomplete",
+  // Owner 2026-11-19: services added to a signed order reset the signatures.
+  [SIGNATURE_RESET_REASON]: "orders_blocking_signature_reset",
   // Owner 2026-11-11: execution starts on a current signed estimate.
   [ESTIMATE_OUTDATED_REASON]: "orders_blocking_estimate_outdated",
   "Advance invoice exists but payment is still missing":
@@ -425,6 +431,9 @@ export function orderBlockingReasonSection(reason: string): OrderSectionKey {
   // A new estimate starts from the order's services and costs (the banner of
   // the order links to the quotes).
   if (reason === ESTIMATE_OUTDATED_REASON) return "services";
+  // The new versions of the Einzelauftrag and the estimate are made and
+  // signed from the order overview (its «Устарел» banner).
+  if (reason === SIGNATURE_RESET_REASON) return "overview";
   // Services still planned or delivered are approved, invoiced or cancelled
   // in the service list.
   if (/^\d+ service item\(s\) are not approved or invoiced$/.test(reason)) {

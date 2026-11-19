@@ -146,6 +146,11 @@ export type Leistung = {
   vat_rate_snapshot?: unknown;
   /** Discount in percent of the line (owner 2026-11-18). */
   discount_percent?: unknown;
+  /** The position's tax profile (owner 2026-11-19). */
+  tax_profile_id?: string | null;
+  tax_profile_name?: string | null;
+  tax_profile_key?: string | null;
+  tax_profile_category?: string | null;
   planned_partner_cost_net?: unknown;
   planned_partner_cost_vat?: unknown;
   planned_partner_cost_gross?: unknown;

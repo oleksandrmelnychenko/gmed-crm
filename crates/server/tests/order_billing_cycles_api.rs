@@ -2645,3 +2645,445 @@ async fn order_positions_carry_their_tax_profile() {
     let chosen_id = Uuid::parse_str(chosen["id"].as_str().unwrap()).unwrap();
     assert_eq!(stored(chosen_id).await.1, Decimal::from(19));
 }
+
+async fn line_profile(pool: &PgPool, id: Uuid) -> (Option<Uuid>, Decimal) {
+    sqlx::query_as::<_, (Option<Uuid>, Decimal)>(
+        "SELECT tax_profile_id, vat_rate FROM order_leistungen WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// qa-fix-113: every path that creates an order position stores its tax
+/// profile — an order line written without one (repeat orders, service
+/// groups, amendments), the line an interpreter report adds, the line a
+/// completed appointment adds from a legacy price version without a profile
+/// («Organisation der Behandlung», QA2 tester C), and a pass-through cost.
+#[tokio::test]
+async fn every_line_creation_path_stores_its_tax_profile() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let standard = tax_profile_id(&ctx.pool, "standard_vat").await;
+    let pass_through = tax_profile_id(&ctx.pool, "pass_through_0").await;
+    let case = interpreter_case(&ctx, &ceo, 3).await;
+    // A line written without a profile takes the catalogue item's.
+    assert_eq!(
+        line_profile(&ctx.pool, case.service_id).await.0,
+        Some(standard)
+    );
+
+    // Reported hours beyond the planned ones add a line of their own.
+    report_hours(&ctx, &ceo, &case, 3.0, 2).await;
+    report_hours(&ctx, &ceo, &case, 2.0, 1).await;
+    let report_lines: Vec<(Option<Uuid>, Decimal)> = sqlx::query_as(
+        r#"SELECT tax_profile_id, vat_rate FROM order_leistungen
+           WHERE order_id = $1 AND source_interpreter_report_id IS NOT NULL"#,
+    )
+    .bind(case.order_id)
+    .fetch_all(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(!report_lines.is_empty());
+    for (profile, vat) in report_lines {
+        assert_eq!(profile, Some(standard));
+        assert_eq!(vat, Decimal::from(19));
+    }
+
+    // A line from a legacy price version, written without a profile: the
+    // catalogue item's profile.
+    let (organisation_id, organisation_profile): (Uuid, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT id, tax_profile_id FROM agency_service_catalog
+           WHERE service_key = 'treatment_organization' ORDER BY created_at LIMIT 1"#,
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(organisation_profile.is_some());
+    let legacy_version: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO agency_service_price_versions (
+               agency_service_id, name, unit_price, vat_rate, currency, valid_from, valid_to,
+               created_by
+           ) VALUES ($1, 'Legacy', 550, 0, 'EUR', '2020-01-01', '2020-12-31', $2)
+           RETURNING id"#,
+    )
+    .bind(organisation_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let appointment_line: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               status, delivered_at, agency_service_id, agency_service_price_version_id
+           ) VALUES ($1, $2, 'Organisation der Behandlung', 1, 550, 'EUR', 0,
+                     'delivered', now(), $3, $4)
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .bind(organisation_id)
+    .bind(legacy_version)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        line_profile(&ctx.pool, appointment_line).await,
+        (organisation_profile, Decimal::ZERO)
+    );
+
+    // A pass-through cost written with its purchase VAT: «Durchlaufender
+    // Posten 0 %» at 0 %.
+    let clinic: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               is_cost_passthrough
+           ) VALUES ($1, $2, 'Klinikrechnung', 1, 1000, 'EUR', 19, TRUE)
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        line_profile(&ctx.pool, clinic).await,
+        (Some(pass_through), Decimal::ZERO)
+    );
+
+    // The order screen reads the profile of each position.
+    let (status, order) = call(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/orders/{}", case.order_id),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{order:?}");
+    let lines = order["leistungen"].as_array().unwrap();
+    let clinic_line = lines
+        .iter()
+        .find(|line| line["id"] == clinic.to_string())
+        .unwrap();
+    assert_eq!(clinic_line["tax_profile_key"], "pass_through_0");
+    assert_eq!(clinic_line["tax_profile_category"], "pass_through");
+}
+
+/// qa-fix-113: quote, interim, final, credit note and XML bill the rate and
+/// category of the position's profile; a pass-through with the 19 % profile
+/// is refused.
+#[tokio::test]
+async fn invoices_bill_the_rate_and_category_of_the_line_profile() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let standard = tax_profile_id(&ctx.pool, "standard_vat").await;
+    let pass_through = tax_profile_id(&ctx.pool, "pass_through_0").await;
+    let case = interpreter_case(&ctx, &ceo, 2).await;
+    let path = format!("/api/v1/orders/{}/leistungen", case.order_id);
+    let (status, refused) = call(
+        &ctx.app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({
+            "description": "Klinik",
+            "quantity": 1,
+            "unit_price": 500,
+            "vat_rate": 19,
+            "is_cost_passthrough": true,
+            "tax_profile_id": standard,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    let (status, clinic) = call(
+        &ctx.app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({
+            "description": "Klinik",
+            "quantity": 1,
+            "unit_price": 500,
+            "vat_rate": 19,
+            "is_cost_passthrough": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{clinic:?}");
+    let clinic_id = Uuid::parse_str(clinic["id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        line_profile(&ctx.pool, clinic_id).await.0,
+        Some(pass_through)
+    );
+    sqlx::query(
+        "UPDATE order_leistungen SET status = 'approved', delivered_at = now(), approved_at = now() WHERE order_id = $1",
+    )
+    .bind(case.order_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, quote) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/orders/{}/quotes", case.order_id),
+        &ceo,
+        Some(json!({ "notes": "Angebot 2" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote:?}");
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+    let quote_lines = quote["line_items"].as_array().unwrap();
+    let quoted_clinic = quote_lines
+        .iter()
+        .find(|line| line["description"] == "Klinik")
+        .unwrap();
+    assert_eq!(quoted_clinic["vat_category"], "pass_through");
+    assert_eq!(quoted_clinic["vat_rate"], "0");
+    let interpreter_index = quote_lines
+        .iter()
+        .position(|line| line["description"] == "Dolmetscherbetreuung")
+        .unwrap();
+    let clinic_index = quote_lines
+        .iter()
+        .position(|line| line["description"] == "Klinik")
+        .unwrap();
+    assert_eq!(quote_lines[interpreter_index]["vat_category"], "standard");
+
+    let (status, interim) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &ceo,
+        Some(json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": interpreter_index, "quantity": 1 }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{interim:?}");
+    assert_eq!(interim["line_items"][0]["vat_category"], "standard");
+    release_invoice(&ctx, &ceo, interim["id"].as_str().unwrap()).await;
+
+    let (status, final_invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &ceo,
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [
+                { "line_index": interpreter_index, "quantity": 1 },
+                { "line_index": clinic_index, "quantity": 1 },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice:?}");
+    let billed_clinic = line_by_description(&final_invoice, "Klinik");
+    assert_eq!(billed_clinic["vat_rate"], "0");
+    assert_eq!(billed_clinic["vat_category"], "pass_through");
+    let final_id = final_invoice["id"].as_str().unwrap().to_string();
+    release_invoice(&ctx, &ceo, &final_id).await;
+    let (status, xml) = raw_get(
+        &ctx.app,
+        &format!("/api/v1/invoices/{final_id}/zugferd.xml"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    assert!(
+        xml.contains("<ram:CategoryCode>E</ram:CategoryCode>"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<ram:CategoryCode>S</ram:CategoryCode>"),
+        "{xml}"
+    );
+
+    // A credit note of the pass-through line credits it at 0 %.
+    let lines = final_invoice["line_items"].as_array().unwrap();
+    let clinic_line_index = lines
+        .iter()
+        .position(|line| line["description"] == "Klinik")
+        .unwrap();
+    let (status, credit) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{final_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "reason": "Klinik storniert",
+            "issued_on": gmed_server::app_time::today().to_string(),
+            "lines": [{ "line_index": clinic_line_index }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
+    let stored: Value = sqlx::query_scalar(
+        "SELECT line_items FROM invoice_credit_note_transactions WHERE invoice_id = $1::uuid",
+    )
+    .bind(&final_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored[0]["is_cost_passthrough"], true, "{stored:?}");
+    assert_eq!(stored[0]["vat_rate"], "0", "{stored:?}");
+}
+
+/// QA2 D S2-2: after interim invoices billed every estimate line a final
+/// invoice still closes the order — one line at 0,00 € naming the interims,
+/// payable 0, a valid e-invoice.
+#[tokio::test]
+async fn a_closing_final_after_interims_bills_nothing_and_names_them() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case(&ctx, &ceo, 2).await;
+    report_hours(&ctx, &ceo, &case, 2.0, 1).await;
+    let mut numbers = Vec::new();
+    for _ in 0..2 {
+        let (status, interim) = call(
+            &ctx.app,
+            "POST",
+            &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+            &ceo,
+            Some(json!({ "invoice_type": "interim", "line_items": [{ "line_index": 0, "quantity": 1 }] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{interim:?}");
+        let released = release_invoice(&ctx, &ceo, interim["id"].as_str().unwrap()).await;
+        numbers.push(released["invoice_number"].as_str().unwrap().to_string());
+    }
+    let (status, final_invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice:?}");
+    assert_eq!(money(&final_invoice["total_gross"]), Decimal::ZERO);
+    let lines = final_invoice["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let description = lines[0]["description"].as_str().unwrap();
+    for number in &numbers {
+        assert!(description.contains(number), "{description}");
+    }
+    assert_eq!(lines[0]["vat_rate"], "19");
+    let final_id = final_invoice["id"].as_str().unwrap().to_string();
+    let released = release_invoice(&ctx, &ceo, &final_id).await;
+    assert_eq!(
+        money(&released["balance_due"]),
+        Decimal::ZERO,
+        "{released:?}"
+    );
+    let (status, xml) = raw_get(
+        &ctx.app,
+        &format!("/api/v1/invoices/{final_id}/zugferd.xml"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    assert!(
+        xml.contains("<ram:DuePayableAmount>0.00</ram:DuePayableAmount>"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<ram:CategoryCode>S</ram:CategoryCode>"),
+        "{xml}"
+    );
+    // A second final is refused: the order's billing is closed.
+    let (status, again) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert!(status.is_client_error(), "{again:?}");
+}
+
+/// QA2 B S2-4: the statement counts a service a final billed outside the
+/// estimate as billed, and lists no cancelled service.
+#[tokio::test]
+async fn the_statement_counts_a_billed_extra_line_and_skips_cancelled_ones() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let case = interpreter_case(&ctx, &ceo, 1).await;
+    report_hours(&ctx, &ceo, &case, 1.0, 1).await;
+    let transfer_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               status, delivered_at, approved_at, discount_percent
+           ) VALUES ($1, $2, 'Zusatztransfer', 1, 180, 'EUR', 19, 'approved', now(), now(), 15)
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let cancelled_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               status, cancelled_at, cancelled_by, cancellation_reason
+           ) VALUES ($1, $2, 'Storniert', 1, 10, 'EUR', 19, 'cancelled', now(), $3, 'Test')
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", case.quote_id),
+        &ceo,
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [{ "line_index": 0, "quantity": 1 }],
+            "order_services": [{ "order_leistung_id": transfer_id, "quantity": 1 }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    release_invoice(&ctx, &ceo, invoice["id"].as_str().unwrap()).await;
+    let (status, statement) = call(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{}/account-statement", case.patient_id),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    let items = statement["items"].as_array().unwrap();
+    let transfer = items
+        .iter()
+        .find(|item| item["id"] == transfer_id.to_string())
+        .unwrap();
+    assert_eq!(transfer["payment_state"], "invoiced", "{transfer:?}");
+    assert!(
+        !items
+            .iter()
+            .any(|item| item["id"] == cancelled_id.to_string()),
+        "{items:?}"
+    );
+}

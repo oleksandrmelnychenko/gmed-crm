@@ -404,10 +404,7 @@ fn group_key(is_cost_passthrough: bool, vat_rate: Decimal) -> (bool, Decimal) {
 fn advance_line_shares(line_items: &Value) -> BTreeMap<(bool, Decimal), Decimal> {
     let mut shares = BTreeMap::new();
     for line in line_items.as_array().into_iter().flatten() {
-        let passthrough = line
-            .get("is_cost_passthrough")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let passthrough = crate::money::json_line_pass_through(&line);
         let vat_rate = invoice_json_decimal(line, "vat_rate").unwrap_or(Decimal::ZERO);
         let gross = invoice_json_decimal(line, "line_gross").unwrap_or(Decimal::ZERO);
         *shares
@@ -548,7 +545,7 @@ pub(super) async fn get_invoice_draft_editor(
                     "unit_price": invoice_json_decimal(item, "unit_price").map(decimal_to_string),
                     "vat_rate": invoice_json_decimal(item, "vat_rate").map(decimal_to_string),
                     "discount_percent": decimal_to_string(crate::money::json_discount_percent(item)),
-                    "is_cost_passthrough": item.get("is_cost_passthrough").and_then(Value::as_bool).unwrap_or(false),
+                    "is_cost_passthrough": crate::money::json_line_pass_through(&item),
                     "quoted_quantity": decimal_to_string(quoted),
                     "open_quantity": decimal_to_string(open),
                     "billed_quantity": decimal_to_string(

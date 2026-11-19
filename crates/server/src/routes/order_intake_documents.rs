@@ -18,7 +18,7 @@ fn line_net(line: &Value) -> Decimal {
 /// (`order_service_total_gross`, QA 2026-10-31). Only the repeat-order context
 /// flags such lines.
 fn line_vat_rate(line: &Value) -> &str {
-    if line["is_cost_passthrough"] == true {
+    if crate::money::json_line_pass_through(line) {
         "0"
     } else {
         text(line, "vat_rate")
@@ -292,7 +292,9 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
                 vat_rate: Some(line_vat_rate(line).to_owned()),
                 // The context flags pass-through costs; the estimated outlays
                 // line is also recognised by its description.
-                is_cost_passthrough: line["is_cost_passthrough"].as_bool(),
+                is_cost_passthrough: line["is_cost_passthrough"]
+                    .as_bool()
+                    .map(|flag| flag || crate::money::json_line_pass_through(line)),
             }
         })
         .collect();

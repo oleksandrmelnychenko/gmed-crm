@@ -325,11 +325,7 @@ pub(crate) fn visit_coverage(
 /// `vat_rate`, `is_cost_passthrough`, optional `line_net` / `line_gross`);
 /// `None` for a pass-through or unreadable line.
 fn own_line_amounts(item: &Value) -> Option<Amounts> {
-    if item
-        .get("is_cost_passthrough")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if crate::money::json_line_pass_through(&item) {
         return None;
     }
     let decimal = |key: &str| -> Option<Decimal> {

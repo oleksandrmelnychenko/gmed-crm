@@ -8,6 +8,7 @@
  */
 
 import { moneyFinalLinePartAmounts, moneyLineAmounts, moneyLinePartAmounts, normalizeMoneyInput, parseMoneyInput, roundCents, sameCents, toCents } from "@/lib/money";
+import { netForGross } from "./invoice-model";
 
 import {
   receivedPaymentFormFrom,
@@ -259,10 +260,14 @@ export function draftOwnServicesTotal(payload: DraftEditorPayload, form: DraftFo
   }, form);
 }
 
-/** Net and VAT of a gross share, worked back like the server (`line_amounts_for_gross`). */
+/**
+ * Net and VAT of a gross share, worked back like the server
+ * (`line_amounts_for_gross`: the cent net whose VAT reaches the gross), so
+ * the preview and the stored split agree to the cent (QA2 A S3-6).
+ */
 export function amountsForGross(gross: number, vatRatePercent: number): SplitRow {
   const rounded = roundCents(gross);
-  const net = roundCents(rounded / (1 + vatRatePercent / 100));
+  const net = netForGross(rounded, vatRatePercent);
   return { net, vat: roundCents(rounded - net), gross: rounded };
 }
 

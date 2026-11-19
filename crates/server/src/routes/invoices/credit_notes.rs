@@ -48,6 +48,8 @@ pub(crate) struct CreditableLine {
     /// rate implied by their VAT and net amounts.
     pub vat_rate: Decimal,
     pub is_cost_passthrough: bool,
+    /// The line's discount in percent (owner 2026-11-18).
+    pub discount_percent: Decimal,
     pub net: Decimal,
     pub vat: Decimal,
     pub gross: Decimal,
@@ -73,6 +75,8 @@ impl CreditableLine {
             "unit_price": self.unit_price.map(money::money_string),
             "vat_rate": self.vat_rate.normalize().to_string(),
             "is_cost_passthrough": self.is_cost_passthrough,
+            "discount_percent": (self.discount_percent > Decimal::ZERO)
+                .then(|| money::money_string(self.discount_percent)),
             "line_net": money::money_string(self.net),
             "line_vat": money::money_string(self.vat),
             "line_gross": money::money_string(self.gross),
@@ -103,12 +107,24 @@ pub(crate) struct CreditNoteLine {
     pub unit_price: Option<Decimal>,
     pub vat_rate: Decimal,
     pub is_cost_passthrough: bool,
+    /// The line's discount in percent when the whole discounted line is
+    /// credited (QA2 S3: the Storno printed «— —» and no «Rabatt»).
+    pub discount_percent: Decimal,
     pub net: Decimal,
     pub vat: Decimal,
     pub gross: Decimal,
 }
 
 impl CreditNoteLine {
+    /// The «Rabatt» of a whole credited line: amount = list net − net.
+    pub fn discount_amount(&self) -> Option<Decimal> {
+        let (Some(quantity), Some(unit_price)) = (self.quantity, self.unit_price) else {
+            return None;
+        };
+        (self.discount_percent > Decimal::ZERO)
+            .then(|| money::line_discount_amount(quantity, unit_price, self.discount_percent))
+    }
+
     pub fn to_json(&self) -> Value {
         json!({
             "invoice_line_index": self.invoice_line_index,
@@ -117,6 +133,8 @@ impl CreditNoteLine {
             "unit_price": self.unit_price.map(money::money_string),
             "vat_rate": self.vat_rate.normalize().to_string(),
             "is_cost_passthrough": self.is_cost_passthrough,
+            "discount_percent": (self.discount_percent > Decimal::ZERO)
+                .then(|| money::money_string(self.discount_percent)),
             "line_net": money::money_string(self.net),
             "line_vat": money::money_string(self.vat),
             "line_gross": money::money_string(self.gross),
@@ -134,10 +152,8 @@ impl CreditNoteLine {
             quantity: json_decimal(item, "quantity"),
             unit_price: json_decimal(item, "unit_price"),
             vat_rate: json_decimal(item, "vat_rate").unwrap_or(Decimal::ZERO),
-            is_cost_passthrough: item
-                .get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            is_cost_passthrough: crate::money::json_line_pass_through(&item),
+            discount_percent: money::json_discount_percent(item),
             net: json_decimal(item, "line_net").unwrap_or(Decimal::ZERO),
             vat: json_decimal(item, "line_vat").unwrap_or(Decimal::ZERO),
             gross: json_decimal(item, "line_gross").unwrap_or(Decimal::ZERO),
@@ -213,9 +229,9 @@ pub(crate) fn creditable_lines(
             let gross = json_decimal(item, "line_gross").unwrap_or(Decimal::ZERO);
             let vat = json_decimal(item, "line_vat").unwrap_or(Decimal::ZERO);
             let net = json_decimal(item, "line_net").unwrap_or(gross - vat);
-            // A discounted line (owner 2026-11-18) is credited and reversed
-            // as its amount: quantity × list price is not its net.
-            let priced = money::json_discount_percent(item) <= Decimal::ZERO;
+            // A discounted line (owner 2026-11-18) keeps quantity and list
+            // price: its discount is credited and printed with it (QA2 S3).
+            let discount_percent = money::json_discount_percent(item);
             CreditableLine {
                 index,
                 description: item
@@ -224,13 +240,11 @@ pub(crate) fn creditable_lines(
                     .unwrap_or_default()
                     .trim()
                     .to_string(),
-                quantity: json_decimal(item, "quantity").filter(|_| priced),
-                unit_price: json_decimal(item, "unit_price").filter(|_| priced),
+                quantity: json_decimal(item, "quantity"),
+                unit_price: json_decimal(item, "unit_price"),
                 vat_rate: effective_vat_rate(item, net, vat),
-                is_cost_passthrough: item
-                    .get("is_cost_passthrough")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                is_cost_passthrough: crate::money::json_line_pass_through(&item),
+                discount_percent,
                 net,
                 vat,
                 gross,
@@ -445,6 +459,11 @@ fn credit_line(line: &CreditableLine, amount: Decimal) -> CreditNoteLine {
         unit_price: if whole_line { line.unit_price } else { None },
         vat_rate: line.vat_rate,
         is_cost_passthrough: line.is_cost_passthrough,
+        discount_percent: if whole_line {
+            line.discount_percent
+        } else {
+            Decimal::ZERO
+        },
         net: amount - vat,
         vat,
         gross: amount,

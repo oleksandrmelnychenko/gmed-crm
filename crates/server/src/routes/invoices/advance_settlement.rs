@@ -1745,6 +1745,7 @@ mod tests {
             unit_price: None,
             vat_rate: Decimal::ZERO,
             is_cost_passthrough: false,
+            discount_percent: Decimal::ZERO,
             net: Decimal::from(gross),
             vat: Decimal::ZERO,
             gross: Decimal::from(gross),

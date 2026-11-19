@@ -909,6 +909,7 @@ fn printed_lines(context: &CreditNotePdfContext) -> Vec<CreditNoteLine> {
             unit_price: None,
             vat_rate: Decimal::ZERO,
             is_cost_passthrough: false,
+            discount_percent: Decimal::ZERO,
             net: context.amount_net,
             vat: context.amount_vat,
             gross: context.amount_gross,
@@ -1192,6 +1193,42 @@ pub(crate) fn build_credit_note_pdf(
             false,
             false,
         );
+        // The discount of a whole credited line under it, like the invoice
+        // prints it (QA2 S3: the Storno showed «— —» and no «Rabatt»).
+        if let Some(discount) = line.discount_amount() {
+            let text = format!(
+                "{} {} %: {} {}",
+                if language == "de" {
+                    "Rabatt"
+                } else if language == "uk" {
+                    "Знижка"
+                } else if language == "en" {
+                    "Discount"
+                } else {
+                    "Скидка"
+                },
+                format_number(language, line.discount_percent),
+                format_money(-sign * discount, &context.currency),
+                if language == "de" {
+                    "netto"
+                } else if language == "en" {
+                    "net"
+                } else {
+                    "нетто"
+                },
+            );
+            layout.row(
+                &[
+                    (text.as_str(), 84.0, Align::Left),
+                    ("", 16.0, Align::Right),
+                    ("", 26.0, Align::Right),
+                    ("", 16.0, Align::Right),
+                    ("", 30.0, Align::Right),
+                ],
+                false,
+                false,
+            );
+        }
     }
     layout.space(5.0);
 
@@ -2003,6 +2040,7 @@ mod tests {
             unit_price: Some(dec("160.5")),
             vat_rate: Decimal::ZERO,
             is_cost_passthrough: true,
+            discount_percent: Decimal::ZERO,
             net: dec("481.50"),
             vat: Decimal::ZERO,
             gross: dec("481.50"),
@@ -2022,6 +2060,7 @@ mod tests {
             unit_price: Some(dec("481.50")),
             vat_rate: Decimal::ZERO,
             is_cost_passthrough: false,
+            discount_percent: Decimal::ZERO,
             net: dec("481.50"),
             vat: Decimal::ZERO,
             gross: dec("481.50"),

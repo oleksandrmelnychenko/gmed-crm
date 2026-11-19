@@ -60,6 +60,52 @@ pub fn billed_vat_rate(is_cost_passthrough: bool, vat_rate: Decimal) -> Decimal 
     }
 }
 
+/// A stored document line (quote, invoice, credit-note line) as JSON: a
+/// `serde_json::Value` object or its map.
+pub trait JsonLine {
+    fn field(&self, key: &str) -> Option<&serde_json::Value>;
+}
+
+impl JsonLine for serde_json::Value {
+    fn field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.get(key)
+    }
+}
+
+impl JsonLine for serde_json::Map<String, serde_json::Value> {
+    fn field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.get(key)
+    }
+}
+
+impl<T: JsonLine + ?Sized> JsonLine for &T {
+    fn field(&self, key: &str) -> Option<&serde_json::Value> {
+        (**self).field(key)
+    }
+}
+
+/// The VAT category of a line's tax profile (owner 2026-11-19), when the
+/// line carries one (`vat_category`, copied from the order position).
+pub fn json_line_vat_category(item: &impl JsonLine) -> Option<&str> {
+    item.field("vat_category")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|category| !category.is_empty())
+}
+
+/// Whether a stored line is a pass-through cost: its tax profile's category
+/// decides; a line without one (issued before 2026-11-19) keeps its stored
+/// `is_cost_passthrough` flag.
+pub fn json_line_pass_through(item: &impl JsonLine) -> bool {
+    match json_line_vat_category(item) {
+        Some(category) => category == "pass_through",
+        None => item
+            .field("is_cost_passthrough")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
 /// Rounded net, VAT and gross amounts of one document line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineAmounts {

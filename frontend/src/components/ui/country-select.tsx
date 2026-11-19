@@ -169,6 +169,7 @@ export function CountrySelect({
   emptyLabel = "—",
   required = false,
   disabled = false,
+  id,
 }: {
   value: string | null;
   onChange: (code: string | null) => void;
@@ -179,6 +180,7 @@ export function CountrySelect({
   emptyLabel?: string;
   required?: boolean;
   disabled?: boolean;
+  id?: string;
 }) {
   const selectedValue = countryCodeFromStoredValue(value);
   const options = useMemo(() => {
@@ -195,6 +197,7 @@ export function CountrySelect({
 
   return (
     <NativeComboboxSelect
+      id={id}
       value={selectedValue}
       aria-label={ariaLabel}
       className={className}

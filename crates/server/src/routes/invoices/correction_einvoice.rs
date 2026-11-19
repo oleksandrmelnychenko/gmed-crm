@@ -145,13 +145,22 @@ fn line(line: &CreditNoteLine) -> EInvoiceLine {
     let net = round_cents(line.net);
     // Quantity × unit price where they give the credited net (a whole line);
     // a partial credit is one unit of its amount.
-    let (quantity, unit_net) = match (line.quantity, line.unit_price) {
+    // A whole discounted line keeps its list price and states the discount
+    // as the line allowance, like the invoice (QA2 S3).
+    let discount = line
+        .discount_amount()
+        .map(|amount| super::zugferd::LineDiscount {
+            percent: line.discount_percent,
+            amount: round_cents(amount),
+        });
+    let allowance = discount.map_or(Decimal::ZERO, |discount| discount.amount);
+    let (quantity, unit_net, discount) = match (line.quantity, line.unit_price) {
         (Some(quantity), Some(price))
-            if quantity > Decimal::ZERO && round_cents(quantity * price) == net =>
+            if quantity > Decimal::ZERO && round_cents(quantity * price) - allowance == net =>
         {
-            (quantity, price)
+            (quantity, price, discount)
         }
-        _ => (Decimal::ONE, net),
+        _ => (Decimal::ONE, net, None),
     };
     EInvoiceLine {
         name: line.description.trim().to_string(),
@@ -165,7 +174,7 @@ fn line(line: &CreditNoteLine) -> EInvoiceLine {
         // A credited part is one piece; a whole line keeps no unit label here.
         unit_code: "C62",
         // A credited part is one unit of its (already discounted) amount.
-        discount: None,
+        discount,
     }
 }
 
@@ -362,6 +371,7 @@ mod tests {
             unit_price: quantity_price.map(|(_, price)| dec(price)),
             vat_rate: dec(rate),
             is_cost_passthrough: passthrough,
+            discount_percent: Decimal::ZERO,
             net: dec(net),
             vat: dec(vat),
             gross: dec(net) + dec(vat),

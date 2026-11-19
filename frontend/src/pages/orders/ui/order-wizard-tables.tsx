@@ -1,4 +1,5 @@
 import { OrderCatalogServicesTable, serviceLineDiscount } from "./order-catalog-services-table";
+import { usePositionTaxProfiles } from "../data/use-position-tax-profiles";
 import type { ServiceLine } from "../model/order-service-line";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
@@ -47,13 +48,15 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
 }) {
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [deleteLine, setDeleteLine] = useState<ServiceLine | null>(null);
+  const taxProfiles = usePositionTaxProfiles(lines.length > 0);
   const catalogById = new Map(catalog.map(service => [service.id, service]));
   const rows: ServiceLine[] = lines.map(line => {
     const service = catalogById.get(line.agency_service_id ?? "");
     return { id: line.id, agencyServiceId: line.agency_service_id, agencyServicePriceVersionId: line.agency_service_price_version_id,
       clientReference: null, description: line.description, catalogDescription: service?.description ?? "",
       catalogDescriptionItems: serviceDescriptionItems(service?.description_items, service?.description), catalogUnitLabel: service?.unit_label ?? "",
-      currency: "EUR", quantity: line.quantity, price: line.unit_price, vat: line.vat_rate, discount: line.discount_percent ?? "" };
+      currency: "EUR", quantity: line.quantity, price: line.unit_price, vat: line.vat_rate, discount: line.discount_percent ?? "",
+      taxProfileId: line.tax_profile_id ?? null };
   });
   const totals = rows.reduce((result, line) => {
     const { net, vat, gross } = moneyLineAmounts(money(line.quantity), money(line.price), money(line.vat), serviceLineDiscount(line));
@@ -85,6 +88,15 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
       selectedPriceId={(line, service) => line.agencyServicePriceVersionId ?? listAgencyServicePriceChoices(service, effectiveOn ?? undefined).find(price => money(price.unit_price) === money(line.price) && money(price.vat_rate) === money(line.vat))?.id ?? ""}
       onQuantityChange={(line, quantity) => updateLine(line.id, { quantity })}
       onDiscountChange={(line, discount) => updateLine(line.id, { discount_percent: discount })}
+      taxProfiles={taxProfiles}
+      onTaxProfileChange={(line, profile) => {
+        // The profile's rate is the position's VAT; «по каталогу» restores the price's rate.
+        const service = catalogById.get(line.agencyServiceId ?? "");
+        const price = service && listAgencyServicePriceChoices(service, effectiveOn ?? undefined).find(item => item.id === (line.agencyServicePriceVersionId ?? ""));
+        updateLine(line.id, profile
+          ? { tax_profile_id: profile.id, vat_rate: String(Number(profile.vat_rate)) }
+          : { tax_profile_id: null, ...(price ? { vat_rate: String(price.vat_rate) } : {}) });
+      }}
       onPriceChange={(line, service, priceId) => { const price = listAgencyServicePriceChoices(service, effectiveOn ?? undefined).find(item => item.id === priceId); if (price && price.currency.toUpperCase() === "EUR") updateLine(line.id, { agency_service_price_version_id: price.id || null, unit_price: String(price.unit_price), vat_rate: String(price.vat_rate) }); }}
       onDelete={setDeleteLine} /> : <p className="py-3 text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>}
     <Dialog open={Boolean(deleteLine)} onOpenChange={open => { if (!open) setDeleteLine(null); }}>

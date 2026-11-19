@@ -1633,6 +1633,23 @@ async fn load_patient_account_statement(
                      WHERE storno.invoice_id = invoice.id AND storno.issued_on > $3
                  )))
                             AND invoice.released_at IS NOT NULL
+                      ), 0)
+                      -- A service a final bills outside the estimate has no
+                      -- allocation row: its invoice line names it (QA2 B S2-4).
+                      + COALESCE((
+                          SELECT SUM(NULLIF(extra.value ->> 'quantity', '')::NUMERIC)
+                          FROM invoices extra_invoice
+                          CROSS JOIN LATERAL jsonb_array_elements(
+                              CASE WHEN jsonb_typeof(extra_invoice.line_items) = 'array'
+                                   THEN extra_invoice.line_items ELSE '[]'::jsonb END
+                          ) AS extra(value)
+                          WHERE extra.value ->> 'source' = 'final_order_service'
+                            AND extra.value ->> 'source_order_leistung_id' = service.id::TEXT
+                            AND extra_invoice.released_at IS NOT NULL
+                            AND (extra_invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM invoice_storno_documents storno
+                                WHERE storno.invoice_id = extra_invoice.id AND storno.issued_on > $3
+                            )))
                       ), 0) AS invoiced_quantity
                FROM order_leistungen service
                JOIN orders ON orders.id = service.order_id
@@ -1640,6 +1657,8 @@ async fn load_patient_account_statement(
                       ON allocation.order_leistung_id = service.id
                LEFT JOIN invoices invoice ON invoice.id = allocation.invoice_id
                WHERE orders.patient_id = $1
+                 -- A cancelled service is no unbilled service (QA2 B S2-4).
+                 AND service.status <> 'cancelled'
                  AND ($2::date IS NULL OR (service.created_at AT TIME ZONE 'Europe/Berlin')::date >= $2)
                  AND ($3::date IS NULL OR (service.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3)
                  AND ($4::uuid IS NULL OR service.order_id = $4)

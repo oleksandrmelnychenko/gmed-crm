@@ -28,6 +28,8 @@ import {
   effectiveAdvanceBasis,
   interimLimitBesideOpenAdvance,
   isOverageOnlyInvoice,
+  isClosingFinalPossible,
+  quoteUnavailableReason,
   isQuoteAvailableForInvoice,
   prepaymentExceedsUnbilledQuote,
   quoteRequiredPrepayment,
@@ -161,11 +163,12 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
       };
   const quoteAvailable = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType));
   const overageOnly = isOverageOnlyInvoice(selectedQuote, form);
+  const closingFinal = isClosingFinalPossible(selectedQuote, form);
   const interimLimit = overageOnly ? null : interimLimitBesideOpenAdvance(selectedQuote, lines, form);
   const overOpenAdvance = interimLimit != null && selectionTotals.gross > interimLimit.maxGross;
   const selectionValid = prepaymentMode
     ? quoteAvailable && Boolean(prepaymentSplit && prepaymentSplit.gross > 0)
-    : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form, extras)) && (totals.gross > 0 || final) && !overOpenAdvance;
+    : quoteAvailable && (overageOnly || closingFinal || isInvoiceSelectionValid(lines, form, extras)) && (totals.gross > 0 || final) && !overOpenAdvance;
   // Money received before the invoice (Billing/CEO) and the service period
   // (owner 2026-11-17); the release records the payment with its day.
   const canRecordPayment = hasCapability(user, "invoices.finance");
@@ -224,6 +227,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     ? lines.length + extras.length
     : lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
+  // An open quote this type cannot bill is listed disabled with the reason
+  // (QA2 D S2-4: a second positions advance silently vanished).
+  const blockedQuotes = quotes
+    .map((quote) => ({ quote, reason: quoteUnavailableReason(quote, form.invoiceType, de ? "de" : "ru") }))
+    .filter((item): item is { quote: QuoteOption; reason: string } => item.reason != null);
   // The select offers the quotes this type can bill; no list of the hidden
   // ones under the field (owner 2026-11-19). Under «Промежуточный» a quote
   // only an interim invoice can bill is marked in its option.
@@ -269,9 +277,14 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                         {[quote.quote_number, quote.patient_name, quote.order_number, quote.patient_pid, interimOnly(quote) ? interimOnlyLabel : null].filter(Boolean).join(" · ")}
                       </option>
                     ))}
+                    {blockedQuotes.map(({ quote, reason }) => (
+                      <option key={quote.id} value={quote.id} disabled>
+                        {[quote.quote_number, quote.patient_name, quote.order_number, reason].filter(Boolean).join(" · ")}
+                      </option>
+                    ))}
                   </NativeComboboxSelect>
                 </FormField>
-                {!optionsError && !optionsBusy && !selectableQuotes.length ? (
+                {!optionsError && !optionsBusy && !selectableQuotes.length && !blockedQuotes.length ? (
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl." : "Для текущего выбора нет доступных предложений."}
                   </p>
@@ -587,12 +600,13 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
             </div>
           </div>
           <div className="shrink-0 border-t border-border bg-card" data-testid="invoice-create-footer">
-            {footerMessage ? <div role={footerError ? "alert" : "status"} className={cn("flex max-h-[min(24dvh,9rem)] items-start gap-2 overflow-y-auto border-b px-4 py-2.5 text-xs leading-5 sm:px-5", footerError ? "border-destructive/20 bg-destructive/5 text-destructive" : "border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300")}>
+            {/* The message row keeps its height when empty, so the form above does not jump (QA2 S3). */}
+            {footerMessage ? <div role={footerError ? "alert" : "status"} className={cn("flex min-h-11 max-h-[min(24dvh,9rem)] items-start gap-2 overflow-y-auto border-b px-4 py-2.5 text-xs leading-5 sm:px-5", footerError ? "border-destructive/20 bg-destructive/5 text-destructive" : "border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300")}>
               <AlertCircle className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1 break-words">{footerMessage}
               </div>
               <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" disabled={formBusy || optionsBusy} onClick={onRetry}>{de ? "Prüfen" : "Проверить"}</Button>
-            </div> : null}
+            </div> : <div aria-hidden="true" data-testid="invoice-create-footer-reserve" className="min-h-11 border-b border-transparent" />}
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
             <p className="text-sm tabular-nums"><span className="text-muted-foreground">{t.invoices_total}: </span><strong>{money(totals.gross)}</strong></p>
             <div className="flex gap-2">
