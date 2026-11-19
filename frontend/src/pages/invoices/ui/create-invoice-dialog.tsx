@@ -23,6 +23,7 @@ import {
   createInvoiceLineSelection,
   formatCurrency,
   invoiceLineQuantityAvailable,
+  invoiceSelectionLineAmounts,
   isInvoiceSelectionValid,
   effectiveAdvanceBasis,
   interimLimitBesideOpenAdvance,
@@ -37,7 +38,7 @@ import { ownServicesGrossOfSelection } from "@/components/order-budget/order-bud
 import { fetchPrepaymentAdvancePreview } from "../data/invoice-api";
 import { localizeInvoiceError } from "../model/invoice-errors";
 import { finalInvoiceTotals, finalOwnExtrasGross } from "../model/final-invoice";
-import { FinalInvoiceLines, FinalInvoiceSettlement, InvoiceLinePills, InvoiceLineRemark } from "./final-invoice-lines";
+import { FinalInvoiceLines, FinalInvoiceSettlement, InvoiceLineAmount, InvoiceLineRow, invoiceLineDiscountAmount, invoiceLineQuantityInputClass } from "./final-invoice-lines";
 import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import type { CreateForm, InvoiceType, PrepaymentAdvancePreview, QuoteOption } from "../model/types";
@@ -221,13 +222,12 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     ? lines.length + extras.length
     : lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
-  // Quotes this type hides, with why: staff looked for them under the default
-  // type without a word (QA 2026-11-01, X3 NEW-3).
-  // Interim invoices are offered again (owner 2026-11-18): quotes that only an
-  // interim invoice can bill are named under the choice.
-  const interimOnlyQuotes = form.invoiceType === "interim"
-    ? []
-    : quotes.filter((quote) => !isQuoteAvailableForInvoice(quote, form.invoiceType) && isQuoteAvailableForInvoice(quote, "interim"));
+  // The select offers the quotes this type can bill; no list of the hidden
+  // ones under the field (owner 2026-11-19). Under «Промежуточный» a quote
+  // only an interim invoice can bill is marked in its option.
+  const interimOnlyLabel = de ? "nur Zwischenrechnung" : "только промежуточный";
+  const interimOnly = (quote: QuoteOption) => form.invoiceType === "interim"
+    && !isQuoteAvailableForInvoice(quote, "final") && !isQuoteAvailableForInvoice(quote, "advance");
 
   return (
     <Dialog dirty={dirty} open={open} onOpenChange={(nextOpen) => { if (!formBusy) onOpenChange(nextOpen); }}>
@@ -264,7 +264,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <option value="__empty__">{optionsBusy ? t.common_loading : t.invoices_workspace_choose_quote}</option>
                     {selectableQuotes.map((quote) => (
                       <option key={quote.id} value={quote.id}>
-                        {[quote.quote_number, quote.patient_name, quote.order_number, quote.patient_pid].filter(Boolean).join(" · ")}
+                        {[quote.quote_number, quote.patient_name, quote.order_number, quote.patient_pid, interimOnly(quote) ? interimOnlyLabel : null].filter(Boolean).join(" · ")}
                       </option>
                     ))}
                   </NativeComboboxSelect>
@@ -272,11 +272,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {!optionsError && !optionsBusy && !selectableQuotes.length ? (
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl." : "Для текущего выбора нет доступных предложений."}
-                  </p>
-                ) : null}
-                {interimOnlyQuotes.length ? (
-                  <p role="status" data-testid="invoice-interim-only-quotes" className="text-xs leading-5 text-muted-foreground">
-                    {de ? "Nur als Zwischenrechnung verfügbar" : "Доступны только промежуточным счётом"}: {interimOnlyQuotes.map((quote) => quote.quote_number).join(", ")}.
                   </p>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -485,52 +480,52 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                         // (markup or separators only, QA 2026-11-16 B-2).
                         const notes = line.notes?.trim();
                         const hasNotes = /[\p{L}\p{N}]/u.test(notes?.replace(/<[^>]*>/g, "") ?? "");
+                        const amounts = selected ? invoiceSelectionLineAmounts(line, quantity) : null;
                         return (
-                          <div key={`${selectedQuote.id}-${index}`} className={cn("grid grid-cols-[1.25rem_minmax(0,1fr)] gap-x-2.5 gap-y-3 p-3 sm:grid-cols-[1.25rem_minmax(0,1fr)_6rem_6.5rem]", !selected && "bg-muted/30")}>
-                            <input type="checkbox" aria-label={`${de ? "Position" : "Позиция"}: ${name}`}
-                              checked={selected} disabled={busy || available <= 0 || final}
-                              className={cn(checkboxClass, "mt-0.5")}
-                              onChange={(event) => {
-                                const checked = event.target.checked;
-                                onFormChange((current) => ({ ...current, selectedLineIndexes: checked
-                                  ? [...new Set([...current.selectedLineIndexes, index])].sort((a, b) => a - b)
-                                  : current.selectedLineIndexes.filter((item) => item !== index) }));
-                              }} />
-                            <div className="min-w-0">
-                              <p className="break-words text-sm font-medium">{name}</p>
-                              <InvoiceLinePills unitPrice={line.unit_price} vatRate={line.vat_rate} discountPercent={line.discount_percent}
-                                origin={{ kind: "estimate", quantity: Number(line.quantity).toLocaleString("de-DE", { maximumFractionDigits: 4 }) }} money={money} />
-                              {hasNotes && notes !== line.description.trim() ? (
-                                <details className="mt-1 text-xs text-muted-foreground">
-                                  <summary className="w-fit cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">{descriptionLabel}</summary>
-                                  <p className="mt-1 whitespace-pre-line break-words leading-5">{notes}</p>
-                                </details>
-                              ) : null}
-                            </div>
-                            <div className="col-start-2 flex min-w-0 flex-wrap items-start justify-between gap-3 sm:contents">
-                              <label className="w-24 shrink-0 space-y-1 text-xs text-muted-foreground">
-                                <span>{quantityLabel}</span>
+                          <InvoiceLineRow key={`${selectedQuote.id}-${index}`} name={name} muted={!selected}
+                            leading={(
+                              <input type="checkbox" aria-label={`${de ? "Position" : "Позиция"}: ${name}`}
+                                checked={selected} disabled={busy || available <= 0}
+                                className={cn(checkboxClass, "mt-0.5")}
+                                onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  onFormChange((current) => ({ ...current, selectedLineIndexes: checked
+                                    ? [...new Set([...current.selectedLineIndexes, index])].sort((a, b) => a - b)
+                                    : current.selectedLineIndexes.filter((item) => item !== index) }));
+                                }} />
+                            )}
+                            pills={{
+                              unitPrice: line.unit_price, vatRate: line.vat_rate, discountPercent: line.discount_percent,
+                              origin: { kind: "estimate", quantity: Number(line.quantity).toLocaleString("de-DE", { maximumFractionDigits: 4 }) },
+                              money,
+                            }}
+                            details={hasNotes && notes !== line.description.trim() ? (
+                              <details className="mt-1 text-xs text-muted-foreground">
+                                <summary className="w-fit cursor-pointer rounded-sm py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">{descriptionLabel}</summary>
+                                <p className="mt-1 whitespace-pre-line break-words leading-5">{notes}</p>
+                              </details>
+                            ) : null}
+                            quantity={(
+                              <>
                                 <Input type="number" required min="0.01" step="0.01" max={String(available)}
-                                  disabled={busy || !selected || available <= 0} readOnly={final}
+                                  disabled={busy || !selected || available <= 0}
                                   aria-label={`${quantityLabel}: ${name}`} aria-invalid={invalid || undefined}
                                   value={form.lineQuantities[String(index)] ?? ""}
-                                  className={cn(inputClass, "h-8 text-right tabular-nums", final && "border-transparent bg-transparent shadow-none")}
+                                  className={invoiceLineQuantityInputClass}
                                   onChange={(event) => onFormChange((current) => ({ ...current, lineQuantities: { ...current.lineQuantities, [String(index)]: event.target.value } }))} />
-                                <span className="block">{availableLabel}: {availableText}</span>
-                              </label>
-                              <div className="min-w-24 text-right">
-                                <p className="mb-1 text-xs text-muted-foreground">{de ? "Brutto" : "Сумма с НДС"}</p>
-                                <p className="whitespace-nowrap font-mono text-sm font-medium tabular-nums">{money(totals.lineGrossByIndex[index] ?? 0)}</p>
-                              </div>
-                            </div>
-                            {selected ? (
-                              <InvoiceLineRemark className="col-start-2 min-w-0 sm:col-span-3" name={name} busy={busy}
-                                value={form.lineComments[String(index)] ?? ""}
-                                onChange={(value) => onFormChange((current) => ({ ...current, lineComments: { ...current.lineComments, [String(index)]: value } }))} />
-                            ) : null}
-                            {available <= 0 ? <p className="col-start-2 text-xs text-muted-foreground sm:col-span-3">{de ? "Bereits vollständig abgerechnet" : "Уже выставлено полностью"}</p> : null}
-                            {invalid ? <p role="alert" className="col-start-2 text-xs text-destructive sm:col-span-3">{de ? `Menge muss größer als 0 und höchstens ${availableText} sein.` : `Количество должно быть больше 0 и не больше ${availableText}.`}</p> : null}
-                          </div>
+                                <p>{availableLabel}: {availableText}</p>
+                              </>
+                            )}
+                            amount={<InvoiceLineAmount gross={amounts?.gross ?? 0} net={amounts?.net ?? 0}
+                              discount={amounts ? invoiceLineDiscountAmount(quantity, line.unit_price, amounts.net) : 0} money={money} />}
+                            remark={selected ? {
+                              value: form.lineComments[String(index)] ?? "",
+                              busy,
+                              onChange: (value) => onFormChange((current) => ({ ...current, lineComments: { ...current.lineComments, [String(index)]: value } })),
+                            } : null}>
+                            {available <= 0 ? <p className="text-xs text-muted-foreground">{de ? "Bereits vollständig abgerechnet" : "Уже выставлено полностью"}</p> : null}
+                            {invalid ? <p role="alert" className="text-xs text-destructive">{de ? `Menge muss größer als 0 und höchstens ${availableText} sein.` : `Количество должно быть больше 0 и не больше ${availableText}.`}</p> : null}
+                          </InvoiceLineRow>
                         );
                       })}
                       {!availableCount ? <p role="status" className="p-4 text-sm text-muted-foreground">{de ? "Keine abrechenbaren Positionen für diesen Rechnungstyp." : "Для этого типа счёта нет доступных позиций."}</p> : null}

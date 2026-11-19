@@ -44,6 +44,7 @@ import {
   servicePeriodProblemText,
 } from "../model/document-terms";
 import { INVOICE_PAYMENT_METHODS } from "../model/payment-correction";
+import { InvoiceLineDeviationPill } from "./final-invoice-lines";
 import { GuardedDateInput } from "./guarded-date-input";
 import { ReleaseDueDateField } from "./release-due-date-field";
 
@@ -75,9 +76,7 @@ const COPY: Record<"ru" | "de", Copy> = {
     open: "открыто",
     estimate: "по смете",
     actual: "фактически",
-    notDelivered: "не оказано",
     outsideEstimate: "вне сметы",
-    aboveEstimate: "больше сметы",
     quantity: "Кол-во",
     comment: "Примечание к позиции",
     split: "Распределение аванса",
@@ -124,9 +123,7 @@ const COPY: Record<"ru" | "de", Copy> = {
     open: "offen",
     estimate: "laut Angebot",
     actual: "erbracht",
-    notDelivered: "nicht erbracht",
     outsideEstimate: "nicht im Angebot",
-    aboveEstimate: "über Angebot",
     quantity: "Menge",
     comment: "Anmerkung zur Position",
     split: "Aufteilung der Anzahlung",
@@ -413,12 +410,13 @@ export function DraftInvoiceEditorDialog({
                                     {comparison.recorded ? ` · ${copy.actual} ${formatQuantity(comparison.actual)}` : ""}
                                   </span>
                                   {!comparison.recorded ? <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{copy.estimate}</span> : null}
-                                  {comparison.notDelivered ? <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{copy.notDelivered}</span> : null}
-                                  {comparison.aboveEstimate ? <span className="rounded-sm bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{copy.aboveEstimate}</span> : null}
-                                  {comparison.difference !== 0 ? (
-                                    <span className={comparison.difference > 0 ? "font-mono tabular-nums text-amber-700 dark:text-amber-300" : "font-mono tabular-nums text-muted-foreground"}>
-                                      {formatFinalDifference(comparison.difference, comparison.differenceGross, (value) => value, (value) => money(value))}
-                                    </span>
+                                  {comparison.notDelivered || comparison.difference !== 0 ? (
+                                    <InvoiceLineDeviationPill deviation={{
+                                      kind: comparison.notDelivered ? "not_delivered" : comparison.difference > 0 ? "above" : "below",
+                                      difference: comparison.difference === 0 ? null : comparison.notDelivered
+                                        ? `${comparison.differenceGross > 0 ? "+" : "−"}${money(Math.abs(comparison.differenceGross))}`
+                                        : formatFinalDifference(comparison.difference, comparison.differenceGross, (value) => value, (value) => money(value)),
+                                    }} />
                                   ) : null}
                                 </span>
                               ) : null}

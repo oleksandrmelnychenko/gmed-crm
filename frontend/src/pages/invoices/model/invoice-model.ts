@@ -471,6 +471,40 @@ export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: Invo
     ));
 }
 
+/**
+ * Net, VAT and gross of one quote line billed with `quantity` on a new
+ * invoice: the server's per-line rounding (half away from zero), the part
+ * completing the line bills its exact rest (QA 2026-11-15, A-1). `null` when
+ * nothing can be billed.
+ */
+export function invoiceSelectionLineAmounts(line: InvoiceLineItem, quantity: number) {
+  const unitPrice = Number(line.unit_price ?? 0);
+  const vatRate = Number(line.vat_rate ?? 0);
+  if (
+    !Number.isFinite(quantity) ||
+    !Number.isFinite(unitPrice) ||
+    !Number.isFinite(vatRate) ||
+    quantity <= 0 ||
+    unitPrice < 0 ||
+    vatRate < 0
+  ) {
+    return null;
+  }
+  const billedKnown = line.invoiced_net !== undefined && line.invoiced_gross !== undefined;
+  return moneyLinePartAmounts({
+    quantity,
+    unitPriceNet: unitPrice,
+    vatRatePercent: vatRate,
+    discountPercent: Number(line.discount_percent ?? 0),
+    lineQuantity: Number(line.quantity),
+    billedQuantity: Number(line.invoiced_quantity ?? 0),
+    lineNet: billedKnown ? Number(line.line_net) : Number.NaN,
+    lineGross: billedKnown ? Number(line.line_gross) : Number.NaN,
+    billedNet: Number(line.invoiced_net ?? 0),
+    billedGross: Number(line.invoiced_gross ?? 0),
+  });
+}
+
 export function calculateInvoiceSelectionTotals(
   lines: InvoiceLineItem[],
   selectedLineIndexes: number[],
@@ -480,45 +514,15 @@ export function calculateInvoiceSelectionTotals(
   return lines.reduce(
     (totals, line, lineIndex) => {
       if (!selected.has(lineIndex)) return totals;
-      const quantity = Number(lineQuantities[String(lineIndex)] ?? 0);
-      const unitPrice = Number(line.unit_price ?? 0);
-      const vatRate = Number(line.vat_rate ?? 0);
-      if (
-        !Number.isFinite(quantity) ||
-        !Number.isFinite(unitPrice) ||
-        !Number.isFinite(vatRate) ||
-        quantity <= 0 ||
-        unitPrice < 0 ||
-        vatRate < 0
-      ) {
-        return totals;
-      }
-      // Same per-line rounding as the server invoice (half away from zero);
-      // the part completing the line bills its exact rest (QA 2026-11-15, A-1).
-      const billedKnown = line.invoiced_net !== undefined && line.invoiced_gross !== undefined;
-      const {
-        net: lineNet,
-        vat: lineVat,
-        gross: lineGross,
-      } = moneyLinePartAmounts({
-        quantity,
-        unitPriceNet: unitPrice,
-        vatRatePercent: vatRate,
-        discountPercent: Number(line.discount_percent ?? 0),
-        lineQuantity: Number(line.quantity),
-        billedQuantity: Number(line.invoiced_quantity ?? 0),
-        lineNet: billedKnown ? Number(line.line_net) : Number.NaN,
-        lineGross: billedKnown ? Number(line.line_gross) : Number.NaN,
-        billedNet: Number(line.invoiced_net ?? 0),
-        billedGross: Number(line.invoiced_gross ?? 0),
-      });
+      const amounts = invoiceSelectionLineAmounts(line, Number(lineQuantities[String(lineIndex)] ?? 0));
+      if (!amounts) return totals;
       return {
-        net: roundCents(totals.net + lineNet),
-        vat: roundCents(totals.vat + lineVat),
-        gross: roundCents(totals.gross + lineGross),
+        net: roundCents(totals.net + amounts.net),
+        vat: roundCents(totals.vat + amounts.vat),
+        gross: roundCents(totals.gross + amounts.gross),
         lineGrossByIndex: {
           ...totals.lineGrossByIndex,
-          [lineIndex]: lineGross,
+          [lineIndex]: amounts.gross,
         },
       };
     },
