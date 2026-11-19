@@ -13,6 +13,8 @@ import { appDateKey } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { formatMoneyAmount } from "@/lib/money";
+import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
+import { t as translationsFor, type Lang } from "@/lib/i18n";
 
 import { fetchInvoiceDraftEditor, updateInvoiceDraft } from "../data/invoice-api";
 import {
@@ -178,6 +180,9 @@ export function DraftInvoiceEditorDialog({
   onSaved,
 }: Props) {
   const copy = COPY[lang === "de" ? "de" : "ru"];
+  // Catalogue lines in the UI language; the invoice prints the German name (QA3).
+  const uiTranslations = translationsFor((lang === "de" ? "de" : "ru") as Lang);
+  const lineName = (description: string | null | undefined) => agencyServiceNameLabel(undefined, description, uiTranslations);
   const [payload, setPayload] = useState<DraftEditorPayload | null>(null);
   const [form, setForm] = useState<DraftForm | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -398,7 +403,7 @@ export function DraftInvoiceEditorDialog({
                               onChange={(event) => setLine(line.line_index, { selected: event.target.checked })}
                             />
                             <span className="min-w-0">
-                              <span className="block break-words text-foreground">{line.description}</span>
+                              <span className="block break-words text-foreground">{lineName(line.description)}</span>
                               <span className="block text-xs text-muted-foreground">
                                 {money(line.unit_price)} · {line.is_cost_passthrough ? copy.passthroughGroup : `${line.vat_rate ?? "0"} %`}
                                 {Number(line.discount_percent ?? 0) > 0 ? (
@@ -430,7 +435,7 @@ export function DraftInvoiceEditorDialog({
                           <Input
                             className={inputClass}
                             inputMode="decimal"
-                            aria-label={`${copy.quantity}: ${line.description}`}
+                            aria-label={`${copy.quantity}: ${lineName(line.description)}`}
                             disabled={!entry?.selected}
                             value={entry?.quantity ?? ""}
                             onChange={(event) => setLine(line.line_index, { quantity: event.target.value })}
@@ -440,7 +445,7 @@ export function DraftInvoiceEditorDialog({
                               className={`${inputClass} sm:col-span-2`}
                               maxLength={300}
                               placeholder={copy.comment}
-                              aria-label={`${copy.comment}: ${line.description}`}
+                              aria-label={`${copy.comment}: ${lineName(line.description)}`}
                               value={entry.comment}
                               onChange={(event) => setLine(line.line_index, { comment: event.target.value })}
                             />
@@ -455,7 +460,7 @@ export function DraftInvoiceEditorDialog({
                         data-testid="invoice-draft-kept-service"
                       >
                         <span className="min-w-0">
-                          <span className="block break-words text-foreground">{service.description}</span>
+                          <span className="block break-words text-foreground">{lineName(service.description)}</span>
                           <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                             {money(service.unit_price)} · {service.is_cost_passthrough ? copy.passthroughGroup : `${service.vat_rate ?? "0"} %`} · {formatQuantity(service.quantity)}
                             <span className="rounded-sm bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{copy.outsideEstimate}</span>
@@ -466,7 +471,7 @@ export function DraftInvoiceEditorDialog({
                           className={`${inputClass} w-full`}
                           maxLength={300}
                           placeholder={copy.comment}
-                          aria-label={`${copy.comment}: ${service.description}`}
+                          aria-label={`${copy.comment}: ${lineName(service.description)}`}
                           value={form.serviceComments?.[service.order_leistung_id] ?? ""}
                           onChange={(event) => setForm({
                             ...form,

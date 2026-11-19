@@ -3729,6 +3729,118 @@ async fn approved_interpreter_report_consumes_the_planned_interpreter_line() {
     .await;
 }
 
+/// QA3 C S1-2: a delivered interpreter line is an earlier visit. A new report
+/// never overwrites its hours: it adds its own line on the order tariff
+/// (discount and tax profile of the order's interpreter line).
+#[tokio::test]
+async fn approved_interpreter_report_keeps_a_delivered_line_and_adds_its_own() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interp-billing-delivered");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("ORD-DELIV-{tag}"),
+        "execution",
+        "active",
+        "Interpreter support",
+    )
+    .await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let interpreter_service_id = seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "interpreter_hours",
+        "Interpreter hours",
+        "2026-01-01",
+    )
+    .await;
+    let delivered = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        Some(interpreter_service_id),
+        "Dolmetscher-/Betreuungsleistung",
+        "2",
+        2,
+    )
+    .await;
+    sqlx::query(
+        "UPDATE order_leistungen
+         SET status = 'delivered', delivered_at = now() - interval '1 day', discount_percent = 15
+         WHERE id = $1",
+    )
+    .bind(delivered)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (delivered_profile,): (Option<Uuid>,) =
+        sqlx::query_as("SELECT tax_profile_id FROM order_leistungen WHERE id = $1")
+            .bind(delivered)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let fixture = InterpreterReportFixture {
+        app: &app,
+        pool: &pool,
+        order_id,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        interpreter_id,
+    };
+    let report = fixture.approved_report("2026-04-21", 2.5).await;
+
+    let (status, quantity, linked) = order_service_state(&pool, delivered).await;
+    assert_eq!(status, "delivered");
+    assert_eq!(
+        quantity.parse::<f64>().unwrap(),
+        2.0,
+        "delivered hours stay"
+    );
+    assert_eq!(linked, None);
+
+    let created: (Uuid, String, String, String, Option<Uuid>) = sqlx::query_as(
+        "SELECT id, status, quantity::text, discount_percent::text, tax_profile_id
+         FROM order_leistungen WHERE source_interpreter_report_id::text = $1",
+    )
+    .bind(&report)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_ne!(created.0, delivered);
+    assert_eq!(created.1, "approved");
+    assert_eq!(created.2.parse::<f64>().unwrap(), 2.5);
+    assert_eq!(
+        created.3.parse::<f64>().unwrap(),
+        15.0,
+        "order tariff discount"
+    );
+    assert_eq!(created.4, delivered_profile, "order tariff tax profile");
+
+    let interpreter_hours: String = sqlx::query_scalar(
+        r#"SELECT COALESCE(sum(quantity), 0)::text FROM order_leistungen
+           WHERE order_id = $1 AND agency_service_id = $2"#,
+    )
+    .bind(order_id)
+    .bind(interpreter_service_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(interpreter_hours.parse::<f64>().unwrap(), 4.5);
+}
+
 /// Owner 2026-11-13 (release QA D-02): approved interpreter hours below the
 /// plan only lower the amount, so the signed estimate stays current; hours
 /// above the plan raise it, and the estimate is outdated.
@@ -4129,6 +4241,124 @@ async fn completed_medical_appointment_auto_creates_order_leistung_from_agency_c
         .as_array()
         .expect("leistungen array on second fetch");
     assert_eq!(leistungen.len(), 1);
+    assert_eq!(
+        leistungen[0]["source_medical_appointment_id"],
+        appointment_id.to_string()
+    );
+}
+
+/// QA3 C S2-4: «Добавить в смету» at a visit adds a planned line linked to the
+/// appointment. Completing the visit delivers that line; no second
+/// «Organisation der Behandlung» comes on top.
+#[tokio::test]
+async fn a_line_added_for_a_visit_is_delivered_by_its_completion_without_a_duplicate() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("medical-billing-linked");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("ORD-LINK-{tag}"),
+        "execution",
+        "active",
+        "Treatment coordination",
+    )
+    .await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Linked visit {tag}"),
+        "confirmed",
+        "2026-04-24",
+    )
+    .await;
+    sqlx::query("UPDATE appointments SET order_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "treatment_organization",
+        "Organisation der Behandlung",
+        "2026-01-01",
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    // Even a line staff typed by hand belongs to the visit once it is linked.
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Begleitung zum Termin",
+            "quantity": 1,
+            "unit_price": 550,
+            "vat_rate": 19,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "source_medical_appointment_id": appointment_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let line_id = created["id"].as_str().unwrap().to_string();
+
+    // A second line for the same visit is refused.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Begleitung zum Termin",
+            "quantity": 1,
+            "unit_price": 550,
+            "vat_rate": 19,
+            "source_medical_appointment_id": appointment_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, leistungen) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let leistungen = leistungen.as_array().expect("leistungen");
+    assert_eq!(leistungen.len(), 1, "{leistungen:?}");
+    assert_eq!(leistungen[0]["id"], line_id);
+    assert_eq!(leistungen[0]["status"], "delivered");
     assert_eq!(
         leistungen[0]["source_medical_appointment_id"],
         appointment_id.to_string()

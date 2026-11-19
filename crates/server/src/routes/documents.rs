@@ -443,6 +443,53 @@ struct GeneratedContractLineItem {
     /// the flag still mark "Voraussichtliche Auslagen" by its description.
     is_cost_passthrough: bool,
     notes: Option<String>,
+    /// The position's tax profile and its category (quote lines carry them).
+    tax_profile_id: Option<Uuid>,
+    vat_category: Option<String>,
+    /// The profile's reason for a line without VAT (QA3 B S2-2), filled by
+    /// [`apply_contract_exemption_reasons`]; `None` keeps the former
+    /// classification.
+    exemption_reason: Option<String>,
+}
+
+/// The reasons of [`apply_contract_exemption_reasons`] with a pooled connection.
+async fn exemption_reasons_or_500(
+    state: &AppState,
+    items: &mut [GeneratedContractLineItem],
+) -> Result<(), axum::response::Response> {
+    let result = match state.db.acquire().await {
+        Ok(mut conn) => apply_contract_exemption_reasons(&mut conn, items).await,
+        Err(error) => Err(error),
+    };
+    result.map_err(|error| {
+        tracing::error!(%error, "load the exemption reasons of the tax profiles");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load tax profiles",
+        )
+    })
+}
+
+/// Each listed line without VAT takes its tax profile's reason.
+async fn apply_contract_exemption_reasons(
+    conn: &mut sqlx::PgConnection,
+    items: &mut [GeneratedContractLineItem],
+) -> Result<(), sqlx::Error> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let catalog = crate::tax_exemptions::ExemptionCatalog::load(conn).await?;
+    for item in items {
+        item.exemption_reason = catalog
+            .resolve(
+                contract_line_vat_rate(item),
+                item.is_cost_passthrough || is_estimated_outlays_item(item),
+                item.tax_profile_id,
+                item.vat_category.as_deref(),
+            )
+            .map(|exemption| exemption.reason);
+    }
+    Ok(())
 }
 
 struct GeneratedCostEstimateCatalogSelection {
@@ -1156,6 +1203,33 @@ struct GeneratedSingleOrderContext {
     agency_sign_date: Option<NaiveDate>,
     generated_at: chrono::DateTime<chrono::Utc>,
     contracting: ContractingDoc,
+    /// The order has a flat fee (a catalogue service due in full on
+    /// termination): only then the Einzelauftrag prints the Pauschale clause
+    /// (QA3 A S3-13).
+    has_flat_fee: bool,
+}
+
+/// Whether an order has a flat fee («Pauschale»): a not cancelled position
+/// of a catalogue service due in full on termination.
+async fn order_has_flat_fee(state: &AppState, order_id: Option<Uuid>) -> bool {
+    let Some(order_id) = order_id else {
+        return false;
+    };
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM order_leistungen line
+               JOIN agency_service_catalog catalog ON catalog.id = line.agency_service_id
+               WHERE line.order_id = $1
+                 AND line.status <> 'cancelled'
+                 AND catalog.due_in_full_on_termination)"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or_else(|error| {
+        tracing::error!(%error, %order_id, "check the flat fee of an order");
+        false
+    })
 }
 
 #[allow(dead_code)]
@@ -7738,6 +7812,15 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                     .get("notes")
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned),
+                tax_profile_id: object
+                    .get("tax_profile_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| Uuid::parse_str(id).ok()),
+                vat_category: object
+                    .get("vat_category")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                exemption_reason: None,
             })
         })
         .collect()
@@ -19963,11 +20046,14 @@ async fn generate_document(
                 .map(parse_contract_conditions)
                 .unwrap_or_default();
 
-            let line_items = quote_row
+            let mut line_items = quote_row
                 .as_ref()
                 .and_then(|row| row.try_get::<Option<Value>, _>("line_items").ok().flatten())
                 .map(|value| parse_quote_line_items(&value))
                 .unwrap_or_default();
+            if let Err(resp) = exemption_reasons_or_500(&state, &mut line_items).await {
+                return resp;
+            }
             let order_metadata = match load_generated_order_metadata(&state, order_id).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -20447,7 +20533,9 @@ async fn generate_document(
                 (Some(configured), _) => Some(configured),
                 (None, reference) => reference,
             };
+            let has_flat_fee = order_has_flat_fee(&state, order_id).await;
             let context = GeneratedSingleOrderContext {
+                has_flat_fee,
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
                 title_override: title_override.clone(),
@@ -24208,21 +24296,30 @@ fn build_single_order_pdf(
                 7.0,
                 1.5,
             );
+            let mut clause = 2;
+            if context.has_flat_fee {
+                admin_block(
+                    &mut layout,
+                    "2. Die Pauschale für die Kommunikation mit den Ärzten und die Koordination der Behandlungen ist in voller Höhe zu zahlen, unabhängig davon, wie viele Ärzte tatsächlich konsultiert worden sind.",
+                    0.0,
+                    1.0,
+                );
+                clause += 1;
+            }
             admin_block(
                 &mut layout,
-                "2. Die Pauschale für die Kommunikation mit den Ärzten und die Koordination der Behandlungen ist in voller Höhe zu zahlen, unabhängig davon, wie viele Ärzte tatsächlich konsultiert worden sind.",
+                &format!(
+                    "{clause}. Die Parteien sind sich einig, dass sich die Vergütung auf die unter § 1 genannten Leistungen bezieht. Den Parteien steht es frei, jederzeit Folgeaufträge unter Geltung der Regelungen des Dienstleistungsvertrages abzuschließen."
+                ),
                 0.0,
                 1.0,
             );
             admin_block(
                 &mut layout,
-                "3. Die Parteien sind sich einig, dass sich die Vergütung auf die unter § 1 genannten Leistungen bezieht. Den Parteien steht es frei, jederzeit Folgeaufträge unter Geltung der Regelungen des Dienstleistungsvertrages abzuschließen.",
-                0.0,
-                1.0,
-            );
-            admin_block(
-                &mut layout,
-                "4. Im Übrigen gelten die Regelungen des § 2 des Rahmendienstleistungsvertrages.",
+                &format!(
+                    "{}. Im Übrigen gelten die Regelungen des § 2 des Rahmendienstleistungsvertrages.",
+                    clause + 1
+                ),
                 0.0,
                 1.5,
             );
@@ -24907,13 +25004,17 @@ fn contract_vat_total_label(items: &[&GeneratedContractLineItem]) -> String {
     }
 }
 
-/// The 0 % line of the totals (QA2 S3): «MwSt. 0%» with 0,00 € when a
-/// service of the document is VAT-free (§ 4 Nr. 14 or exempt).
+/// The 0 % line of the totals (QA2 S3, QA3 A S3-2): «MwSt. 0%» with 0,00 €
+/// next to a taxed rate when a service of the document carries no VAT
+/// (§ 4 Nr. 14, exempt, or a pass-through cost).
 fn contract_zero_vat_total(items: &[&GeneratedContractLineItem]) -> Option<(String, &'static str)> {
     let groups = contract_vat_groups(items);
-    let exempt = groups
-        .iter()
-        .any(|(treatment, _)| matches!(treatment, ContractLineVat::Exempt));
+    let exempt = groups.iter().any(|(treatment, _)| {
+        matches!(
+            treatment,
+            ContractLineVat::Exempt | ContractLineVat::Passthrough
+        )
+    });
     let taxed = groups
         .iter()
         .any(|(treatment, _)| matches!(treatment, ContractLineVat::Taxed(_)));
@@ -24930,19 +25031,46 @@ fn mixed_contract_vat_note(items: &[&GeneratedContractLineItem]) -> Option<Strin
     if matches!(groups.as_slice(), [] | [(ContractLineVat::Taxed(_), _)]) {
         return None;
     }
-    let parts = groups
+    // A 0 % group splits by the reason of each line's tax profile (QA3 B
+    // S2-2): «Steuerfreie Leistung» is not § 4 Nr. 14.
+    let mut reasoned: Vec<(ContractLineVat, Option<String>, Vec<&str>)> = Vec::new();
+    for &item in items {
+        let treatment = ContractLineVat::of(item);
+        let reason = match treatment {
+            ContractLineVat::Taxed(_) => None,
+            ContractLineVat::Exempt | ContractLineVat::Passthrough => {
+                item.exemption_reason.clone().or_else(|| {
+                    crate::routes::invoices::line_exemption_reason(
+                        Decimal::ZERO,
+                        treatment == ContractLineVat::Passthrough,
+                    )
+                    .map(str::to_string)
+                })
+            }
+        };
+        let index = match reasoned
+            .iter()
+            .position(|(group, group_reason, _)| *group == treatment && *group_reason == reason)
+        {
+            Some(index) => index,
+            None => {
+                reasoned.push((treatment, reason, Vec::new()));
+                reasoned.len() - 1
+            }
+        };
+        let name = item.description.trim();
+        let names = &mut reasoned[index].2;
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    reasoned.sort_by_key(|(treatment, _, _)| treatment.sort_key());
+    let parts = reasoned
         .iter()
-        .map(|(treatment, names)| {
-            let (rate, reason) = match treatment {
-                ContractLineVat::Taxed(rate) => (*rate, None),
-                ContractLineVat::Exempt => (
-                    Decimal::ZERO,
-                    crate::routes::invoices::line_exemption_reason(Decimal::ZERO, false),
-                ),
-                ContractLineVat::Passthrough => (
-                    Decimal::ZERO,
-                    crate::routes::invoices::line_exemption_reason(Decimal::ZERO, true),
-                ),
+        .map(|(treatment, reason, names)| {
+            let rate = match treatment {
+                ContractLineVat::Taxed(rate) => *rate,
+                ContractLineVat::Exempt | ContractLineVat::Passthrough => Decimal::ZERO,
             };
             let mut part = format!("{} %", fmt_vat_rate(rate));
             if !names.is_empty() {
@@ -32768,6 +32896,9 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
                 .map(ToOwned::to_owned),
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         })
         .collect()
 }
@@ -32974,6 +33105,9 @@ async fn load_lead_cost_estimate_catalog_selection(
             vat_rate: None,
             is_cost_passthrough: false,
             notes: None,
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         });
     }
 
@@ -33325,35 +33459,33 @@ async fn load_order_quote_summary(
         )
     })?;
 
-    Ok(row.map(|row| {
-        let line_items = row
-            .try_get::<Option<Value>, _>("line_items")
+    let mut line_items = row
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<Value>, _>("line_items").ok().flatten())
+        .map(|value| parse_quote_line_items(&value))
+        .unwrap_or_default();
+    exemption_reasons_or_500(state, &mut line_items).await?;
+    Ok(row.map(|row| OrderQuoteSummary {
+        quote_number: row
+            .try_get::<Option<String>, _>("quote_number")
+            .ok()
+            .flatten(),
+        total_net: row
+            .try_get::<Option<String>, _>("total_net")
             .ok()
             .flatten()
-            .map(|value| parse_quote_line_items(&value))
-            .unwrap_or_default();
-        OrderQuoteSummary {
-            quote_number: row
-                .try_get::<Option<String>, _>("quote_number")
-                .ok()
-                .flatten(),
-            total_net: row
-                .try_get::<Option<String>, _>("total_net")
-                .ok()
-                .flatten()
-                .map(|v| fmt_money_de(&v)),
-            total_vat: row
-                .try_get::<Option<String>, _>("total_vat")
-                .ok()
-                .flatten()
-                .map(|v| fmt_money_de(&v)),
-            total_gross: row
-                .try_get::<Option<String>, _>("total_gross")
-                .ok()
-                .flatten()
-                .map(|v| fmt_money_de(&v)),
-            line_items,
-        }
+            .map(|v| fmt_money_de(&v)),
+        total_vat: row
+            .try_get::<Option<String>, _>("total_vat")
+            .ok()
+            .flatten()
+            .map(|v| fmt_money_de(&v)),
+        total_gross: row
+            .try_get::<Option<String>, _>("total_gross")
+            .ok()
+            .flatten()
+            .map(|v| fmt_money_de(&v)),
+        line_items,
     }))
 }
 
@@ -44166,6 +44298,9 @@ mod tests {
                 vat_rate: Some(vat.to_string()),
                 is_cost_passthrough: false,
                 notes: notes.map(str::to_string),
+                tax_profile_id: None,
+                vat_category: None,
+                exemption_reason: None,
             }
         };
         let mut items = vec![
@@ -44213,6 +44348,7 @@ mod tests {
         assert_eq!(super::format_eur_decimal(rows[1].1), "300,00 €");
 
         let context = GeneratedSingleOrderContext {
+            has_flat_fee: true,
             language: "de".to_string(),
             auto_name: "Kostenvoranschlag (Ausfertigung Zahler/in)".to_string(),
             title_override: None,
@@ -47160,6 +47296,7 @@ mod tests {
         ));
 
         let mut context = GeneratedSingleOrderContext {
+            has_flat_fee: true,
             language: "de".to_string(),
             auto_name: "Einzelauftrag".to_string(),
             title_override: None,
@@ -47469,6 +47606,9 @@ mod tests {
                 "1) Dining: Up to 2 restaurant reservations per day\n2) Transport Coordination: up to 2 transfers/day\n\nNOT INCLUDED\n- Private chauffeur services\n- Security services"
                     .to_string(),
             ),
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         };
 
         assert_eq!(
@@ -47510,6 +47650,7 @@ mod tests {
     #[test]
     fn single_order_and_order_cost_estimate_are_separate_legal_documents() {
         let mut context = GeneratedSingleOrderContext {
+            has_flat_fee: true,
             language: "de".to_string(),
             auto_name: "Einzelauftrag".to_string(),
             title_override: None,
@@ -47562,6 +47703,9 @@ mod tests {
                         "Herstellung von Kontakten und Terminvereinbarungen.\n\nKoordination der interdisziplinären Zusammenarbeit."
                             .to_string(),
                     ),
+                    tax_profile_id: None,
+                    vat_category: None,
+                    exemption_reason: None,
                 },
                 GeneratedContractLineItem {
                     description_items: None,
@@ -47574,6 +47718,9 @@ mod tests {
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
+                    tax_profile_id: None,
+                    vat_category: None,
+                    exemption_reason: None,
                 },
                 GeneratedContractLineItem {
                     description_items: None,
@@ -47585,6 +47732,9 @@ mod tests {
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
+                    tax_profile_id: None,
+                    vat_category: None,
+                    exemption_reason: None,
                 },
             ],
             total_net: Some("2.299,00 €".to_string()),
@@ -47656,6 +47806,9 @@ mod tests {
             vat_rate: Some("0".to_string()),
             is_cost_passthrough: false,
             notes: None,
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         });
         context.total_net = Some("2.349,00 €".to_string());
         context.total_gross = Some("2.785,81 €".to_string());
@@ -47786,6 +47939,9 @@ mod tests {
             vat_rate: Some(vat_rate.to_string()),
             is_cost_passthrough: false,
             notes: None,
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         }
     }
 
@@ -47943,6 +48099,38 @@ mod tests {
         assert_eq!(super::contract_vat_total_label(&two_rates), "MwSt.");
     }
 
+    /// QA3 A S3-2: a KV with 19 % and pass-through lines prints «MwSt. 0%»
+    /// too; B S2-2: a 0 % line prints its own profile's reason.
+    #[test]
+    fn mixed_documents_print_the_zero_rate_and_each_profile_reason() {
+        let taxed = priced_line("Airport transfer", "2", "180,00 €", "360,00 €", "19");
+        let outlays = GeneratedContractLineItem {
+            is_cost_passthrough: true,
+            ..priced_line("Klinikrechnung", "1", "800,00 €", "800,00 €", "0")
+        };
+        assert_eq!(
+            super::contract_zero_vat_total(&[&taxed, &outlays]),
+            Some(("MwSt. 0%".to_string(), "0,00 €"))
+        );
+        assert_eq!(super::contract_zero_vat_total(&[&taxed]), None);
+
+        let exempt = GeneratedContractLineItem {
+            exemption_reason: Some("Steuerfreie Leistung".to_string()),
+            ..priced_line("Sonderleistung", "1", "50,00 €", "50,00 €", "0")
+        };
+        let medical = priced_line(
+            "Organisation der Behandlung",
+            "1",
+            "550,00 €",
+            "550,00 €",
+            "0",
+        );
+        assert_eq!(
+            super::contract_vat_note(&[&taxed, &exempt, &medical, &outlays]),
+            "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: 19 % – Airport transfer; 0 % – Sonderleistung (Steuerfreie Leistung); 0 % – Organisation der Behandlung (Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG); 0 % – Klinikrechnung (Durchlaufender Posten gemäß § 10 Abs. 1 Satz 5 UStG)."
+        );
+    }
+
     /// QA 2026-11-01: a stored quote keeps net and gross per line; 452,20 stood
     /// under "zzgl. MwSt." on the estimate and the Kostenübernahmeerklärung.
     #[test]
@@ -48046,6 +48234,7 @@ mod tests {
     fn order_documents_state_the_vat_of_mixed_rate_services() {
         let lines = mixed_vat_order_lines();
         let mut context = GeneratedSingleOrderContext {
+            has_flat_fee: true,
             language: "de".to_string(),
             auto_name: "Einzelauftrag".to_string(),
             title_override: None,
@@ -48087,6 +48276,17 @@ mod tests {
             "*{MIXED_VAT_NOTE}. Der konkrete Aufwand wird im Kostenvoranschlag"
         )));
         assert!(!order_text.contains("zzgl. MwSt. 19 %"));
+        assert!(order_text.contains("Die Pauschale"));
+
+        // QA3 A S3-13: without a flat fee the Pauschale clause is left out
+        // and the clauses after it move up.
+        context.has_flat_fee = false;
+        let order_text =
+            normalized_pdf_text(&build_single_order_pdf(&context, "DOC-VAT-ORDER").unwrap());
+        assert!(!order_text.contains("Pauschale"));
+        assert!(order_text.contains("2. Die Parteien"));
+        assert!(order_text.contains("3. Im Übrigen"));
+        context.has_flat_fee = true;
 
         context.line_items = lines.clone();
         context.total_net = Some("2.870,00 €".to_string());
@@ -48282,6 +48482,9 @@ mod tests {
                 vat_rate: None,
                 is_cost_passthrough: false,
                 notes: None,
+                tax_profile_id: None,
+                vat_category: None,
+                exemption_reason: None,
             }],
             total_range: Some("100,00 - 1000,00 €".to_string()),
             agency: legal_test_agency(),
@@ -48360,6 +48563,9 @@ mod tests {
                 vat_rate: None,
                 is_cost_passthrough: false,
                 notes: None,
+                tax_profile_id: None,
+                vat_category: None,
+                exemption_reason: None,
             }],
             total_range: Some("100,00 - 1000,00 €".to_string()),
             agency: legal_test_agency(),
@@ -48531,6 +48737,9 @@ mod tests {
             vat_rate: None,
             is_cost_passthrough: false,
             notes: None,
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         };
         let context = GeneratedCostEstimateContext {
             language: "de".to_string(),
@@ -48634,6 +48843,9 @@ mod tests {
                 vat_rate: None,
                 is_cost_passthrough: false,
                 notes: None,
+                tax_profile_id: None,
+                vat_category: None,
+                exemption_reason: None,
             }],
             total_range: "800,00 - 1.200,00 €".to_string(),
         };
@@ -48794,6 +49006,9 @@ mod tests {
             vat_rate: None,
             is_cost_passthrough: false,
             notes: None,
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         }])
         .unwrap();
 
@@ -48814,6 +49029,9 @@ mod tests {
             vat_rate: Some("19".to_string()),
             is_cost_passthrough: false,
             notes: None,
+            tax_profile_id: None,
+            vat_category: None,
+            exemption_reason: None,
         }])
         .unwrap();
 
@@ -48858,6 +49076,7 @@ mod tests {
             return;
         };
         let context = GeneratedSingleOrderContext {
+            has_flat_fee: true,
             language: "de".to_string(),
             auto_name: "Einzelauftrag".to_string(),
             title_override: None,
@@ -48898,6 +49117,9 @@ mod tests {
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: Some("Leistungsumfang 10, 11".to_string()),
+                    tax_profile_id: None,
+                    vat_category: None,
+                    exemption_reason: None,
                 },
                 GeneratedContractLineItem {
                     description_items: None,
@@ -48910,6 +49132,9 @@ mod tests {
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
+                    tax_profile_id: None,
+                    vat_category: None,
+                    exemption_reason: None,
                 },
                 GeneratedContractLineItem {
                     description_items: None,
@@ -48921,6 +49146,9 @@ mod tests {
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
+                    tax_profile_id: None,
+                    vat_category: None,
+                    exemption_reason: None,
                 },
             ],
             total_net: Some("2.299,00 €".to_string()),

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/ui/status-chip";
 import { inputClass } from "@/components/ui-shell";
-import { agencyServiceNameLabel, agencyServiceUnitCount } from "@/lib/agency-service-labels";
+import { agencyServiceNameLabel, agencyServiceUnitShortCount } from "@/lib/agency-service-labels";
 import { useLang } from "@/lib/i18n";
 import { roundCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -211,7 +211,7 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
   const de = lang === "de";
   const quantityLabel = de ? "Menge" : "Количество";
   const actualLabel = de ? "erbracht" : "фактически";
-  const unitCount = (value: string, unit?: string | null) => agencyServiceUnitCount(value, unit, t, lang);
+  const unitCount = (value: string, unit?: string | null) => agencyServiceUnitShortCount(value, unit, t, lang);
   const outside = extras.filter((extra) => extra.quote_line_index == null || !lines[extra.quote_line_index]);
 
   const serviceRow = (extra: DeliveredOrderService, nested: boolean) => {

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+describe("agencyServiceUnitShortCount (QA3: one unit form per list)", () => {
+  it("abbreviates hours, days and pieces with a decimal comma", () => {
+    expect(agencyServiceUnitShortCount("6", "hour", t("ru"), "ru")).toBe("6 ч");
+    expect(agencyServiceUnitShortCount("2.5", "Stunden", t("de"), "de")).toBe("2,5 Std.");
+    expect(agencyServiceUnitShortCount("1", "item", t("ru"), "ru")).toBe("1 шт.");
+    expect(agencyServiceUnitShortCount("3", "day", t("ru"), "ru")).toBe("3 дн.");
+    expect(agencyServiceUnitShortCount("2", "ride", t("ru"), "ru")).toBe("2 поездки");
+    expect(agencyServiceUnitShortCount("4", null, t("ru"), "ru")).toBe("4");
+  });
+});
+
 import {
   agencyCatalogItemName,
   agencyServiceLineDisplayDescription,
@@ -8,6 +19,7 @@ import {
   agencyServiceNameLabel,
   agencyServiceStoredName,
   agencyServiceUnitCount,
+  agencyServiceUnitShortCount,
   agencyServiceUnitLabel,
   germanDocumentUnitLabel,
 } from "./agency-service-labels";

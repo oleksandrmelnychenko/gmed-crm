@@ -17,11 +17,11 @@ pub(super) const ZUGFERD_XML_FILENAME: &str = "factur-x.xml";
 /// sRGB profile for the PDF/A output intent (CC0, see assets/icc/README.md).
 const SRGB_ICC_PROFILE: &[u8] = include_bytes!("../../../assets/icc/sRGB-v2-micro.icc");
 const EN16931_GUIDELINE: &str = "urn:cen.eu:en16931:2017";
-const PASSTHROUGH_EXEMPTION: &str = "Durchlaufender Posten gemäß § 10 Abs. 1 Satz 5 UStG";
+const PASSTHROUGH_EXEMPTION: &str = crate::tax_exemptions::PASSTHROUGH_REASON;
 /// Medical care is exempt under § 4 Nr. 14 UStG (Art. 132 VAT Directive); the
-/// VATEX code is only written when every exempt line is medical care.
-const ZERO_RATE_EXEMPTION: &str = "Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG";
-const ZERO_RATE_EXEMPTION_CODE: &str = "VATEX-EU-132";
+/// VATEX code is only written when every exempt line shares it.
+const ZERO_RATE_EXEMPTION: &str = crate::tax_exemptions::MEDICAL_REASON;
+const ZERO_RATE_EXEMPTION_CODE: &str = crate::tax_exemptions::MEDICAL_REASON_CODE;
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct EInvoiceParty {
@@ -55,19 +55,34 @@ pub(super) struct EInvoiceLine {
     /// `amount` (BT-136) at `percent` (BT-138) on the list net (BT-137), so
     /// that quantity × net price − allowance = line net (BT-131).
     pub discount: Option<LineDiscount>,
+    /// The reason of the line's tax profile for a line without VAT (QA3
+    /// B S2-2); `None` keeps the former classification
+    /// ([`line_exemption_reason`]).
+    pub exemption: Option<crate::tax_exemptions::Exemption>,
 }
 
-/// UN/ECE Rec. 20 code of a line's unit label (QA 2026-11-19, S3-9): hours
-/// `HUR`, days `DAY`, anything else one piece `C62`.
+/// UN/ECE Rec. 20 code of a line's unit label (QA 2026-11-19, S3-9; QA3):
+/// hours `HUR`, days `DAY`, months `MON`, anything else one piece `C62`.
 pub(super) fn unit_code(label: Option<&str>) -> &'static str {
-    match label
-        .map(|label| label.trim().trim_end_matches('.').to_lowercase())
-        .as_deref()
-    {
-        Some(
-            "hour" | "hours" | "stunde" | "stunden" | "std" | "h" | "час" | "часа" | "часов" | "ч",
-        ) => "HUR",
-        Some("day" | "days" | "tag" | "tage" | "день" | "дня" | "дней") => "DAY",
+    let Some(label) = label else {
+        return "C62";
+    };
+    let label = label.trim().to_lowercase();
+    let label = label
+        .trim_start_matches("pro ")
+        .trim_start_matches("per ")
+        .trim_start_matches("за ")
+        .trim_end_matches('.')
+        .trim_end_matches("(n)")
+        .trim();
+    match label {
+        "hour" | "hours" | "hr" | "hrs" | "stunde" | "stunden" | "std" | "h" | "час" | "часа"
+        | "часов" | "ч" | "година" | "годин" => "HUR",
+        "day" | "days" | "tag" | "tage" | "tagen" | "день" | "дня" | "дней" | "дн" | "сутки" => {
+            "DAY"
+        }
+        "month" | "months" | "monat" | "monate" | "monaten" | "mon" | "месяц" | "месяца"
+        | "месяцев" | "мес" | "місяць" => "MON",
         _ => "C62",
     }
 }
@@ -271,8 +286,11 @@ fn text(value: &Option<String>) -> Option<&str> {
 struct TaxGroup {
     category: &'static str,
     rate: Decimal,
-    /// Every exemption that applies to lines of this group, in line order.
-    exemptions: Vec<&'static str>,
+    /// Every exemption reason that applies to lines of this group, in line
+    /// order.
+    exemptions: Vec<String>,
+    /// The VATEX code of each line of the group (`None` for a line without).
+    codes: Vec<Option<String>>,
     basis: Decimal,
     /// Sum of the stored line VAT, `None` once a line comes without it.
     line_vat: Option<Decimal>,
@@ -294,8 +312,14 @@ impl TaxGroup {
     fn exemption_reason(&self) -> Option<String> {
         (!self.exemptions.is_empty()).then(|| self.exemptions.join("; "))
     }
-    fn exemption_code(&self) -> Option<&'static str> {
-        (self.exemptions == [ZERO_RATE_EXEMPTION]).then_some(ZERO_RATE_EXEMPTION_CODE)
+    /// BT-121 is one code for the whole breakdown: written only when every
+    /// exempt line carries the same one.
+    fn exemption_code(&self) -> Option<&str> {
+        let first = self.codes.first()?.as_deref()?;
+        self.codes
+            .iter()
+            .all(|code| code.as_deref() == Some(first))
+            .then_some(first)
     }
 }
 
@@ -345,15 +369,34 @@ fn line_allowance_xml(line: &EInvoiceLine) -> String {
     )
 }
 
-fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
+fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<(String, Option<String>)>) {
+    if line.vat_rate > Decimal::ZERO {
+        return ("S", None);
+    }
+    if let Some(exemption) = &line.exemption {
+        return (
+            "E",
+            Some((exemption.reason.clone(), exemption.code.clone())),
+        );
+    }
     match line_exemption_reason(line.vat_rate, line.is_cost_passthrough) {
         None => ("S", None),
-        Some(reason) => ("E", Some(reason)),
+        Some(reason) => (
+            "E",
+            Some((
+                reason.to_string(),
+                (reason == ZERO_RATE_EXEMPTION).then(|| ZERO_RATE_EXEMPTION_CODE.to_string()),
+            )),
+        ),
     }
 }
 
 /// One breakdown per category and rate. EN 16931 allows exactly one exempt
-/// breakdown (BR-E-01), so medical care and pass-through items share it.
+/// breakdown (BR-E-01: an invoice with category E lines has exactly one E
+/// breakdown), so medical care, other exempt services and pass-through items
+/// share it and its reason (BT-120) names each of their reasons; category O
+/// cannot carry them either, it excludes every other category (BR-O-11..14).
+/// The printed invoice shows the same reasons per 0 % row.
 fn tax_groups(lines: &[EInvoiceLine]) -> Vec<TaxGroup> {
     let mut groups: Vec<TaxGroup> = Vec::new();
     for line in lines {
@@ -368,6 +411,7 @@ fn tax_groups(lines: &[EInvoiceLine]) -> Vec<TaxGroup> {
                     category,
                     rate: line.vat_rate,
                     exemptions: Vec::new(),
+                    codes: Vec::new(),
                     basis: Decimal::ZERO,
                     line_vat: Some(Decimal::ZERO),
                 });
@@ -379,10 +423,11 @@ fn tax_groups(lines: &[EInvoiceLine]) -> Vec<TaxGroup> {
             .line_vat
             .zip(line.line_vat)
             .map(|(sum, vat)| sum + round_cents(vat));
-        if let Some(exemption) = exemption
-            && !group.exemptions.contains(&exemption)
-        {
-            group.exemptions.push(exemption);
+        if let Some((reason, code)) = exemption {
+            if !group.exemptions.contains(&reason) {
+                group.exemptions.push(reason);
+            }
+            group.codes.push(code);
         }
     }
     groups
@@ -939,6 +984,7 @@ mod tests {
                     vat_rate: dec("19"),
                     is_cost_passthrough: false,
                     unit_code: "C62",
+                    exemption: None,
                     discount: None,
                     note: Some("2. & 3. Quartal 2026".to_string()),
                 },
@@ -951,6 +997,7 @@ mod tests {
                     vat_rate: dec("0"),
                     is_cost_passthrough: true,
                     unit_code: "C62",
+                    exemption: None,
                     discount: None,
                     note: None,
                 },
@@ -1035,6 +1082,7 @@ mod tests {
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
                 unit_code: "C62",
+                exemption: None,
                 discount: None,
             })
             .collect();
@@ -1108,6 +1156,7 @@ mod tests {
             vat_rate: dec("19"),
             is_cost_passthrough: false,
             unit_code: "C62",
+            exemption: None,
             discount: None,
             note: None,
         }];
@@ -1133,6 +1182,7 @@ mod tests {
             vat_rate: dec("19"),
             is_cost_passthrough: false,
             unit_code: "C62",
+            exemption: None,
             discount: Some(LineDiscount {
                 percent: dec("10"),
                 amount: dec("36"),
@@ -1161,6 +1211,7 @@ mod tests {
             vat_rate: dec("19"),
             is_cost_passthrough: false,
             unit_code: "C62",
+            exemption: None,
             discount: None,
             note: None,
         }];
@@ -1349,6 +1400,7 @@ mod tests {
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
                 unit_code: "C62",
+                exemption: None,
                 discount: None,
                 note: None,
             },
@@ -1361,6 +1413,7 @@ mod tests {
                 vat_rate: dec("0"),
                 is_cost_passthrough: true,
                 unit_code: "C62",
+                exemption: None,
                 discount: None,
                 note: None,
             },
@@ -1408,6 +1461,7 @@ mod tests {
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
                 unit_code: "C62",
+                exemption: None,
                 discount: None,
                 note: None,
             },
@@ -1420,6 +1474,7 @@ mod tests {
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
                 unit_code: "C62",
+                exemption: None,
                 discount: None,
                 note: None,
             },
@@ -1458,6 +1513,7 @@ mod tests {
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
                 unit_code: "C62",
+                exemption: None,
                 discount: None,
             },
             EInvoiceLine {
@@ -1470,6 +1526,7 @@ mod tests {
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
                 unit_code: "C62",
+                exemption: None,
                 discount: None,
             },
         ];

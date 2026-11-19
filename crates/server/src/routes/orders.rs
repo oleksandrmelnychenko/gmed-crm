@@ -369,6 +369,11 @@ struct AddLeistungRequest {
     planned_partner_cost_net: Option<f64>,
     planned_partner_cost_vat: Option<f64>,
     planned_partner_cost_gross: Option<f64>,
+    /// The medical appointment of the order this line is planned for
+    /// («Добавить в смету», QA3 C S2-4): completing it delivers this line
+    /// instead of adding a second one.
+    #[serde(default)]
+    source_medical_appointment_id: Option<Uuid>,
     /// Confirms that a change of the services of an order the client signed
     /// resets the order signatures (QA C3-01, `client_terms.rs`).
     #[serde(default)]
@@ -9148,6 +9153,23 @@ async fn load_external_invoice_allocation_workspace(
              AND orders.currency = $3
              AND invoice.invoice_type <> 'advance'
              AND invoice.status NOT IN ('draft', 'cancelled')
+             -- Only an invoice that bills pass-through or clinic costs
+             -- re-bills a supplier invoice (QA3 C S3-6): an interpreter-only
+             -- interim is no target for a clinic's costs.
+             AND EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements(
+                     CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
+                          THEN invoice.line_items ELSE '[]'::jsonb END
+                 ) AS item(value)
+                 LEFT JOIN order_leistungen billed
+                        ON billed.id::text = item.value ->> 'source_order_leistung_id'
+                 WHERE item.value ->> 'is_cost_passthrough' = 'true'
+                    OR item.value ->> 'vat_category' = 'pass_through'
+                    OR billed.is_cost_passthrough
+                    OR (billed.provider_id IS NOT NULL
+                        AND billed.planned_partner_cost_gross > 0)
+             )
            GROUP BY invoice.id
            HAVING invoice.total_gross - invoice.credited_amount - COALESCE(SUM(allocation.amount_gross) FILTER (
                       WHERE allocation.reversed_at IS NULL
@@ -11358,6 +11380,48 @@ async fn add_leistung(
         Ok(value) => value,
         Err(resp) => return resp,
     };
+    if let Some(appointment_id) = body.source_medical_appointment_id {
+        match sqlx::query_as::<_, (bool, bool)>(
+            r#"SELECT COALESCE(appointment.order_id = $2
+                       AND appointment.appointment_type = 'medical'
+                       AND appointment.status <> 'cancelled', false) AS usable,
+                      EXISTS (SELECT 1 FROM order_leistungen line
+                              WHERE line.source_medical_appointment_id = appointment.id) AS linked
+               FROM appointments appointment
+               WHERE appointment.id = $1"#,
+        )
+        .bind(appointment_id)
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some((true, false))) => {}
+            Ok(Some((true, true))) => {
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    "appointment_already_has_service",
+                    "The appointment already has its service line",
+                );
+            }
+            Ok(_) => {
+                return coded_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "appointment_not_in_order",
+                    "The appointment is not a medical appointment of this order",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %order_id, "check the appointment of a new service");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to add service");
+            }
+        }
+        if passthrough {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "A pass-through cost cannot be linked to an appointment",
+            );
+        }
+    }
 
     // The order row is locked for the whole edit: the terms the client signed
     // are compared before and after it (QA C3-01, `client_terms.rs`).
@@ -11384,10 +11448,11 @@ async fn add_leistung(
              is_cost_passthrough, provider_id, doctor_id, external_document_id,
              notes, client_reference,
              planned_partner_cost_net, planned_partner_cost_vat,
-             planned_partner_cost_gross, tax_profile_id, vat_source, discount_percent
+             planned_partner_cost_gross, tax_profile_id, vat_source, discount_percent,
+             source_medical_appointment_id
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                 $16, $17, $18, $19, $20, $21)
+                 $16, $17, $18, $19, $20, $21, $22)
          ON CONFLICT (order_id, client_reference) DO UPDATE SET
              patient_id = EXCLUDED.patient_id,
              agency_service_id = EXCLUDED.agency_service_id,
@@ -11437,6 +11502,7 @@ async fn add_leistung(
     .bind(tax_profile_id)
     .bind(vat_source)
     .bind(discount_percent)
+    .bind(body.source_medical_appointment_id)
     .fetch_optional(&mut *transaction)
     .await;
     match upserted {

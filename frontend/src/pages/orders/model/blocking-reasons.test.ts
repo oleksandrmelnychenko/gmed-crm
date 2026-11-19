@@ -10,7 +10,17 @@ import {
   orderBlockingReasonSection,
   prepaymentGateAmount,
   resolveOrderBlockingReason,
+  SIGNATURE_RESET_REASON,
+  withStandingBlockingReasons,
 } from "./blocking-reasons";
+
+describe("withStandingBlockingReasons (QA3 C S2-3)", () => {
+  it("lists the signature reset first in every phase, once", () => {
+    expect(withStandingBlockingReasons(["A"], [SIGNATURE_RESET_REASON, "B"])).toEqual([SIGNATURE_RESET_REASON, "A"]);
+    expect(withStandingBlockingReasons([SIGNATURE_RESET_REASON], [SIGNATURE_RESET_REASON])).toEqual([SIGNATURE_RESET_REASON]);
+    expect(withStandingBlockingReasons(["A"], undefined)).toEqual(["A"]);
+  });
+});
 
 describe("overage blockers (QA 2026-11-01, Z1 N2)", () => {
   it("opens where the blocker is resolved", () => {

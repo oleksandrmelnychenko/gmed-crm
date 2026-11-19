@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -508,10 +509,6 @@ function useContractsPageContent() {
         lang === "de"
           ? "Der Vertrag ist unterschrieben und es laufen Aufträge darunter; er kann nicht auf Entwurf oder Versendet zurückgesetzt werden."
           : "Договор подписан и по нему идут заказы; вернуть его в черновик или «отправлен» нельзя.",
-      quoteAcceptedBySignature:
-        lang === "de"
-          ? "„Angenommen“ setzt das System selbst, sobald der Kunde den Kostenvoranschlag unterschrieben hat: elektronisch oder auf Papier – dann den Scan des unterschriebenen Exemplars am Dokument hochladen („Auf Papier unterschrieben“)."
-          : "Статус «Принято» система ставит сама, когда клиент подписал смету: электронно или на бумаге — тогда загрузите скан подписанного экземпляра у документа сметы («Подписано на бумаге»).",
       quoteExpired: (validUntil: string) =>
         lang === "de"
           ? `Das Angebot ist abgelaufen (gültig bis ${validUntil}). Es kann nicht mehr angenommen werden; erstellen Sie ein neues Angebot.`
@@ -955,7 +952,14 @@ function useContractsPageContent() {
   const contractParam = searchParams.get("contract") ?? "";
   const quoteParam = searchParams.get("quote") ?? "";
 
+  // The URL opens a sheet only when it changes: closing a sheet clears the
+  // URL in a transition, and the old value must not open it again (QA3: the
+  // quote sheet did not close).
+  const appliedParamsRef = useRef<string | null>(null);
   useEffect(() => {
+    const params = contractParam + "|" + quoteParam;
+    if (appliedParamsRef.current === params) return;
+    appliedParamsRef.current = params;
     if (contractParam) {
       if (selectedContractId !== contractParam) setSelectedContractId(contractParam);
       if (selectedQuoteId) setSelectedQuoteId("");
@@ -1362,6 +1366,17 @@ function useContractsPageContent() {
         ),
       },
       {
+        id: "discount_percent",
+        label: lang === "de" ? "Rabatt" : "Скидка",
+        accessor: (row) => Number(row.discount_percent ?? 0),
+        filterType: "number",
+        sortable: true,
+        width: 100,
+        // «12,5 %», empty without a discount (QA3 B).
+        render: (row) =>
+          Number(row.discount_percent ?? 0) > 0 ? formatQuantity(String(row.discount_percent)) + " %" : "",
+      },
+      {
         id: "vat_rate",
         label: t.invoices_vat,
         accessor: (row) => Number(row.vat_rate ?? 0),
@@ -1434,6 +1449,7 @@ function useContractsPageContent() {
       t.invoices_vat,
       t.orders_cost_pass_through_badge,
       t,
+      lang,
       text.description,
       text.gross,
       text.net,
@@ -2886,8 +2902,9 @@ function useContractsPageContent() {
                 <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ClipboardCheck}>{text.quoteOrderSection}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label={t.orders_title} className="sm:col-span-2">
+                    <Field label={lang === "de" ? "Auftrag" : "Заказ"} className="sm:col-span-2">
                       <NativeComboboxSelect
+                        aria-label={lang === "de" ? "Auftrag" : "Заказ"}
                         value={createQuoteForm.orderId || "__empty__"}
                         onChange={(event) =>
                           setCreateQuoteForm((current) => ({
@@ -2911,7 +2928,7 @@ function useContractsPageContent() {
                         ))}
                       </NativeComboboxSelect>
                     </Field>
-                    <Field label={t.orders_title}>
+                    <Field label={lang === "de" ? "Auftragsnummer · Patient · Summe" : "Номер заказа · пациент · сумма"}>
                       <Input
                         readOnly
                         className={cn(shellInputClassName, !selectedCreateOrder && "text-muted-foreground")}
@@ -3244,11 +3261,6 @@ function useContractsPageContent() {
                         <ShellBanner tone="warning">
                           {text.quoteExpired(formatDate(quoteDetail.valid_until, locale, t.common_not_set))}
                         </ShellBanner>
-                      ) : null}
-                      {!quoteSuperseded && quoteDetail.status !== "accepted" ? (
-                        <p className="text-xs leading-5 text-muted-foreground" data-testid="quote-accepted-by-signature-hint">
-                          {text.quoteAcceptedBySignature}
-                        </p>
                       ) : null}
                       <div className="grid gap-4 sm:grid-cols-3">
                         <Field label={t.users_status}>

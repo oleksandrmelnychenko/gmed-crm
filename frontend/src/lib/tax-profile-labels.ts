@@ -25,6 +25,13 @@ const SEED_TAX_PROFILE_TEXTS: Record<
     ru: ["Без НДС (освобождено), 0 %", "Общий профиль освобождения от НДС для вручную проверенных услуг."],
     de: ["Steuerfrei, 0 %", "Allgemeines steuerfreies Profil für manuell geprüfte Leistungen."],
   },
+  pass_through_0: {
+    name: "Durchlaufender Posten 0 %",
+    description:
+      "Kosten, die GMED im Namen und für Rechnung des Patienten verauslagt (§ 10 Abs. 1 Satz 5 UStG): ohne Umsatzsteuer weiterberechnet; die Vorsteuer des Einkaufs ist nicht die des Patienten.",
+    ru: ["Транзитные расходы, 0 %", "Расходы, оплаченные GMED от имени и за счёт пациента (§ 10 Abs. 1 Satz 5 UStG): перевыставляются без НДС."],
+    de: ["Durchlaufender Posten, 0 %", "Kosten, die GMED im Namen und für Rechnung des Patienten verauslagt (§ 10 Abs. 1 Satz 5 UStG): ohne Umsatzsteuer weiterberechnet."],
+  },
 };
 
 export function seedTaxProfileText(

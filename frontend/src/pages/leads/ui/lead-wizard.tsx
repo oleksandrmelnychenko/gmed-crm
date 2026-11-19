@@ -2917,9 +2917,18 @@ function readinessReasonLabel(reason: string, tx: Tx, minor = false) {
     // «Принято к сведению» (C-F4) are named, never «Проверьте незавершённые данные».
     [SANCTIONS_CONFIRMED_REASON]: sanctionsConfirmedReasonText(tx),
     [UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON]: uncountedParentUnacknowledgedReasonText(tx),
+    // QA3 A S3-10: the readiness names the field, never only «Проверьте незавершённые данные».
+    "Address country is missing": tx("Укажите страну в адресе", "Land in der Anschrift angeben"),
+    "Preferred language is missing": tx("Укажите предпочитаемый язык", "Bevorzugte Sprache angeben"),
+    "First and last name are required": tx("Укажите имя и фамилию", "Vor- und Nachnamen angeben"),
+    "Cost assumption declaration is missing": tx("Создайте заявление о принятии расходов", "Kostenübernahmeerklärung erstellen"),
+    "Cost assumption declaration is not signed": tx("Получите подпись на заявлении о принятии расходов", "Unterschrift auf der Kostenübernahmeerklärung einholen"),
+    "Payer declaration is missing": tx("Нет заявления плательщика", "Erklärung des Zahlers fehlt"),
+    "Source of funds is missing": tx("Укажите происхождение средств", "Mittelherkunft angeben"),
     ...payerReadinessReasonLabels(tx),
   };
-  return labels[reason] ?? tx("Проверьте незавершённые данные", "Unvollständige Angaben prüfen");
+  // An unknown reason is shown as the server states it, so the field is named.
+  return labels[reason] ?? tx(`Проверьте данные: ${reason}`, `Angaben prüfen: ${reason}`);
 }
 
 /** The optional readiness field with the missing contract keys of the representatives; `[]` on an older server. */

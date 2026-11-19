@@ -87,7 +87,12 @@ async fn seed_patient_invoice(
                order_id, patient_id, invoice_number, invoice_type, status,
                total_net, total_vat, total_gross, paid_amount,
                line_items, portal_visible, created_by
-           ) VALUES ($1, $2, $3, 'interim', 'sent', $4, 0, $4, 0, '[]', true, $5)
+           ) VALUES ($1, $2, $3, 'interim', 'sent', $4, 0, $4, 0,
+                     jsonb_build_array(jsonb_build_object(
+                         'description', 'Klinikrechnung', 'quantity', '1',
+                         'unit_price', $4::text, 'vat_rate', '0',
+                         'is_cost_passthrough', true)),
+                     true, $5)
            RETURNING id"#,
     )
     .bind(order_id)
@@ -188,6 +193,39 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
             .iter()
             .any(|candidate| candidate["id"] == invoice_id.to_string())
     );
+    // QA3 C S3-6: an invoice that bills no pass-through or clinic cost (an
+    // interpreter-only interim) is no target for a supplier invoice.
+    let interpreter_only: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_number, invoice_type, status,
+               total_net, total_vat, total_gross, paid_amount,
+               line_items, portal_visible, created_by
+           ) VALUES ($1, $2, $3, 'interim', 'sent', 100, 19, 119, 0,
+                     '[{"description": "Dolmetscherbetreuung", "quantity": "1", "unit_price": "100", "vat_rate": "19", "is_cost_passthrough": false}]',
+                     true, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INTERP-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let (_, refreshed) = request_json(&ctx.app, "GET", &base, &bearer, None).await;
+    assert!(
+        !refreshed["candidate_invoices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|candidate| candidate["id"] == interpreter_only.to_string()),
+        "{refreshed}"
+    );
+    sqlx::query("DELETE FROM invoices WHERE id = $1")
+        .bind(interpreter_only)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
 
     let (cross_status, cross) = request_json(
         &ctx.app,

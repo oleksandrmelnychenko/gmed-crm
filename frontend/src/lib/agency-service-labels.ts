@@ -190,6 +190,31 @@ export function agencyServiceUnitCount(
   return `${value} ${agencyServiceUnitLabel(unitLabel, translations)}`.trim();
 }
 
+const AGENCY_SERVICE_UNIT_SHORT: Partial<Record<TranslationKey, { ru: string; de: string }>> = {
+  revenue_unit_default: { ru: "ед.", de: "Einh." },
+  revenue_unit_item: { ru: "шт.", de: "Stk." },
+  revenue_unit_hour: { ru: "ч", de: "Std." },
+  revenue_unit_day: { ru: "дн.", de: "Tg." },
+};
+
+/**
+ * A quantity with a short unit, the same for every line of one list (QA3:
+ * «фактически 6 ч», «3 ч», «1 шт.» instead of «3 часа» next to «1 шт.»);
+ * other units count like [`agencyServiceUnitCount`].
+ */
+export function agencyServiceUnitShortCount(
+  quantity: string | number | null | undefined,
+  unitLabel: string | null | undefined,
+  translations: Translations,
+  lang: Lang,
+) {
+  const key = unitLabel?.trim() ? AGENCY_SERVICE_UNIT_LABEL_KEYS[normalizedKey(unitLabel)] : undefined;
+  const short = key ? AGENCY_SERVICE_UNIT_SHORT[key] : undefined;
+  if (!short) return agencyServiceUnitCount(quantity, unitLabel, translations, lang);
+  const raw = quantity === null || quantity === undefined ? "" : String(quantity).trim();
+  return `${raw.replace(".", ",")} ${lang === "de" ? short.de : short.ru}`.trim();
+}
+
 type LocalizedCatalogItem = {
   service_key?: string | null;
   service_name?: string | null;

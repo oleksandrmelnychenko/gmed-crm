@@ -33,6 +33,8 @@ type QuoteLineItem = {
   unit_price: string;
   vat_rate: string;
   is_cost_passthrough: boolean;
+  /** Discount in percent (owner 2026-11-18); none when null or 0. */
+  discount_percent?: string | number | null;
   line_net: string;
   line_vat: string;
   line_gross: string;

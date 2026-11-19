@@ -141,7 +141,10 @@ fn released_advances_note(context: &CreditNotePdfContext) -> Option<String> {
     ))
 }
 
-fn line(line: &CreditNoteLine) -> EInvoiceLine {
+fn line(
+    line: &CreditNoteLine,
+    terms: Option<&super::line_terms::InvoiceLineTerms>,
+) -> EInvoiceLine {
     let net = round_cents(line.net);
     // Quantity × unit price where they give the credited net (a whole line);
     // a partial credit is one unit of its amount.
@@ -162,6 +165,8 @@ fn line(line: &CreditNoteLine) -> EInvoiceLine {
         }
         _ => (Decimal::ONE, net, None),
     };
+    // The whole line is credited with its own quantity and price.
+    let whole_line = line.quantity == Some(quantity) && line.unit_price == Some(unit_net);
     EInvoiceLine {
         name: line.description.trim().to_string(),
         note: None,
@@ -171,10 +176,19 @@ fn line(line: &CreditNoteLine) -> EInvoiceLine {
         line_vat: Some(round_cents(line.vat)),
         vat_rate: line.vat_rate.normalize(),
         is_cost_passthrough: line.is_cost_passthrough,
-        // A credited part is one piece; a whole line keeps no unit label here.
-        unit_code: "C62",
+        // A credited part is one piece; a whole line keeps the unit of the
+        // invoice line it corrects (QA3).
+        unit_code: if whole_line {
+            super::zugferd::unit_code(terms.and_then(|terms| terms.unit.as_deref()))
+        } else {
+            "C62"
+        },
         // A credited part is one unit of its (already discounted) amount.
         discount,
+        // The reason of the corrected line's tax profile.
+        exemption: terms
+            .and_then(|terms| terms.exemption.clone())
+            .filter(|_| line.vat_rate <= Decimal::ZERO),
     }
 }
 
@@ -271,7 +285,12 @@ pub(super) fn correction_einvoice(context: &CreditNotePdfContext) -> EInvoice {
             .as_deref()
             .unwrap_or_default()
             .iter()
-            .map(line)
+            .map(|credited| {
+                line(
+                    credited,
+                    context.invoice_line_terms.get(credited.invoice_line_index),
+                )
+            })
             .collect(),
         total_gross: round_cents(context.amount_gross),
         prepaid_amount: round_cents(released_totals(context).2),
@@ -392,6 +411,7 @@ mod tests {
             credit_line("Hotel", None, ("0", true), "160.50", "0.00"),
         ];
         CreditNotePdfContext {
+            invoice_line_terms: Vec::new(),
             credit_note_id: Uuid::nil(),
             invoice_id: Uuid::nil(),
             patient_id: Uuid::nil(),

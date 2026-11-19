@@ -56,7 +56,7 @@ export function OverflowMenu({
         {triggerContent ?? <MoreHorizontal aria-hidden="true" />}
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Positioner align={align} sideOffset={6} collisionPadding={12} className="isolate z-[150]">
+        <Menu.Positioner align={align} sideOffset={6} collisionPadding={12} className="isolate z-[300]">
           <Menu.Popup className="min-w-52 max-w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-lg border border-border bg-[var(--control-popover,var(--popover))] p-1 text-popover-foreground shadow-xl outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none">
             {items.map((item) => (
               <Menu.Item

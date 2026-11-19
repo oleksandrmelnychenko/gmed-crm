@@ -132,6 +132,10 @@ type TaxProfile = {
   profile_key: string;
   name: string;
   description?: string | null;
+  /** German reason printed for lines without VAT (QA3 B S2-2). */
+  exemption_reason?: string | null;
+  /** Its VATEX code, e.g. VATEX-EU-132. */
+  exemption_reason_code?: string | null;
   vat_rate: string;
   vat_category: string;
   is_default: boolean;
@@ -285,6 +289,8 @@ type TaxProfileForm = {
   profileKey: string;
   name: string;
   description: string;
+  exemptionReason: string;
+  exemptionReasonCode: string;
   vatRate: string;
   vatCategory: string;
   isDefault: boolean;
@@ -297,6 +303,8 @@ const BLANK_TAX_PROFILE_FORM: TaxProfileForm = {
   profileKey: "",
   name: "",
   description: "",
+  exemptionReason: "",
+  exemptionReasonCode: "",
   vatRate: "19",
   vatCategory: "standard",
   isDefault: false,
@@ -502,6 +510,8 @@ function taxProfileToForm(profile: TaxProfile): TaxProfileForm {
     profileKey: profile.profile_key,
     name: profile.name,
     description: profile.description ?? "",
+    exemptionReason: profile.exemption_reason ?? "",
+    exemptionReasonCode: profile.exemption_reason_code ?? "",
     vatRate: profile.vat_rate,
     vatCategory: profile.vat_category,
     isDefault: profile.is_default,
@@ -2241,6 +2251,8 @@ function useFinanceCatalogPageContent() {
           profile_key: form.profileKey.trim(),
           name: form.name.trim(),
           description: form.description.trim() || null,
+          exemption_reason: form.exemptionReason.trim() || null,
+          exemption_reason_code: form.exemptionReasonCode.trim().toUpperCase() || null,
           vat_rate: vatRate,
           vat_category: form.vatCategory,
           is_default: form.isDefault,
@@ -2288,6 +2300,8 @@ function useFinanceCatalogPageContent() {
           profile_key: taxEditForm.profileKey.trim(),
           name: taxEditForm.name.trim(),
           description: taxEditForm.description.trim() || null,
+          exemption_reason: taxEditForm.exemptionReason.trim() || null,
+          exemption_reason_code: taxEditForm.exemptionReasonCode.trim().toUpperCase() || null,
           vat_rate: vatRate,
           vat_category: taxEditForm.vatCategory,
           is_default: taxEditForm.isDefault,
@@ -3532,6 +3546,25 @@ function useFinanceCatalogPageContent() {
                       disabled={createBusy}
                     />
                   </Field>
+                  <Field label={lang === "de" ? "Befreiungsgrund (für Dokumente)" : "Основание освобождения (для документов)"} htmlFor="tax-profile-exemption-reason">
+                    <Input
+                      id="tax-profile-exemption-reason"
+                      value={form.exemptionReason}
+                      onChange={(event) => setForm((current) => ({ ...current, exemptionReason: event.target.value }))}
+                      maxLength={300}
+                      disabled={createBusy}
+                    />
+                  </Field>
+                  <Field label={lang === "de" ? "VATEX-Code" : "Код VATEX"} htmlFor="tax-profile-exemption-code">
+                    <Input
+                      id="tax-profile-exemption-code"
+                      value={form.exemptionReasonCode}
+                      onChange={(event) => setForm((current) => ({ ...current, exemptionReasonCode: event.target.value }))}
+                      placeholder="VATEX-EU-132"
+                      maxLength={32}
+                      disabled={createBusy}
+                    />
+                  </Field>
                 </Section>
               </div>
             </AdminSheetScaffold>
@@ -3730,6 +3763,25 @@ function useFinanceCatalogPageContent() {
                       }
                       className={textareaClass}
                       rows={3}
+                      disabled={taxEditBusy}
+                    />
+                  </Field>
+                  <Field label={lang === "de" ? "Befreiungsgrund (für Dokumente)" : "Основание освобождения (для документов)"} htmlFor="tax-edit-profile-exemption-reason">
+                    <Input
+                      id="tax-edit-profile-exemption-reason"
+                      value={taxEditForm.exemptionReason}
+                      onChange={(event) => setTaxEditForm((current) => ({ ...current, exemptionReason: event.target.value }))}
+                      maxLength={300}
+                      disabled={taxEditBusy}
+                    />
+                  </Field>
+                  <Field label={lang === "de" ? "VATEX-Code" : "Код VATEX"} htmlFor="tax-edit-profile-exemption-code">
+                    <Input
+                      id="tax-edit-profile-exemption-code"
+                      value={taxEditForm.exemptionReasonCode}
+                      onChange={(event) => setTaxEditForm((current) => ({ ...current, exemptionReasonCode: event.target.value }))}
+                      placeholder="VATEX-EU-132"
+                      maxLength={32}
                       disabled={taxEditBusy}
                     />
                   </Field>

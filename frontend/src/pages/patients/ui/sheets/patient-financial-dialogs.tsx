@@ -515,7 +515,7 @@ function InvoiceManagerDialog({
             className={textareaClassName}
             value={invoiceStatusForm.notes}
             onChange={(event) => onInvoiceNotesChange(event.target.value)}
-            placeholder={invoiceNotesLocked ? t.revenue_invoices_notes_locked : l("patients_billing_notes_or_payment_confirmation_details")}
+            placeholder={invoiceNotesLocked ? undefined : l("patients_billing_notes_or_payment_confirmation_details")}
             disabled={invoiceNotesLocked}
           />
         </FormField>

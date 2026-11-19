@@ -269,13 +269,15 @@ describe("supplier invoice service options", () => {
     const lines = [
       line("own", { agency_service_id: "svc-interpreter" }),
       line("passthrough", { is_cost_passthrough: true, agency_service_id: "svc-outlays" }),
-      line("clinic", { provider_id: "clinic-1", agency_service_id: "svc-mrt" }),
+      line("clinic", { provider_id: "clinic-1", agency_service_id: "svc-mrt", planned_partner_cost_gross: "800" }),
+      line("organisation", { provider_id: "clinic-1", agency_service_id: "svc-org" }),
       line("manual", {}),
+      line("doctor-visit", { provider_id: "clinic-1" }),
       line("cancelled", { is_cost_passthrough: true, status: "cancelled" }),
     ];
-    expect(supplierInvoiceServiceOptions(lines).map((item) => item.id)).toEqual(["passthrough", "clinic", "manual"]);
+    expect(supplierInvoiceServiceOptions(lines).map((item) => item.id)).toEqual(["passthrough", "clinic"]);
     // A line linked before stays selectable.
-    expect(supplierInvoiceServiceOptions(lines, "own").map((item) => item.id)).toEqual(["own", "passthrough", "clinic", "manual"]);
+    expect(supplierInvoiceServiceOptions(lines, "own").map((item) => item.id)).toEqual(["own", "passthrough", "clinic"]);
   });
 });
 

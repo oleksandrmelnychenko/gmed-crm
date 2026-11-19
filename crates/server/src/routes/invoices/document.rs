@@ -937,13 +937,25 @@ pub(super) async fn load_deducted_advances(
     Ok(advances)
 }
 
-/// The statutory reason printed for 0 % lines that are not pass-through
-/// costs: the same classification the embedded e-invoice uses.
-pub(super) fn zero_rate_exemption_note(lines: &[InvoicePdfLineItem]) -> Option<&'static str> {
-    lines
+/// The statutory reasons printed for 0 % lines that are not pass-through
+/// costs: each line's tax profile reason (QA3 B S2-2), the same the embedded
+/// e-invoice states; lines without one keep the former classification.
+pub(super) fn zero_rate_exemption_note(lines: &[InvoicePdfLineItem]) -> Option<String> {
+    let mut reasons: Vec<String> = Vec::new();
+    for line in lines
         .iter()
         .filter(|line| !line.is_cost_passthrough && line.vat_rate_value <= Decimal::ZERO)
-        .find_map(|line| zugferd::line_exemption_reason(line.vat_rate_value, false))
+    {
+        let reason = line.exemption_reason.clone().or_else(|| {
+            zugferd::line_exemption_reason(line.vat_rate_value, false).map(str::to_string)
+        });
+        if let Some(reason) = reason
+            && !reasons.contains(&reason)
+        {
+            reasons.push(reason);
+        }
+    }
+    (!reasons.is_empty()).then(|| reasons.join("; "))
 }
 
 #[cfg(test)]
@@ -1004,7 +1016,24 @@ mod tests {
             line_vat: vat,
             line_gross_value: net + vat,
             discount: None,
+            exemption_reason: None,
         }
+    }
+
+    #[test]
+    fn each_zero_rate_line_prints_its_profile_reason_once() {
+        let mut exempt = line("0", false, "30", "0");
+        exempt.exemption_reason = Some("Steuerfreie Leistung".to_string());
+        let lines = vec![
+            line("0", false, "50", "0"),
+            exempt.clone(),
+            exempt,
+            line("0", true, "200", "0"),
+        ];
+        assert_eq!(
+            zero_rate_exemption_note(&lines).as_deref(),
+            Some("Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG; Steuerfreie Leistung")
+        );
     }
 
     #[test]
@@ -1040,7 +1069,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            zero_rate_exemption_note(&lines),
+            zero_rate_exemption_note(&lines).as_deref(),
             Some("Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG")
         );
         // Pass-through lines alone carry no § 4 note.

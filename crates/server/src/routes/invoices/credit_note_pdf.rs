@@ -32,7 +32,7 @@ use serde_json::Value;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use super::credit_notes::{CreditNoteLine, parse_credit_note_lines, vat_breakdown};
+use super::credit_notes::{CreditNoteLine, parse_credit_note_lines};
 use super::stored_documents::{self, NewInvoiceDocument, PendingBlob};
 use super::{
     INVOICE_DOCUMENT_SOURCE_HEADER, can_read_invoices, ensure_patient_access, err,
@@ -100,6 +100,27 @@ pub(crate) struct CreditNotePdfContext {
     pub(super) deducted_advances: Vec<super::document::DeductedAdvance>,
     /// GMED's country (ISO 3166-1 alpha-2) for the embedded e-invoice.
     pub agency_country_code: Option<String>,
+    /// Unit and exemption reason of each line of the corrected invoice, by
+    /// `invoice_line_index` (QA3: the Storno XML wrote `C62` where the
+    /// invoice had `HUR`).
+    pub(crate) invoice_line_terms: Vec<super::line_terms::InvoiceLineTerms>,
+}
+
+/// [`CreditNotePdfContext::invoice_line_terms`] of an invoice.
+async fn corrected_invoice_line_terms(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<super::line_terms::InvoiceLineTerms>, sqlx::Error> {
+    let line_items: Option<Value> =
+        sqlx::query_scalar::<_, Option<Value>>("SELECT line_items FROM invoices WHERE id = $1")
+            .bind(invoice_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .flatten();
+    match line_items {
+        Some(line_items) => super::line_terms::invoice_line_terms(conn, &line_items).await,
+        None => Ok(Vec::new()),
+    }
 }
 
 fn setting(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
@@ -182,7 +203,9 @@ pub(crate) async fn load_credit_note_pdf_context(
         recipient.as_ref(),
     )
     .await?;
+    let invoice_line_terms = corrected_invoice_line_terms(conn, invoice_id).await?;
     Ok(Some(CreditNotePdfContext {
+        invoice_line_terms,
         recipient,
         // A credit note on a final invoice: the advance deductions it
         // released, as stored at issue (QA 2026-11-16).
@@ -331,7 +354,9 @@ pub(crate) async fn load_storno_pdf_context(
         })
         .filter(|lines| !lines.is_empty());
     let lines = lines_for_recipient(conn, lines, recipient.as_ref()).await?;
+    let invoice_line_terms = corrected_invoice_line_terms(conn, invoice_id).await?;
     Ok(Some(CreditNotePdfContext {
+        invoice_line_terms,
         recipient,
         deducted_advances: super::storno::deducted_advances_from_json(
             row.try_get::<Option<Value>, _>("deducted_advances")?
@@ -378,6 +403,31 @@ pub(crate) async fn load_storno_pdf_context(
         tax_number: setting(&row, "agency_tax_number"),
         agency_country_code: setting(&row, "agency_country_code").map(|code| code.to_uppercase()),
     }))
+}
+
+/// The VAT summary of a correction: one row per rate, the 0 % lines split
+/// into VAT-free services and pass-through costs, taxed rates first.
+fn printed_vat_breakdown(
+    lines: &[CreditNoteLine],
+) -> Vec<(Decimal, bool, Decimal, Decimal, Decimal)> {
+    let mut rows: Vec<(Decimal, bool, Decimal, Decimal, Decimal)> = Vec::new();
+    for line in lines {
+        let rate = line.vat_rate.normalize();
+        let passthrough = rate <= Decimal::ZERO && line.is_cost_passthrough;
+        match rows
+            .iter_mut()
+            .find(|(existing, kind, ..)| *existing == rate && *kind == passthrough)
+        {
+            Some((_, _, net, vat, gross)) => {
+                *net += line.net;
+                *vat += line.vat;
+                *gross += line.gross;
+            }
+            None => rows.push((rate, passthrough, line.net, line.vat, line.gross)),
+        }
+    }
+    rows.sort_by_key(|(rate, passthrough, ..)| (std::cmp::Reverse(*rate), *passthrough));
+    rows
 }
 
 pub(super) fn label(language: &str, key: &'static str) -> &'static str {
@@ -497,7 +547,7 @@ pub(super) fn label(language: &str, key: &'static str) -> &'static str {
         ("uk", "unit_price") => "Ціна",
         ("ru", "unit_price") => "Цена",
         ("en", "unit_price") => "Unit price",
-        (_, "unit_price") => "Einzelpreis",
+        (_, "unit_price") => "Einzelpreis netto",
         ("uk", "vat_rate") => "ПДВ",
         ("ru", "vat_rate") => "НДС",
         ("en", "vat_rate") => "VAT",
@@ -513,7 +563,7 @@ pub(super) fn label(language: &str, key: &'static str) -> &'static str {
         ("uk", "passthrough") => "перевиставлені витрати без ПДВ",
         ("ru", "passthrough") => "перевыставленные расходы без НДС",
         ("en", "passthrough") => "VAT-free cost passthrough",
-        (_, "passthrough") => "MwSt-freie Durchlaufkosten",
+        (_, "passthrough") => "MwSt-freie Durchlaufkostenposition",
         ("uk", "legacy_line") => "Коригування рахунку (пропорційно)",
         ("ru", "legacy_line") => "Корректировка счёта (пропорционально)",
         ("en", "legacy_line") => "Invoice correction (pro rata)",
@@ -1247,8 +1297,16 @@ pub(crate) fn build_credit_note_pdf(
             true,
             false,
         );
-        for (rate, net, vat, gross) in vat_breakdown(&lines) {
-            let rate = format!("{} %", format_number(language, rate));
+        for (rate, passthrough, net, vat, gross) in printed_vat_breakdown(&lines) {
+            // 0 % splits like the invoice: VAT-free services and
+            // «Durchlaufende Posten (0 %)» (QA3 S3-16).
+            let rate = if rate > Decimal::ZERO {
+                format!("{} %", format_number(language, rate))
+            } else if passthrough {
+                super::invoice_pdf_label(language, "vat_group_passthrough").to_string()
+            } else {
+                super::invoice_pdf_label(language, "vat_group_zero_rated").to_string()
+            };
             let net = format_money(sign * net, &context.currency);
             let vat = format_money(sign * vat, &context.currency);
             let gross = format_money(sign * gross, &context.currency);
@@ -1949,6 +2007,7 @@ mod tests {
 
     fn context(lines: Option<Vec<CreditNoteLine>>, transaction_type: &str) -> CreditNotePdfContext {
         CreditNotePdfContext {
+            invoice_line_terms: Vec::new(),
             credit_note_id: Uuid::nil(),
             invoice_id: Uuid::nil(),
             patient_id: Uuid::nil(),

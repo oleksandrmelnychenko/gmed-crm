@@ -200,6 +200,9 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
                 vat_rate: None,
                 is_cost_passthrough: false,
                 notes: None,
+                tax_profile_id: None,
+                vat_category: None,
+                exemption_reason: None,
             }
         })
         .collect();

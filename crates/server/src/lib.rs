@@ -40,6 +40,7 @@ pub(crate) mod service_description;
 pub mod services;
 pub mod settings;
 pub mod state;
+pub mod tax_exemptions;
 pub mod telemetry;
 mod websocket;
 

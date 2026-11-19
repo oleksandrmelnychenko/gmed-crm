@@ -49,6 +49,7 @@ pub(crate) mod final_delivery;
 mod final_preview;
 mod ledger_text;
 pub(crate) mod line_comments;
+pub(crate) mod line_terms;
 mod patient_notices;
 pub mod payer;
 pub(crate) mod rebilling_waivers;
@@ -886,6 +887,9 @@ struct InvoicePdfLineItem {
     /// Discount in percent and its net amount, printed under the position
     /// (owner 2026-11-18); the amounts above are after it.
     discount: Option<zugferd::LineDiscount>,
+    /// The tax profile's reason of a line without VAT (QA3 B S2-2), see
+    /// [`line_terms`]; `None` keeps the former classification.
+    exemption_reason: Option<String>,
 }
 
 #[derive(Clone)]
@@ -3652,6 +3656,7 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
                 line_vat,
                 line_gross_value,
                 discount: zugferd::stored_line_discount(item),
+                exemption_reason: None,
             }
         })
         .collect()
@@ -7062,6 +7067,15 @@ async fn load_invoice_pdf_context_on(
     };
     let third_party_payer = recipient.is_third_party_payer();
     let mut pdf_lines = parse_invoice_pdf_line_items(&line_items);
+    for (line, terms) in pdf_lines
+        .iter_mut()
+        .zip(line_terms::invoice_line_terms(&mut *conn, &line_items).await?)
+    {
+        line.exemption_reason = terms.exemption.map(|exemption| exemption.reason);
+        if let Some(description) = terms.german_description {
+            line.description = description;
+        }
+    }
     if third_party_payer {
         let catalog = crate::routes::documents::payer_estimate_catalog_rows(&mut *conn).await?;
         for line in &mut pdf_lines {
@@ -15833,20 +15847,25 @@ async fn load_einvoice(
     } else {
         Vec::new()
     };
+    // Unit and exemption reason per line (QA3, `line_terms`).
+    let terms = line_terms::invoice_line_terms(&mut *conn, &line_items).await?;
     let lines = line_items
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
-        .map(|line| {
+        .enumerate()
+        .map(|(index, line)| {
+            let terms = terms.get(index).cloned().unwrap_or_default();
             let quantity = decimal(line.get("quantity")).unwrap_or(Decimal::ONE);
             let unit_net = decimal(line.get("unit_price")).unwrap_or(Decimal::ZERO);
             let vat_rate = decimal(line.get("vat_rate")).unwrap_or(Decimal::ZERO);
             let is_cost_passthrough = crate::money::json_line_pass_through(&line);
-            let description = line
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
+            let description = terms.german_description.as_deref().unwrap_or_else(|| {
+                line.get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            });
             // The amounts the printed invoice shows: stored, or derived per
             // line for legacy lines (`invoice_pdf_line_items`).
             let (net, vat, _) = compute_invoice_line_parts(
@@ -15873,9 +15892,10 @@ async fn load_einvoice(
                 line_vat: Some(decimal(line.get("line_vat")).unwrap_or(vat)),
                 vat_rate,
                 is_cost_passthrough,
-                unit_code: zugferd::unit_code(line.get("unit").and_then(Value::as_str)),
+                unit_code: zugferd::unit_code(terms.unit.as_deref()),
                 // The printed position's «Rabatt» line (XML = PDF, fix-99).
                 discount: zugferd::stored_line_discount(line),
+                exemption: terms.exemption,
             }
         })
         .collect();

@@ -317,6 +317,13 @@ async fn get_order_pipeline(
                    AND EXISTS (SELECT 1 FROM quotes signed
                                WHERE signed.order_id = appointment.order_id
                                  AND signed.status = 'accepted')
+                   -- The visit has its order line already (added to the
+                   -- estimate or billed on completion, QA3 C S2-4).
+                   AND NOT EXISTS (
+                       SELECT 1 FROM order_leistungen linked
+                       WHERE linked.source_medical_appointment_id = appointment.id
+                         AND linked.status <> 'cancelled'
+                   )
                    AND NOT EXISTS (
                        SELECT 1
                        FROM quotes signed

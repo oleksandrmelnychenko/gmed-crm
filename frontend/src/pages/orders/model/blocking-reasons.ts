@@ -36,6 +36,21 @@ export const ESTIMATE_OUTDATED_REASON =
 export const SIGNATURE_RESET_REASON =
   "Services changed after signing: the Einzelauftrag and the cost estimate must be signed again";
 
+/**
+ * The reasons of the next step plus the process-gate reasons that hold every
+ * phase: signatures reset by a change of the services must be renewed also
+ * in «Уточнение потребности» and «Исполнение» (QA3 C S2-3), first in the list.
+ */
+export function withStandingBlockingReasons(
+  reasons: readonly string[],
+  processReasons: readonly string[] | null | undefined,
+): string[] {
+  const standing = (processReasons ?? []).filter(
+    (reason) => reason === SIGNATURE_RESET_REASON && !reasons.includes(reason),
+  );
+  return [...standing, ...reasons];
+}
+
 const EXACT_REASON_KEYS: Record<string, string> = {
   "Order signatures are still incomplete":
     "orders_blocking_signatures_incomplete",

@@ -92,6 +92,57 @@ struct CreateTaxProfileRequest {
     is_active: Option<bool>,
     valid_from: Option<String>,
     valid_to: Option<String>,
+    /// German reason printed for lines of the profile without VAT (BT-120,
+    /// QA3 B S2-2). Left out: unchanged on update; null or empty: none.
+    #[serde(default)]
+    exemption_reason: Option<serde_json::Value>,
+    /// VATEX code of the reason (BT-121), same rules.
+    #[serde(default)]
+    exemption_reason_code: Option<serde_json::Value>,
+}
+
+/// An optional text field of a request: `None` when left out, `Some(None)`
+/// to clear it, `Some(Some(text))` to set it.
+fn optional_text_field(value: Option<&serde_json::Value>) -> Option<Option<String>> {
+    value.map(|value| normalize_optional(value.as_str()))
+}
+
+/// The reason fields of a request, checked: `(reason, code)` as
+/// [`optional_text_field`]; a code must be a VATEX code.
+#[allow(clippy::type_complexity)]
+fn exemption_fields(
+    body: &CreateTaxProfileRequest,
+) -> Result<(Option<Option<String>>, Option<Option<String>>), axum::response::Response> {
+    let reason = optional_text_field(body.exemption_reason.as_ref());
+    let code = optional_text_field(body.exemption_reason_code.as_ref())
+        .map(|code| code.map(|code| code.to_uppercase()));
+    if let Some(Some(code)) = &code
+        && !valid_exemption_code(code)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "exemption_reason_code must be a VATEX code",
+        ));
+    }
+    if reason
+        .as_ref()
+        .is_some_and(|reason| reason.as_ref().is_some_and(|text| text.len() > 300))
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "exemption_reason is too long",
+        ));
+    }
+    Ok((reason, code))
+}
+
+/// A VATEX code (CEF code list, e.g. `VATEX-EU-132`), upper case.
+fn valid_exemption_code(code: &str) -> bool {
+    code.starts_with("VATEX-")
+        && code.len() <= 32
+        && code
+            .chars()
+            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '-')
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
@@ -210,7 +261,7 @@ async fn list_tax_profiles(
 
     let sql = format!(
         r#"SELECT tp.id, tp.profile_key, tp.name, tp.description, tp.vat_rate, tp.vat_category,
-                  tp.is_default, tp.is_active, tp.valid_from, tp.valid_to, tp.created_at,
+                  tp.exemption_reason, tp.exemption_reason_code, tp.is_default, tp.is_active, tp.valid_from, tp.valid_to, tp.created_at,
                   tp.updated_at, {usage} AS usage_count
            FROM tax_profiles tp
            ORDER BY tp.is_default DESC, tp.is_active DESC, tp.profile_key"#,
@@ -227,6 +278,8 @@ async fn list_tax_profiles(
                         "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
                         "vat_rate": decimal_to_string(row.try_get::<Decimal, _>("vat_rate").unwrap_or(Decimal::ZERO)),
                         "vat_category": row.try_get::<String, _>("vat_category").unwrap_or_default(),
+                        "exemption_reason": row.try_get::<Option<String>, _>("exemption_reason").unwrap_or_default(),
+                        "exemption_reason_code": row.try_get::<Option<String>, _>("exemption_reason_code").unwrap_or_default(),
                         "is_default": row.try_get::<bool, _>("is_default").unwrap_or(false),
                         "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
                         "usage_count": row.try_get::<i64, _>("usage_count").unwrap_or_default(),
@@ -286,6 +339,10 @@ async fn create_tax_profile(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
+    let (exemption_reason, exemption_code) = match exemption_fields(&body) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -314,8 +371,9 @@ async fn create_tax_profile(
     let row = match sqlx::query(
         r#"INSERT INTO tax_profiles (
                 profile_key, name, description, vat_rate, vat_category,
-                is_default, is_active, valid_from, valid_to
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, CURRENT_DATE), $9)
+                is_default, is_active, valid_from, valid_to,
+                exemption_reason, exemption_reason_code
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, CURRENT_DATE), $9, $10, $11)
            RETURNING id"#,
     )
     .bind(profile_key)
@@ -327,6 +385,8 @@ async fn create_tax_profile(
     .bind(body.is_active.unwrap_or(true))
     .bind(valid_from)
     .bind(valid_to)
+    .bind(exemption_reason.flatten())
+    .bind(exemption_code.flatten())
     .fetch_one(&mut *tx)
     .await
     {
@@ -399,6 +459,10 @@ async fn update_tax_profile(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
+    let (exemption_reason, exemption_code) = match exemption_fields(&body) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -434,7 +498,9 @@ async fn update_tax_profile(
                is_default = $7,
                is_active = $8,
                valid_from = COALESCE($9, valid_from),
-               valid_to = $10
+               valid_to = $10,
+               exemption_reason = CASE WHEN $11 THEN $12 ELSE exemption_reason END,
+               exemption_reason_code = CASE WHEN $13 THEN $14 ELSE exemption_reason_code END
            WHERE id = $1"#,
     )
     .bind(profile_id)
@@ -447,6 +513,10 @@ async fn update_tax_profile(
     .bind(body.is_active.unwrap_or(true))
     .bind(valid_from)
     .bind(valid_to)
+    .bind(exemption_reason.is_some())
+    .bind(exemption_reason.flatten())
+    .bind(exemption_code.is_some())
+    .bind(exemption_code.flatten())
     .execute(&mut *tx)
     .await
     {

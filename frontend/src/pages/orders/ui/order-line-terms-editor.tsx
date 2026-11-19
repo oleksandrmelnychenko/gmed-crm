@@ -25,7 +25,8 @@ export function OrderLineTermsEditor({ discountPercent, taxProfileId, isCostPass
   onSave: (payload: OrderLineTermsPayload) => Promise<void>;
 }) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
-  const initialDiscount = Number(discountPercent ?? 0) > 0 ? String(Number(discountPercent)) : "";
+  // «12,5», not «12.5» (QA3); both are read.
+  const initialDiscount = Number(discountPercent ?? 0) > 0 ? String(Number(discountPercent)).replace(".", ",") : "";
   const [discount, setDiscount] = useState(initialDiscount);
   const [profileId, setProfileId] = useState(taxProfileId ?? "");
   const [busy, setBusy] = useState(false);
@@ -71,7 +72,7 @@ export function OrderLineTermsEditor({ discountPercent, taxProfileId, isCostPass
           onChange={(event) => setProfileId(event.target.value)}
         >
           <option value="">{tx("По каталогу", "Standard des Katalogs")}</option>
-          {choices.map((profile) => <option key={profile.id} value={profile.id}>{taxProfileLabel(profile)}</option>)}
+          {choices.map((profile) => <option key={profile.id} value={profile.id}>{taxProfileLabel(profile, lang)}</option>)}
         </NativeComboboxSelect>
       </label>
       <Button type="button" size="sm" variant="outline" className="h-7" disabled={busy || !changed || parsed === null} onClick={() => void save()}>

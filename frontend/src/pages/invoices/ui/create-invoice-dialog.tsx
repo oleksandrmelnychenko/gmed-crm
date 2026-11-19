@@ -291,7 +291,13 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     }}
                     className={cn(selectClass, "w-full min-w-0")}
                   >
-                    <option value="__empty__">{optionsBusy ? t.common_loading : t.invoices_workspace_choose_quote}</option>
+                    {/* The empty and loading states stay inside the field: a line appearing
+                        under it moved «Тип счёта» under the first click (QA3). */}
+                    <option value="__empty__">{optionsBusy
+                      ? t.common_loading
+                      : !optionsError && !selectableQuotes.length && !blockedQuotes.length
+                        ? (de ? "Keine abrechenbaren Angebote" : "Нет доступных предложений")
+                        : t.invoices_workspace_choose_quote}</option>
                     {selectableQuotes.map((quote) => (
                       <option key={quote.id} value={quote.id}>
                         {[quote.quote_number, quote.patient_name, quote.order_number, quote.patient_pid, interimOnly(quote) ? interimOnlyLabel : null].filter(Boolean).join(" · ")}
@@ -304,11 +310,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     ))}
                   </NativeComboboxSelect>
                 </FormField>
-                {!optionsError && !optionsBusy && !selectableQuotes.length && !blockedQuotes.length ? (
-                  <p role="status" className="text-sm text-muted-foreground">
-                    {de ? "Keine abrechenbaren Angebote für diese Auswahl." : "Для текущего выбора нет доступных предложений."}
-                  </p>
-                ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FormField label={t.invoices_type}>
                     <NativeComboboxSelect
@@ -431,9 +432,9 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 ) : null}
 
                 {form.invoiceType === "advance" && selectedQuote && requiredPrepayment != null ? (
-                  <fieldset className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
-                    <legend className="sr-only">{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</legend>
-                    <div className="border-b border-border px-3 py-2.5" aria-hidden="true">
+                  <fieldset aria-label={de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+                    {/* One title: the sr-only legend repeated it (QA3). */}
+                    <div className="border-b border-border px-3 py-2.5">
                       <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={BookMarked}>{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</SectionHeading></h3>
                     </div>
                     <div className="grid gap-2 p-3">
@@ -652,7 +653,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
               <div className="min-w-0 flex-1 break-words">{footerMessage}
               </div>
               <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" disabled={formBusy || optionsBusy} onClick={onRetry}>{de ? "Prüfen" : "Проверить"}</Button>
-            </div> : <div aria-hidden="true" data-testid="invoice-create-footer-reserve" className="min-h-11 border-b border-transparent" />}
+            </div> : <div aria-hidden="true" data-testid="invoice-create-footer-reserve" className="hidden min-h-11 border-b border-transparent sm:block" />}
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
             <p className="text-sm tabular-nums"><span className="text-muted-foreground">{t.invoices_total}: </span><strong>{money(totals.gross)}</strong></p>
             <div className="flex gap-2">

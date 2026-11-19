@@ -236,7 +236,6 @@ import {
   invoiceToVisibilityForm,
   invoiceDisplayNumber,
   invoiceIssuedAt,
-  invoiceDocumentState,
   invoiceStatusFormProblem,
   canStornoInvoice,
   isInvoiceReleased,
@@ -3318,17 +3317,6 @@ function useStaffInvoicesPageContent() {
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {invoiceTypeLabel(detail.invoice_type)} · PDF
                           </p>
-                          {invoiceDocumentState(detail) === "archived" ? (
-                            <p
-                              className="mt-0.5 text-xs text-muted-foreground"
-                              data-testid="invoice-document-state"
-                            >
-                              {t.revenue_invoices_document_archived.replace(
-                                "{date}",
-                                formatDateTime(detail.stored_document?.generated_at, locale),
-                              )}
-                            </p>
-                          ) : null}
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <Button
@@ -4774,7 +4762,8 @@ function useStaffInvoicesPageContent() {
                   canManage={access.canManage}
                   onChanged={() => setReloadToken((current) => current + 1)}
                 />
-                {dunningBlockKey ? (
+                {/* A draft has no reminders: no how-to text (owner rule, QA3). */}
+                {dunningBlockKey && dunningBlockKey !== "invoices_workspace_dunning_not_sent" ? (
                   <p id="invoice-dunning-block-reason" className="text-sm text-muted-foreground">
                     {t[dunningBlockKey]}
                   </p>
@@ -4927,7 +4916,7 @@ function useStaffInvoicesPageContent() {
                         disabled={!canCreateDunning}
                         title={dunningBlockKey ? t[dunningBlockKey] : undefined}
                         aria-describedby={
-                          dunningBlockKey
+                          dunningBlockKey && dunningBlockKey !== "invoices_workspace_dunning_not_sent"
                             ? "invoice-dunning-block-reason"
                             : dunningDeadline
                               ? "invoice-dunning-deadline"
@@ -5296,7 +5285,7 @@ function useStaffInvoicesPageContent() {
                     </Button>
                   </div>
                 </ShellBanner>
-              ) : dunningBlockKey ? <ShellBanner tone="warning">{t[dunningBlockKey]}</ShellBanner> : null}
+              ) : dunningBlockKey && dunningBlockKey !== "invoices_workspace_dunning_not_sent" ? <ShellBanner tone="warning">{t[dunningBlockKey]}</ShellBanner> : null}
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/70 bg-card px-4 py-3">
                   <div className="text-xs text-muted-foreground">{text.dunningAction}</div>
@@ -5576,7 +5565,6 @@ function useStaffInvoicesPageContent() {
                   />
                   {statusNotesLocked && detail && !canStornoInvoice(detail) && detail.status !== "cancelled" ? (
                     <div className="flex flex-wrap items-center gap-2" data-testid="invoice-status-credit-note-hint">
-                      <p className="text-xs text-muted-foreground">{t.revenue_invoices_notes_locked_credit_note}</p>
                       <Button
                         type="button"
                         variant="outline"
@@ -5595,8 +5583,6 @@ function useStaffInvoicesPageContent() {
                         {t.revenue_invoices_open_credit_note}
                       </Button>
                     </div>
-                  ) : statusNotesLocked ? (
-                    <p className="text-xs text-muted-foreground">{t.revenue_invoices_notes_locked}</p>
                   ) : null}
                 </Field>
               </div>

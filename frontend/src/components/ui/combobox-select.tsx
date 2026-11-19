@@ -226,6 +226,14 @@ function ComboboxSelect({
   ...ariaProps
 }: ComboboxSelectProps) {
   const actionsRef = React.useRef<ComboboxPrimitive.Root.Actions | null>(null)
+  // When an option was picked: the click that follows the pick lands on the
+  // trigger and must not open the list again (QA3: the catalog picker reopened).
+  const pickedAtRef = React.useRef(0)
+  const swallowReopen = (event: React.SyntheticEvent) => {
+    if (Date.now() - pickedAtRef.current > 400) return
+    ;(event as React.SyntheticEvent & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.()
+    event.preventDefault()
+  }
   const isMultiSelect = selectedValues !== EMPTY_SELECTED_VALUES
   const { t } = useLang()
   const pageText = useComboboxText()
@@ -325,6 +333,7 @@ function ComboboxSelect({
       // A multi-select closes on each pick; the Escape that follows belongs to
       // it, not to the dialog behind (QA 2026-11-13, F-C2).
       onOpenChange={(nextOpen, eventDetails) => {
+        if (!nextOpen && eventDetails.reason === "item-press") pickedAtRef.current = Date.now()
         if (!nextOpen && isMultiSelect && eventDetails.reason === "item-press") noteMultiSelectPick()
       }}
     >
@@ -337,6 +346,9 @@ function ComboboxSelect({
         data-placeholder={!selectedValue && selectedLabel == null ? "" : undefined}
         onBlur={onBlur}
         onFocus={onFocus}
+        onPointerDown={swallowReopen}
+        onMouseDown={swallowReopen}
+        onClick={swallowReopen}
         // Escape while the focus is still on the trigger of an open list (right
         // after opening, before it moves into the search box): the list does
         // not hear the key itself, so the trigger closes it — one Escape, as in
@@ -366,11 +378,11 @@ function ComboboxSelect({
           align="start"
           // Kept clear of the screen's edges: on a small phone the flipped popup started above it (QA 2026-11-10, A-5).
           collisionPadding={8}
-          className="isolate z-[150]"
+          className="isolate z-[300]"
         >
           <ComboboxPrimitive.Popup
             data-overlay-interaction-root=""
-            className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-[var(--control-popover,var(--popover))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="relative isolate z-[300] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover [background-color:var(--control-popover,var(--popover))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           >
             <div className="flex items-center gap-2 border-b border-border bg-[var(--control-popover,var(--popover))] px-2.5 py-2">
               <SearchIcon className="size-4 shrink-0 text-muted-foreground" />

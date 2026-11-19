@@ -8,6 +8,7 @@ import {
 import { StaffLink } from "@/components/staff-link";
 import { OrderBudgetIndicator } from "@/components/order-budget/order-budget-indicator";
 import { serviceLineDeltaGross } from "@/components/order-budget/order-budget";
+import { taxProfileLabel } from "@/lib/tax-profile-label";
 import { moneyLineDiscount, parseDiscountPercent, parseMoneyInput } from "@/lib/money";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
@@ -179,6 +180,8 @@ import {
   joinBlockingReasons,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
+  withStandingBlockingReasons,
+  SIGNATURE_RESET_REASON,
   PLANNING_ANCHOR_IDS,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
@@ -413,9 +416,16 @@ type SectionCardProps = {
   className?: string;
 };
 
+/** A tax profile in a select: the UI name of a system profile (it names its
+ * rate), a profile staff created with its rate (QA3). */
+function taxProfileOptionLabel(profile: PositionTaxProfile, lang: string) {
+  const label = taxProfileLabel(profile, lang);
+  return label === profile.name ? `${profile.name} · ${String(Number(profile.vat_rate))} %` : label;
+}
+
 type EmptyStateProps = {
   title: string;
-  description: string;
+  description?: string;
   action?: ReactNode;
 };
 
@@ -596,7 +606,7 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
       <ClipboardList className="size-5 shrink-0 text-muted-foreground" aria-hidden />
       <div className="min-w-0 flex-1 basis-48">
         <h3 className="text-[13px] font-semibold leading-5 text-foreground">{title}</h3>
-        <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">{description}</p>
+        {description ? <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">{description}</p> : null}
       </div>
       {action}
     </div>
@@ -1267,6 +1277,8 @@ function useOrdersPageContent() {
     useState<CancelLeistungTarget | null>(null);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
   const [agencyServicesLoaded, setAgencyServicesLoaded] = useState(false);
+  // «Добавить в смету» at a visit: the new line belongs to that appointment.
+  const [leistungAppointmentId, setLeistungAppointmentId] = useState<string | null>(null);
   const setOrdersPageField = <K extends keyof OrdersPageState>(
     field: K,
     nextValue: SetStateAction<OrdersPageState[K]>,
@@ -1722,13 +1734,18 @@ function useOrdersPageContent() {
         : null,
     [orderDetail],
   );
-  const orderNextStepBlocked =
-    (orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion") &&
-    orderNextStep.blocked;
+  // Signatures reset by a change of the services hold every phase, not only
+  // «Оформление» where the process gate is checked (QA3 C S2-3).
+  const signatureResetPending = Boolean(
+    orderDetail?.process_gates?.blocking_reasons?.includes(SIGNATURE_RESET_REASON),
+  );
   const orderNextStepReasons =
     orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion"
-      ? orderNextStep.reasons
+      ? withStandingBlockingReasons(orderNextStep.reasons, orderDetail?.process_gates?.blocking_reasons)
       : [];
+  const orderNextStepBlocked =
+    (orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion") &&
+    (orderNextStep.blocked || orderNextStepReasons.length > 0);
   const currentLifecyclePhaseIndex = orderDetail
     ? ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number])
     : -1;
@@ -2081,8 +2098,86 @@ function useOrdersPageContent() {
     setCreateOpen(true);
   }
 
+  /** The service form takes a catalogue item: the order tariff of a service it
+   * already has (owner 2026-11-18), else the catalogue price of the order date. */
+  function applyCatalogServiceToLeistungForm(agencyServiceId: string, extra: Partial<LeistungFormState> = {}) {
+      const service = agencyServices.find(
+        (item) => item.id === agencyServiceId,
+      );
+      const effectivePrice = service
+        ? resolveAgencyServicePrice(
+            service,
+            orderDetail?.date_from || undefined,
+          )
+        : null;
+      const selectedPrice = service
+        ? (
+            effectivePrice
+            && (
+              !orderDetail?.currency
+              || effectivePrice.currency.toUpperCase()
+                === orderDetail.currency.toUpperCase()
+            )
+              ? effectivePrice
+              : listAgencyServicePriceChoices(
+                  service,
+                  orderDetail?.date_from || undefined,
+                ).find((price) => (
+                  (price.id || price.is_effective)
+                  && (
+                    !orderDetail?.currency
+                    || price.currency.toUpperCase()
+                      === orderDetail.currency.toUpperCase()
+                  )
+                ))
+          )
+        : null;
+      setLeistungError(null);
+      // The order's tariff of a service it already has (owner 2026-11-18).
+      const tariff = service ? orderServiceTariff(orderDetail?.leistungen, service.id) : null;
+      if (tariff) {
+        setLeistungForm((current) => ({
+          ...current,
+          ...extra,
+          agencyServiceId,
+          agencyServicePriceVersionId: tariff.priceVersionId,
+          description: service
+            ? agencyServiceStoredName(service.service_key, service.service_name, t)
+            : current.description,
+          unitPrice: tariff.unitPrice,
+          currency: orderDetail?.currency || current.currency,
+          vatRate: tariff.vatRate,
+          discountPercent: tariff.discountPercent,
+        }));
+        return;
+      }
+      setLeistungForm((current) => ({
+        ...current,
+        ...extra,
+        agencyServiceId,
+        agencyServicePriceVersionId: selectedPrice?.id ?? "",
+        description: service
+          ? agencyServiceStoredName(
+              service.service_key,
+              service.service_name,
+              t,
+            )
+          : current.description,
+        unitPrice: selectedPrice
+          ? String(selectedPrice.unit_price ?? "")
+          : current.unitPrice,
+        currency: selectedPrice?.currency
+          || orderDetail?.currency
+          || current.currency,
+        vatRate: selectedPrice
+          ? String(selectedPrice.vat_rate ?? "0")
+          : current.vatRate,
+      }));
+  }
+
   function resetLeistungDialog(open: boolean) {
     setLeistungOpen(open);
+    setLeistungAppointmentId(null);
     setLeistungError(null);
     setLeistungForm(
       open
@@ -2537,6 +2632,7 @@ function useOrdersPageContent() {
       vatRate: tariff?.vatRate ?? String(selectedPrice.vat_rate ?? "0"),
       discountPercent: tariff?.discountPercent ?? "",
     });
+    setLeistungAppointmentId(null);
     setLeistungOpen(true);
   }, [
     agencyServices,
@@ -3197,6 +3293,7 @@ function useOrdersPageContent() {
         doctor_id: optString(leistungForm.doctorId),
         external_document_id: optString(leistungForm.externalDocumentId),
         notes: optString(leistungForm.notes),
+        source_medical_appointment_id: leistungAppointmentId ?? undefined,
       }), askSignedTermsChange);
       resetLeistungDialog(false);
       triggerReload();
@@ -5243,14 +5340,16 @@ function useOrdersPageContent() {
                               variant="outline"
                               className={cn(
                                 "rounded-full",
-                                !processGateReadinessApplicable
+                                !processGateReadinessApplicable && !signatureResetPending
                                   ? "border-border bg-muted/50 text-muted-foreground"
                                   : orderDetail.process_gates.execution_ready
                                     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                                     : "border-rose-200 bg-rose-50 text-rose-700",
                               )}
                             >
-                              {!processGateReadinessApplicable
+                              {signatureResetPending
+                                ? l("orders_blockiert")
+                                : !processGateReadinessApplicable
                                 ? l("orders_nicht_verfugbar")
                                 : orderDetail.process_gates.execution_ready
                                   ? l("orders_bereit")
@@ -5297,18 +5396,29 @@ function useOrdersPageContent() {
                         />
                       </div>
 
-                      {processGateReadinessApplicable &&
+                      {(processGateReadinessApplicable || signatureResetPending) &&
                       orderDetail.process_gates.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                           <div className="font-medium">
                             {l("orders_blockierende_grunde")}
                           </div>
                           <ul className="mt-2 space-y-1">
-                            {orderDetail.process_gates.blocking_reasons.map(
-                              (reason) => (
-                                <li key={reason}>• {localizedBlockingReason(reason)}</li>
-                              ),
-                            )}
+                            {orderDetail.process_gates.blocking_reasons
+                              .filter((reason) => processGateReadinessApplicable || reason === SIGNATURE_RESET_REASON)
+                              .map((reason) => (
+                                <li key={reason}>
+                                  {reason === SIGNATURE_RESET_REASON ? (
+                                    <StaffLink
+                                      to={buildOrderWorkspaceHref(orderDetail.id, "overview", patientContextId)}
+                                      className="underline-offset-2 hover:underline"
+                                    >
+                                      • {localizedBlockingReason(reason)}
+                                    </StaffLink>
+                                  ) : (
+                                    <>• {localizedBlockingReason(reason)}</>
+                                  )}
+                                </li>
+                              ))}
                           </ul>
                         </div>
                       ) : null}
@@ -5644,23 +5754,24 @@ function useOrdersPageContent() {
                         onAddToEstimate={
                           permissions.canAddLeistung && !orderStepsLocked
                             ? (appointment) => {
-                                // A manual line for the doctor; staff set the price,
-                                // then the new estimate version goes to the client.
+                                // The line the completed visit would bill: the treatment
+                                // organisation on the order tariff, linked to the visit
+                                // (QA3 C S2-4); a manual line only without that catalogue item.
                                 setLeistungError(null);
-                                setLeistungForm({
+                                const base = {
                                   ...blankLeistungForm(),
-                                  description: [
-                                    ...new Set(
-                                      [appointment.title, appointment.doctor_name, appointment.provider_name]
-                                        .map((part) => part?.trim())
-                                        .filter((part): part is string => Boolean(part)),
-                                    ),
-                                  ].join(" · "),
                                   quantity: "1",
                                   providerId: appointment.provider_id ?? "",
                                   doctorId: appointment.doctor_id ?? "",
                                   currency: orderDetail.currency || "EUR",
-                                });
+                                };
+                                setLeistungForm(base);
+                                setLeistungAppointmentId(appointment.id);
+                                const organisation = agencyServices.find(
+                                  (item) => item.service_key === "treatment_organization" && item.is_active !== false,
+                                );
+                                if (organisation) applyCatalogServiceToLeistungForm(organisation.id, base);
+                                else setLeistungForm({ ...base, description: appointment.title?.trim() ?? "" });
                                 setLeistungOpen(true);
                               }
                             : undefined
@@ -7266,7 +7377,6 @@ function useOrdersPageContent() {
                         {orderDetail.leistungen.length === 0 ? (
                           <EmptyState
                             title={tx.common_not_set}
-                            description={t.orders_services_empty_description}
                           />
                         ) : (
                           orderDetail.leistungen.map((leistung, index) => {
@@ -9441,79 +9551,7 @@ function useOrdersPageContent() {
                   <NativeComboboxSelect
                     id="order-service-agencyServiceId"
                     value={leistungForm.agencyServiceId}
-                    onChange={(event) => {
-                      const agencyServiceId = event.target.value;
-                      const service = agencyServices.find(
-                        (item) => item.id === agencyServiceId,
-                      );
-                      const effectivePrice = service
-                        ? resolveAgencyServicePrice(
-                            service,
-                            orderDetail?.date_from || undefined,
-                          )
-                        : null;
-                      const selectedPrice = service
-                        ? (
-                            effectivePrice
-                            && (
-                              !orderDetail?.currency
-                              || effectivePrice.currency.toUpperCase()
-                                === orderDetail.currency.toUpperCase()
-                            )
-                              ? effectivePrice
-                              : listAgencyServicePriceChoices(
-                                  service,
-                                  orderDetail?.date_from || undefined,
-                                ).find((price) => (
-                                  (price.id || price.is_effective)
-                                  && (
-                                    !orderDetail?.currency
-                                    || price.currency.toUpperCase()
-                                      === orderDetail.currency.toUpperCase()
-                                  )
-                                ))
-                          )
-                        : null;
-                      setLeistungError(null);
-                      // The order's tariff of a service it already has (owner 2026-11-18).
-                      const tariff = service ? orderServiceTariff(orderDetail?.leistungen, service.id) : null;
-                      if (tariff) {
-                        setLeistungForm((current) => ({
-                          ...current,
-                          agencyServiceId,
-                          agencyServicePriceVersionId: tariff.priceVersionId,
-                          description: service
-                            ? agencyServiceStoredName(service.service_key, service.service_name, t)
-                            : current.description,
-                          unitPrice: tariff.unitPrice,
-                          currency: orderDetail?.currency || current.currency,
-                          vatRate: tariff.vatRate,
-                          discountPercent: tariff.discountPercent,
-                        }));
-                        return;
-                      }
-                      setLeistungForm((current) => ({
-                        ...current,
-                        agencyServiceId,
-                        agencyServicePriceVersionId: selectedPrice?.id ?? "",
-                        description: service
-                          ? agencyServiceStoredName(
-                              service.service_key,
-                              service.service_name,
-                              t,
-                            )
-                          : current.description,
-                        unitPrice: selectedPrice
-                          ? String(selectedPrice.unit_price ?? "")
-                          : current.unitPrice,
-                        currency: selectedPrice?.currency
-                          || orderDetail?.currency
-                          || current.currency,
-                        vatRate: selectedPrice
-                          ? String(selectedPrice.vat_rate ?? "0")
-                          : current.vatRate,
-                      }));
-                    }}
+                    onChange={(event) => applyCatalogServiceToLeistungForm(event.target.value)}
                     className={selectClassName}
                   >
                     <option value="">
@@ -9747,7 +9785,7 @@ function useOrdersPageContent() {
                       .filter((profile) => leistungForm.isCostPassthrough === (profile.vat_category === "pass_through"))
                       .map((profile) => (
                         <option key={profile.id} value={profile.id}>
-                          {profile.name} · {String(Number(profile.vat_rate))} %
+                          {taxProfileOptionLabel(profile, lang)}
                         </option>
                       ))}
                   </NativeComboboxSelect>

@@ -198,13 +198,12 @@ test("the quote's internal note is saved on its own and guards the sheet while u
 // Owner decision 2026-11-11, release QA F1: a quote is accepted by the
 // client's signature on the estimate, which sets the status on the server —
 // never by choosing «Принято» in the quote sheet.
-test("the quote sheet does not offer «Принято» by hand and points to the signature", async ({ page }) => {
+test("the quote sheet does not offer «Принято» by hand", async ({ page }) => {
   const api = await prepare(page, "ceo");
   api.state.quoteStatus = "sent";
   await page.goto(`/contracts?quote=${quoteId}`);
-  const hint = page.getByTestId("quote-accepted-by-signature-hint");
-  await expect(hint).toBeVisible();
-  await expect(hint).toContainText("Статус «Принято» система ставит сама");
+  // No how-to text under the status (owner rule, QA3).
+  await expect(page.getByTestId("quote-accepted-by-signature-hint")).toHaveCount(0);
   const status = page.getByRole("combobox", { name: "Статус", exact: true }).first();
   await expect(status).toContainText("Отправлено");
   await status.click();

@@ -45,12 +45,12 @@ async function prepare(page: Page, lang = "ru") {
   return state;
 }
 
-test("draft reminders are blocked before opening the form, with a Russian explanation", async ({ page }) => {
+test("draft reminders are blocked before opening the form, without a how-to text", async ({ page }) => {
   const state = await prepare(page);
   state.invoice.status = "draft";
   await page.goto(`/invoices?invoice=${invoiceId}`);
   await expect(page.getByRole("button", { name: "Добавить напоминание", exact: true })).toBeDisabled();
-  await expect(page.locator("#invoice-dunning-block-reason")).toContainText("Сначала выставьте счёт");
+  await expect(page.locator("#invoice-dunning-block-reason")).toHaveCount(0);
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
 });

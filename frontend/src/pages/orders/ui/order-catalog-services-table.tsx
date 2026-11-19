@@ -7,6 +7,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Trash2 } from "lucide-react";
 import { formatMoneyLabel, moneyLineAmounts, moneyLineDiscount, parseDiscountPercent, roundCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { taxProfileLabel as taxProfileUiName } from "@/lib/tax-profile-label";
 import { t as translationsFor, type Lang } from "@/lib/i18n";
 import { agencyServiceLineDisplayDescription, agencyServiceLineDisplayName } from "@/lib/agency-service-labels";
 import { listAgencyServicePriceChoices } from "@/pages/contracts/model/contracts-model";
@@ -32,9 +33,15 @@ export function taxProfilesForLine(line: Pick<ServiceLine, "isCostPassthrough">,
   return profiles.filter((profile) => (profile.vat_category === "pass_through") === (line.isCostPassthrough === true));
 }
 
-/** «Standard VAT · 19 %»: the profile as a pill or option. */
-export function taxProfileLabel(profile: Pick<PositionTaxProfile, "name" | "vat_rate">) {
-  return `${profile.name} · ${String(Number(profile.vat_rate))} %`;
+/** The profile as a pill or option: the UI name of a system profile
+ * («Стандартная ставка 19 %», QA3), else «Name · 7 %». */
+export function taxProfileLabel(
+  profile: Pick<PositionTaxProfile, "name" | "vat_rate"> & { profile_key?: string | null },
+  lang = "ru",
+) {
+  const uiName = taxProfileUiName(profile, lang);
+  if (uiName !== profile.name) return uiName;
+  return `${profile.name} · ${String(Number(profile.vat_rate)).replace(".", ",")} %`;
 }
 
 export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDiscountChange, onTaxProfileChange, taxProfiles = [], onDelete, totals, lineLocked }: {
@@ -253,7 +260,8 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
       align: "right",
       width: 92,
       render: (line) => {
-        const value = line.isCostPassthrough ? "" : (line.discount ?? "");
+        // «12,5», not «12.5» (QA3); both are read.
+        const value = line.isCostPassthrough ? "" : String(line.discount ?? "").replace(".", ",");
         const invalid = parseDiscountPercent(value) === null;
         return (
           <Input
@@ -296,12 +304,12 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                 className="h-6 max-w-44 rounded-md px-1.5 text-[11px]"
               >
                 <option value="">{tx("По каталогу", "Standard des Katalogs")}</option>
-                {choices.map((profile) => <option key={profile.id} value={profile.id}>{taxProfileLabel(profile)}</option>)}
+                {choices.map((profile) => <option key={profile.id} value={profile.id}>{taxProfileLabel(profile, lang)}</option>)}
               </NativeComboboxSelect>
             </span>
           );
         }
-        const name = current ? taxProfileLabel(current) : line.taxProfileName;
+        const name = current ? taxProfileLabel(current, lang) : line.taxProfileName;
         return (
           <span className="flex flex-col items-end gap-0.5">
             {rate}

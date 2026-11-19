@@ -10360,6 +10360,39 @@ async fn consume_planned_treatment_organization_line(
     catalog_item: &AgencyServiceBillingItem,
 ) -> Result<Option<ConsumedPlannedLine>, sqlx::Error> {
     let mut tx = state.db.begin().await?;
+    // A line staff added for this visit («Добавить в смету», QA3 C S2-4) is
+    // the visit's line: completing the visit delivers it, no second line.
+    let linked_planned = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM order_leistungen
+           WHERE source_medical_appointment_id = $1 AND status = 'planned'
+           FOR UPDATE"#,
+    )
+    .bind(appointment_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(linked_id) = linked_planned {
+        let mut notes = vec![
+            "Geplante Leistung durch den abgeschlossenen medizinischen Termin erbracht".to_string(),
+        ];
+        notes.extend(context_notes.iter().cloned());
+        sqlx::query(
+            r#"UPDATE order_leistungen
+               SET status = 'delivered',
+                   delivered_at = COALESCE(delivered_at, now()),
+                   notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $2)
+               WHERE id = $1 AND status = 'planned'"#,
+        )
+        .bind(linked_id)
+        .bind(notes.join("\n"))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(Some(ConsumedPlannedLine {
+            leistung_id: linked_id,
+            split_from: None,
+            remaining_planned_quantity: None,
+        }));
+    }
     let already_linked = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM order_leistungen WHERE source_medical_appointment_id = $1)",
     )
@@ -10660,7 +10693,7 @@ fn interpreter_report_billing_notes(
 }
 
 /// Bills one approved interpreter report. The report consumes the order's
-/// oldest planned interpreter-hours line that is not linked yet: its quantity
+/// oldest planned (not delivered) interpreter-hours line not linked yet: its quantity
 /// becomes the reported hours (a larger planned remainder does not stay
 /// planned), it is approved and linked to the report. Only when no planned
 /// line is left is a new approved line added. Runs in one transaction that
@@ -10697,14 +10730,19 @@ async fn sync_interpreter_report_billing_candidate(
     let approved_at = candidate.approved_at.unwrap_or_else(chrono::Utc::now);
     let catalog_item =
         load_interpreter_hours_catalog_item(state, candidate.appointment_date).await?;
-    // Not billed yet, also when marked delivered by hand: the report's hours
-    // replace the line's. Without a catalog entry only the key can match.
+    // Only a planned line (not delivered, not approved, not invoiced) takes
+    // the report's hours. A delivered or approved line is an earlier visit:
+    // overwriting its quantity would drop those hours (QA3 C S1-2), so the
+    // report adds its own line on the order tariff instead (the insert
+    // trigger copies price version, discount and tax profile). Without a
+    // catalog entry only the key can match.
     let open_line = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            WHERE ol.order_id = $1
-             AND ol.status IN ('planned', 'delivered', 'approved')
+             AND ol.status = 'planned'
+             AND ol.delivered_at IS NULL
              AND ol.source_interpreter_report_id IS NULL
              AND ol.source_medical_appointment_id IS NULL
              AND {service}

@@ -508,7 +508,6 @@ export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChan
               </div>
               <SignatureConnectionDialog canConfigure={state.can_configure} onChanged={() => { setAwaitingState(true); setRevision(value => value + 1); }} />
             </div>
-            <p className="border-t border-border/60 px-4 py-3 text-xs leading-5 text-muted-foreground">{tx("Для подписания нужно настроить немецкий аккаунт Skribble. Обратитесь к администратору.", "Zum Signieren muss das deutsche Skribble-Konto eingerichtet werden. Bitte wenden Sie sich an die Administration.")}</p>
           </section> : <div className="flex justify-end">
             <Badge variant="outline" className="rounded-full text-[10px]">{state.test_mode ? "DEMO · Skribble" : "QES / eIDAS · Skribble"}</Badge>
           </div>}

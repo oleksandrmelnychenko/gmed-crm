@@ -68,11 +68,11 @@ export function SelectField({
           sideOffset={4}
           align="start"
           alignItemWithTrigger={false}
-          className="isolate z-[150]"
+          className="isolate z-[300]"
         >
           <Select.Popup
             data-overlay-interaction-root=""
-            className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-[var(--control-popover,var(--popover))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="relative isolate z-[300] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover [background-color:var(--control-popover,var(--popover))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           >
             <Select.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">
               {options.map((option) => (
