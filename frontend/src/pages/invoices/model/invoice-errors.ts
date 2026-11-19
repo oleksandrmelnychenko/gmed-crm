@@ -381,6 +381,19 @@ const EXACT: Record<string, Pair> = {
 
 /** Machine-readable error codes of the payer and release checks. */
 const CODES: Record<string, Pair> = {
+  // QA 2026-11-19 (S1-1, S2-2, D S2-3).
+  invoice_passthrough_line_with_vat: [
+    "Eine Durchlaufkostenposition ist mit Mehrwertsteuer berechnet. Entwurf stornieren und eine neue Rechnung erstellen.",
+    "Транзитная позиция посчитана с НДС. Отмените черновик и создайте новый счёт.",
+  ],
+  invoice_status_unchanged: [
+    "Die Rechnung hat diesen Status bereits; es wurde nichts geändert.",
+    "У счёта уже этот статус — ничего не изменено.",
+  ],
+  final_line_counts_separate_service: [
+    "Die Angebotsposition enthält Stunden, die eine eigene Position dieser Rechnung bereits abrechnet. Menge der Angebotsposition auf die eigene Leistung senken.",
+    "Позиция сметы включает часы, которые уже выставлены отдельной строкой этого счёта. Уменьшите количество в позиции сметы до её собственной услуги.",
+  ],
   // Draft editor and «Удалить черновик» (owner 2026-11-14).
   invoice_not_a_draft: [
     "Nur ein Entwurf kann geändert oder gelöscht werden. Eine ausgestellte Rechnung wird storniert.",

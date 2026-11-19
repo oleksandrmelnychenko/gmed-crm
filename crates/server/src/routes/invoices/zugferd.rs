@@ -64,9 +64,9 @@ pub(super) fn unit_code(label: Option<&str>) -> &'static str {
         .map(|label| label.trim().trim_end_matches('.').to_lowercase())
         .as_deref()
     {
-        Some("hour" | "hours" | "stunde" | "stunden" | "std" | "h" | "час" | "часа" | "часов" | "ч") => {
-            "HUR"
-        }
+        Some(
+            "hour" | "hours" | "stunde" | "stunden" | "std" | "h" | "час" | "часа" | "часов" | "ч",
+        ) => "HUR",
         Some("day" | "days" | "tag" | "tage" | "день" | "дня" | "дней") => "DAY",
         _ => "C62",
     }
@@ -1705,5 +1705,17 @@ mod tests {
             let path = std::path::Path::new(&dir).join(format!("{}.xml", invoice.number));
             std::fs::write(path, build_cii_xml(&invoice)).unwrap();
         }
+    }
+
+    #[test]
+    fn a_line_unit_label_gives_its_un_ece_code() {
+        // QA 2026-11-19, S3-9: hours and days, not always one piece.
+        assert_eq!(unit_code(Some("hour")), "HUR");
+        assert_eq!(unit_code(Some("Std.")), "HUR");
+        assert_eq!(unit_code(Some("Stunden")), "HUR");
+        assert_eq!(unit_code(Some("day")), "DAY");
+        assert_eq!(unit_code(Some("Tage")), "DAY");
+        assert_eq!(unit_code(Some("unit")), "C62");
+        assert_eq!(unit_code(None), "C62");
     }
 }

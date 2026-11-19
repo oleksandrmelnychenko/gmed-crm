@@ -6586,7 +6586,13 @@ async fn an_invoice_for_services_not_rendered_says_so_as_its_release_check_does(
         "POST",
         &format!("/api/v1/quotes/{}/invoices", quote["id"].as_str().unwrap()),
         &billing_bearer,
-        Some(json!({ "invoice_type": "final" })),
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [
+                { "line_index": 0, "quantity": 1 },
+                { "line_index": 1, "quantity": 1 },
+            ],
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{draft}");

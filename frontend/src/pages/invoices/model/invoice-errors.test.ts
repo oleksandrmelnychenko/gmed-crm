@@ -122,8 +122,10 @@ describe("localizeInvoiceError", () => {
       message: "The invoice recipient needs a full name and postal address with country before release",
     };
     expect(localizeInvoiceError(incomplete, "de", "x")).toBe(
-      "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land). Es fehlt: PLZ, Land.",
+      "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land). Die Anschrift des Patienten ergänzen der CEO oder der Patient Manager in der Patientenkarte; einen Zahler mit eigener Anschrift hinterlegt Billing im Rechnungsempfänger. Es fehlt: PLZ, Land.",
     );
+    // Billing cannot edit the patient: the message names who can (S2-1).
+    expect(localizeInvoiceError(incomplete, "ru", "x")).toContain("CEO или менеджер пациента");
     expect(localizeInvoiceError(incomplete, "ru", "x")).toContain("Не хватает: индекс, страна.");
     expect(invoiceConfirmationField(incomplete)).toBeNull();
 

@@ -931,6 +931,9 @@ struct InvoicePdfContext {
     /// Paid advance money no VAT category took, set off at the release as a
     /// payment (owner 2026-11-17).
     advance_rests: Vec<document::SetOffAdvanceRest>,
+    /// A final invoice: the interim invoices of its quote that already
+    /// billed part of the services (number, gross); not in its amount.
+    previous_interims: Vec<(String, Decimal)>,
     notes: Option<String>,
     patient_pid: String,
     patient_name: String,
@@ -3327,6 +3330,16 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "advance_rest_set_off") => "Остаток аванса",
         ("en", "advance_rest_set_off") => "Advance rest set off",
         (_, "advance_rest_set_off") => "Restbetrag Anzahlung",
+        ("uk", "previous_interims") => "Уже виставлено проміжними рахунками (не входить у цю суму)",
+        ("ru", "previous_interims") => {
+            "Уже выставлено промежуточными счетами (не входит в эту сумму)"
+        }
+        ("en", "previous_interims") => {
+            "Already billed by interim invoices (not included in this amount)"
+        }
+        (_, "previous_interims") => {
+            "Bereits mit Zwischenrechnung abgerechnet (nicht in diesem Betrag enthalten)"
+        }
         ("uk", "balance_due") => "До сплати",
         ("ru", "balance_due") => "Остаток",
         ("en", "balance_due") => "Balance due",
@@ -4262,17 +4275,23 @@ pub(super) fn quote_line_amounts(line: &Value) -> money::LineAmounts {
 /// what invoices bill of it, so it agrees to the cent with the parts billed
 /// (QA 2026-11-15, A-1).
 fn unbilled_line_gross(line: &Value, billed: Option<&BilledQuoteLine>) -> Decimal {
-    let gross = quote_line_amounts(line).gross;
+    let amounts = quote_line_amounts(line);
     let quoted = invoice_json_decimal(line, "quantity").unwrap_or(Decimal::ZERO);
     match billed {
         Some(billed) if billed.quantity > Decimal::ZERO && quoted > Decimal::ZERO => {
             if billed.quantity >= quoted {
                 Decimal::ZERO
             } else {
-                (gross - billed.gross).max(Decimal::ZERO)
+                // The rest is billed as a line of its own: its net plus the
+                // VAT of that net (QA 2026-11-19, D S1-1).
+                let rest_net = (amounts.net - billed.net).max(Decimal::ZERO);
+                let vat_rate = invoice_json_decimal(line, "vat_rate")
+                    .unwrap_or(Decimal::ZERO)
+                    .round_commercial(2);
+                rest_net + money::vat_amount(rest_net, vat_rate)
             }
         }
-        _ => gross,
+        _ => amounts.gross,
     }
     .round_cents()
 }
@@ -6617,6 +6636,74 @@ async fn load_invoice_pdf_context(
         .map_err(failed)
 }
 
+/// The issued interim invoices of a final invoice's quote (number, gross
+/// less credits): they billed part of the services, the final bills the rest
+/// only. Printed on the final and noted in its e-invoice, so the document
+/// and the dialog's «Фактически − Zwischenrechnung» agree (QA 2026-11-19,
+/// C F10). Empty for any other invoice.
+async fn load_previous_interims(
+    conn: &mut sqlx::PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<(String, Decimal)>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT COALESCE(interim.invoice_number, '') AS invoice_number,
+                  interim.total_gross - interim.credited_amount AS gross
+           FROM invoices final_invoice
+           JOIN invoices interim ON interim.quote_id = final_invoice.quote_id
+           WHERE final_invoice.id = $1
+             AND final_invoice.invoice_type = 'final'
+             AND interim.invoice_type = 'interim'
+             AND interim.id <> final_invoice.id
+             AND interim.released_at IS NOT NULL
+             -- An interim issued after the final (a line credited on it
+             -- billed again) is not part of what the final states.
+             AND (final_invoice.released_at IS NULL
+                  OR interim.released_at <= final_invoice.released_at)
+             AND interim.status <> 'cancelled'
+             AND interim.total_gross - interim.credited_amount > 0
+           ORDER BY interim.release_sequence NULLS FIRST, interim.issued_at, interim.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.try_get::<String, _>("invoice_number")
+                    .unwrap_or_default(),
+                row.try_get::<Decimal, _>("gross").unwrap_or(Decimal::ZERO),
+            )
+        })
+        .collect())
+}
+
+/// «Bereits mit Zwischenrechnung abgerechnet: INV-1 (101,75 €), …».
+fn previous_interims_text(
+    language: &str,
+    interims: &[(String, Decimal)],
+    currency: &str,
+) -> Option<String> {
+    if interims.is_empty() {
+        return None;
+    }
+    let list = interims
+        .iter()
+        .map(|(number, gross)| {
+            format!(
+                "{} ({})",
+                number.trim(),
+                format_invoice_pdf_money(&gross.to_string(), currency)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "{}: {list}",
+        invoice_pdf_label(language, "previous_interims")
+    ))
+}
+
 /// Everything printed on the invoice, read through one connection so a
 /// release can render the document inside its own transaction.
 async fn load_invoice_pdf_context_on(
@@ -6702,6 +6789,7 @@ async fn load_invoice_pdf_context_on(
     };
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     let advance_rests = document::load_set_off_advance_rests(conn, invoice_id).await?;
+    let previous_interims = load_previous_interims(&mut *conn, invoice_id).await?;
     let payment_term_days = if row.try_get::<bool, _>("released").unwrap_or(false) {
         release::DEFAULT_INVOICE_PAYMENT_TERM_DAYS
     } else {
@@ -6781,6 +6869,7 @@ async fn load_invoice_pdf_context_on(
         ),
         deducted_advances,
         advance_rests,
+        previous_interims,
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -7678,6 +7767,12 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             true,
             true,
         );
+    }
+
+    if let Some(text) =
+        previous_interims_text(language, &context.previous_interims, &context.currency)
+    {
+        layout.text_block(&text, 8.5, false, 0.0, InvoicePdfColor::Muted, 3.0, 0.0);
     }
 
     if let Some(reason) = document::zero_rate_exemption_note(&context.line_items) {
@@ -15304,6 +15399,19 @@ async fn load_einvoice(
             None => rests,
         });
     }
+    // The interim invoices that billed part of the services, as the PDF
+    // names them (C F10). They are separate invoices, not prepayments: the
+    // final bills only the rest, so BT-113 does not include them.
+    if let Some(interims) = previous_interims_text(
+        "de",
+        &load_previous_interims(&mut *conn, invoice_id).await?,
+        &currency,
+    ) {
+        prepayment_note = Some(match prepayment_note {
+            Some(note) => format!("{note}; {interims}"),
+            None => interims,
+        });
+    }
     let advances_credited = row
         .try_get::<Decimal, _>("prepayment_applied_amount")
         .unwrap_or(Decimal::ZERO)
@@ -16929,6 +17037,21 @@ async fn update_invoice_status(
         && due_date.is_none_or(|value| Some(value) == locked_due_date)
         && !changes_notes
     {
+        // A reason explains a status change; sent with the status the
+        // invoice already has, nothing would be done and a 200 read as done
+        // (QA 2026-11-19, S2-2: a Storno form reset by a reload).
+        if body
+            .reason
+            .as_deref()
+            .is_some_and(|reason| !reason.trim().is_empty())
+        {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "invoice_status_unchanged",
+                "The invoice already has this status; nothing was changed",
+                json!({ "status": locked_status }),
+            );
+        }
         drop(transaction);
         return match load_invoice_detail(&state, invoice_id, &auth).await {
             Ok(Some(invoice)) => Json(invoice).into_response(),
@@ -18111,6 +18234,7 @@ mod tests {
             prepayment_applied_amount: "0.00".to_string(),
             deducted_advances: Vec::new(),
             advance_rests: Vec::new(),
+            previous_interims: Vec::new(),
             notes: Some("Оплатить после получения счёта.".to_string()),
             patient_pid: "PT-INV-UNIT".to_string(),
             patient_name: "Макс Мюллер".to_string(),
