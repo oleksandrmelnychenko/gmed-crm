@@ -456,6 +456,7 @@ const VAT_CATEGORIES = [
   "exempt",
   "reverse_charge",
   "custom",
+  "pass_through",
 ];
 
 const VAT_CATEGORY_LABEL_KEYS = {
@@ -464,6 +465,7 @@ const VAT_CATEGORY_LABEL_KEYS = {
   exempt: "finance_catalog_vat_category_exempt",
   reverse_charge: "finance_catalog_vat_category_reverse_charge",
   custom: "finance_catalog_vat_category_custom",
+  pass_through: "finance_catalog_vat_category_pass_through",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const VAT_SOURCE_LABEL_KEYS = {

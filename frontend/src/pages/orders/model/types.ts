@@ -917,6 +917,8 @@ export type LeistungFormState = {
   externalDocumentId: string;
   notes: string;
   isCostPassthrough: boolean;
+  /** The position's tax profile (owner 2026-11-19); empty: the server picks the default. */
+  taxProfileId: string;
 };
 
 export type SupportingDocumentOption = {

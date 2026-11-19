@@ -133,6 +133,7 @@ export interface RevenueTranslations {
   finance_catalog_vat_category_zero_rated: string;
   finance_catalog_vat_category_exempt: string;
   finance_catalog_vat_category_reverse_charge: string;
+  finance_catalog_vat_category_pass_through: string;
   finance_catalog_vat_category_custom: string;
   finance_catalog_vat_source_catalog: string;
   finance_catalog_vat_source_tax_profile: string;
@@ -1042,6 +1043,7 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_vat_category_zero_rated: "Нулевая ставка",
   finance_catalog_vat_category_exempt: "Освобождено",
   finance_catalog_vat_category_reverse_charge: "Обратное начисление НДС",
+  finance_catalog_vat_category_pass_through: "Транзитная позиция (durchlaufender Posten)",
   finance_catalog_vat_category_custom: "Индивидуальная",
   finance_catalog_vat_source_catalog: "Каталог услуг",
   finance_catalog_vat_source_tax_profile: "Налоговый профиль",
@@ -1466,6 +1468,7 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_vat_category_zero_rated: "Nullsatz",
   finance_catalog_vat_category_exempt: "Befreit",
   finance_catalog_vat_category_reverse_charge: "Reverse Charge",
+  finance_catalog_vat_category_pass_through: "Durchlaufender Posten",
   finance_catalog_vat_category_custom: "Individuell",
   finance_catalog_vat_source_catalog: "Leistungskatalog",
   finance_catalog_vat_source_tax_profile: "Steuerprofil",

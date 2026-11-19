@@ -113,7 +113,7 @@ import {
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
-import { clearApiCache, type ApiRequestError } from "@/lib/api";
+import { apiFetch, clearApiCache, type ApiRequestError } from "@/lib/api";
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
@@ -276,6 +276,9 @@ import {
   blankExternalInvoiceForm,
   blankLeistungForm,
   orderServiceTariff,
+  withCostPassthrough,
+  withTaxProfile,
+  type PositionTaxProfile,
   blankOrderExecutionForm,
   blankOrderFollowupForm,
   blankOrderPlanningForm,
@@ -1423,6 +1426,23 @@ function useOrdersPageContent() {
         : [],
     [leistungForm.providerId, providerDoctors],
   );
+  // Tax profiles a position can carry (owner 2026-11-19), read when the
+  // service form opens.
+  const [positionTaxProfiles, setPositionTaxProfiles] = useState<PositionTaxProfile[]>([]);
+  useEffect(() => {
+    if (!leistungOpen || positionTaxProfiles.length) return;
+    let cancelled = false;
+    apiFetch<PositionTaxProfile[] | { items?: PositionTaxProfile[] }>("/tax-profiles")
+      .then((payload) => {
+        if (cancelled) return;
+        const items = Array.isArray(payload) ? payload : payload.items ?? [];
+        setPositionTaxProfiles(items.filter((profile) => profile.is_active));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [leistungOpen, positionTaxProfiles.length]);
   const supportingDocumentOptions = useMemo(
     () =>
       orderDocuments.filter(
@@ -3167,6 +3187,7 @@ function useOrdersPageContent() {
         planned_partner_cost_vat: plannedCost.vat,
         planned_partner_cost_gross: plannedCost.gross,
         is_cost_passthrough: leistungForm.isCostPassthrough,
+        tax_profile_id: optString(leistungForm.taxProfileId),
         provider_id: optString(leistungForm.providerId),
         doctor_id: optString(leistungForm.doctorId),
         external_document_id: optString(leistungForm.externalDocumentId),
@@ -9679,17 +9700,33 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field
-                  htmlFor="order-service-vatRate"
-                  label={leistungForm.isCostPassthrough
-                    ? (lang === "de" ? "MwSt. Einkauf, % · Patient 0 %" : "НДС закупки, % · пациенту 0 %")
-                    : t.orders_service_vat_percent}
-                >
+                <Field htmlFor="order-service-taxProfile" label={lang === "de" ? "Steuerprofil" : "Налоговый профиль"}>
+                  <NativeComboboxSelect
+                    id="order-service-taxProfile"
+                    data-testid="order-service-tax-profile"
+                    value={leistungForm.taxProfileId}
+                    disabled={leistungForm.isCostPassthrough}
+                    onChange={(event) =>
+                      setLeistungForm((current) => withTaxProfile(current, event.target.value, positionTaxProfiles))
+                    }
+                    className={selectClassName}
+                  >
+                    <option value="">{lang === "de" ? "Standard des Katalogs" : "По каталогу"}</option>
+                    {positionTaxProfiles
+                      .filter((profile) => leistungForm.isCostPassthrough === (profile.vat_category === "pass_through"))
+                      .map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name} · {String(Number(profile.vat_rate))} %
+                        </option>
+                      ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field htmlFor="order-service-vatRate" label={t.orders_service_vat_percent}>
                   <Input
                     id="order-service-vatRate"
                     value={leistungForm.vatRate}
-                    readOnly={Boolean(leistungForm.agencyServiceId)}
-                    disabled={Boolean(leistungForm.agencyServiceId)}
+                    readOnly={Boolean(leistungForm.agencyServiceId || leistungForm.taxProfileId || leistungForm.isCostPassthrough)}
+                    disabled={Boolean(leistungForm.agencyServiceId || leistungForm.taxProfileId || leistungForm.isCostPassthrough)}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
                         ...current,
@@ -9794,15 +9831,10 @@ function useOrdersPageContent() {
                   id="leistung-cost-passthrough"
                   type="checkbox"
                   checked={leistungForm.isCostPassthrough}
-                  onChange={(event) =>
-                    setLeistungForm((current) => ({
-                      ...current,
-                      isCostPassthrough: event.target.checked,
-                      externalDocumentId: event.target.checked
-                        ? current.externalDocumentId
-                        : "",
-                    }))
-                  }
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setLeistungForm((current) => withCostPassthrough(current, checked, positionTaxProfiles));
+                  }}
                   className={cn(checkboxClass, "mt-1")}
                 />
                 <span className="text-sm font-medium text-foreground">

@@ -253,6 +253,45 @@ export function supplierInvoiceServiceOptions(
   ));
 }
 
+/** A tax profile an order position can carry (`GET /tax-profiles`). */
+export type PositionTaxProfile = {
+  id: string;
+  profile_key: string;
+  name: string;
+  vat_rate: string | number;
+  vat_category: string;
+  is_active: boolean;
+};
+
+/**
+ * The service form after «транзит» is ticked or cleared (owner 2026-11-19):
+ * a pass-through cost carries «Durchlaufender Posten 0 %», billed at 0 %;
+ * clearing it leaves the profile to staff or the server's default.
+ */
+export function withCostPassthrough(
+  form: LeistungFormState,
+  checked: boolean,
+  profiles: readonly PositionTaxProfile[],
+): LeistungFormState {
+  const passThrough = profiles.find((profile) => profile.vat_category === "pass_through" && profile.is_active);
+  if (checked) {
+    return { ...form, isCostPassthrough: true, discountPercent: "", taxProfileId: passThrough?.id ?? "", vatRate: "0" };
+  }
+  const keepProfile = form.taxProfileId !== "" && form.taxProfileId !== passThrough?.id;
+  return { ...form, isCostPassthrough: false, externalDocumentId: "", taxProfileId: keepProfile ? form.taxProfileId : "" };
+}
+
+/** The form with a tax profile picked: its rate is the position's VAT. */
+export function withTaxProfile(
+  form: LeistungFormState,
+  profileId: string,
+  profiles: readonly PositionTaxProfile[],
+): LeistungFormState {
+  const profile = profiles.find((item) => item.id === profileId);
+  if (!profile) return { ...form, taxProfileId: "" };
+  return { ...form, taxProfileId: profile.id, vatRate: String(Number(profile.vat_rate)) };
+}
+
 export function blankLeistungForm(): LeistungFormState {
   return {
     agencyServiceId: "",
@@ -269,6 +308,7 @@ export function blankLeistungForm(): LeistungFormState {
     externalDocumentId: "",
     notes: "",
     isCostPassthrough: false,
+    taxProfileId: "",
   };
 }
 

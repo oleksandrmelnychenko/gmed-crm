@@ -34,7 +34,12 @@ pub fn router() -> Router<AppState> {
 
 /// Profiles the server resolves by key (VAT of order amendments); they are
 /// never removed from the catalogue.
-const SYSTEM_TAX_PROFILE_KEYS: [&str; 3] = ["standard_vat", "termin_fee_0", "vat_exempt_0"];
+const SYSTEM_TAX_PROFILE_KEYS: [&str; 4] = [
+    "standard_vat",
+    "termin_fee_0",
+    "vat_exempt_0",
+    "pass_through_0",
+];
 
 /// How many records name a tax profile: catalogue rows and their price
 /// history, order lines, service groups, amendments, patient packages and
@@ -101,7 +106,8 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 }
 
 fn can_read_tax_profiles(role: Role) -> bool {
-    role.can(Capability::InvoicesView)
+    // Staff editing order positions pick their tax profile (owner 2026-11-19).
+    role.can(Capability::InvoicesView) || role.can(Capability::OrdersEdit)
 }
 
 fn can_manage_tax_profiles(role: Role) -> bool {
@@ -190,7 +196,7 @@ fn validated_vat_rate(value: Option<Decimal>) -> Result<Decimal, axum::response:
 fn valid_vat_category(value: &str) -> bool {
     matches!(
         value,
-        "standard" | "zero_rated" | "exempt" | "reverse_charge" | "custom"
+        "standard" | "zero_rated" | "exempt" | "reverse_charge" | "custom" | "pass_through"
     )
 }
 

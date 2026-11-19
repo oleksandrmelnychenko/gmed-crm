@@ -19,6 +19,8 @@ import {
   summarizeLeistungMetrics,
   supplierInvoiceServiceOptions,
   sumLeistungTotals,
+  withCostPassthrough,
+  withTaxProfile,
   workflowChecklistErrorText,
 } from "./order-model";
 import type { Leistung, OrderProcessGates } from "./types";
@@ -274,5 +276,24 @@ describe("supplier invoice service options", () => {
     expect(supplierInvoiceServiceOptions(lines).map((item) => item.id)).toEqual(["passthrough", "clinic", "manual"]);
     // A line linked before stays selectable.
     expect(supplierInvoiceServiceOptions(lines, "own").map((item) => item.id)).toEqual(["own", "passthrough", "clinic", "manual"]);
+  });
+});
+
+describe("position tax profile (owner 2026-11-19)", () => {
+  const profiles = [
+    { id: "std", profile_key: "standard_vat", name: "Standard", vat_rate: "19", vat_category: "standard", is_active: true },
+    { id: "pt", profile_key: "pass_through_0", name: "Durchlaufender Posten 0 %", vat_rate: "0", vat_category: "pass_through", is_active: true },
+  ];
+
+  it("gives a pass-through cost the pass-through profile at 0 %", () => {
+    const form = { ...blankLeistungForm(), vatRate: "19", discountPercent: "10" };
+    const transit = withCostPassthrough(form, true, profiles);
+    expect(transit).toMatchObject({ isCostPassthrough: true, taxProfileId: "pt", vatRate: "0", discountPercent: "" });
+    expect(withCostPassthrough(transit, false, profiles)).toMatchObject({ isCostPassthrough: false, taxProfileId: "" });
+  });
+
+  it("takes the VAT rate of a picked profile", () => {
+    expect(withTaxProfile({ ...blankLeistungForm(), vatRate: "7" }, "std", profiles)).toMatchObject({ taxProfileId: "std", vatRate: "19" });
+    expect(withTaxProfile(blankLeistungForm(), "", profiles).taxProfileId).toBe("");
   });
 });

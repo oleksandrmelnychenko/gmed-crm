@@ -2550,3 +2550,98 @@ async fn a_final_above_the_recorded_delivery_is_released() {
     );
     release_invoice(&ctx, &ceo, invoice["id"].as_str().unwrap()).await;
 }
+
+async fn tax_profile_id(pool: &PgPool, key: &str) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = $1")
+        .bind(key)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Owner 2026-11-19: every order position carries an explicit tax profile;
+/// a pass-through cost carries «Durchlaufender Posten 0 %» and bills 0 %.
+#[tokio::test]
+async fn order_positions_carry_their_tax_profile() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let (_, order_id, _, _) = seed_quoted_order(&ctx.app, &ctx.pool, ctx.admin_id, &ceo).await;
+    let path = format!("/api/v1/orders/{order_id}/leistungen");
+    let standard = tax_profile_id(&ctx.pool, "standard_vat").await;
+    let pass_through = tax_profile_id(&ctx.pool, "pass_through_0").await;
+    let add = |body: Value| {
+        let app = ctx.app.clone();
+        let path = path.clone();
+        let ceo = ceo.clone();
+        async move { call(&app, "POST", &path, &ceo, Some(body)).await }
+    };
+    let stored = |id: Uuid| {
+        let pool = ctx.pool.clone();
+        async move {
+            sqlx::query_as::<_, (Option<Uuid>, Decimal, String)>(
+                "SELECT tax_profile_id, vat_rate, vat_source FROM order_leistungen WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    // «Индивидуальная услуга», ticked transit, 19 % typed: the profile and 0 %.
+    let (status, clinic) = add(json!({
+        "description": "Klinik MRT Zusatz",
+        "quantity": 1,
+        "unit_price": 1200,
+        "vat_rate": 19,
+        "is_cost_passthrough": true,
+    }))
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{clinic:?}");
+    let clinic_id = Uuid::parse_str(clinic["id"].as_str().unwrap()).unwrap();
+    let (profile, vat, source) = stored(clinic_id).await;
+    assert_eq!(profile, Some(pass_through));
+    assert_eq!(vat, Decimal::ZERO);
+    assert_eq!(source, "tax_profile");
+
+    // A manual 19 % service takes the one 19 % profile.
+    let (status, own) = add(json!({
+        "description": "Beratung",
+        "quantity": 1,
+        "unit_price": 100,
+        "vat_rate": 19,
+    }))
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{own:?}");
+    let own_id = Uuid::parse_str(own["id"].as_str().unwrap()).unwrap();
+    assert_eq!(stored(own_id).await.0, Some(standard));
+
+    // A profile that does not fit the position is refused.
+    for (passthrough, profile) in [(true, standard), (false, pass_through)] {
+        let (status, body) = add(json!({
+            "description": "Falsches Profil",
+            "quantity": 1,
+            "unit_price": 50,
+            "vat_rate": 19,
+            "is_cost_passthrough": passthrough,
+            "tax_profile_id": profile,
+        }))
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    }
+
+    // A chosen profile sets the rate: 7 % typed, the standard profile bills 19 %.
+    let (status, chosen) = add(json!({
+        "description": "Beratung 2",
+        "quantity": 1,
+        "unit_price": 100,
+        "vat_rate": 7,
+        "tax_profile_id": standard,
+    }))
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chosen:?}");
+    let chosen_id = Uuid::parse_str(chosen["id"].as_str().unwrap()).unwrap();
+    assert_eq!(stored(chosen_id).await.1, Decimal::from(19));
+}

@@ -23,6 +23,7 @@ use sqlx::Row;
 mod budget;
 pub(crate) mod client_terms;
 mod incoming_invoices;
+pub(crate) mod line_tax;
 mod pipeline;
 mod unassigned_invoices;
 mod visit_drafts;
@@ -351,6 +352,10 @@ struct AddLeistungRequest {
     #[serde(default)]
     discount_percent: Option<serde_json::Value>,
     is_cost_passthrough: Option<bool>,
+    /// The position's tax profile staff chose (owner 2026-11-19, `line_tax`);
+    /// its rate replaces `vat_rate`.
+    #[serde(default)]
+    tax_profile_id: Option<Uuid>,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     external_document_id: Option<Uuid>,
@@ -11135,7 +11140,7 @@ async fn add_leistung(
         .and_then(|(version_id, _, _, _)| *version_id);
     // Where the line's VAT rate comes from; invoices explain it per line. The
     // column default ("legacy") is for lines that predate VAT sources.
-    let (tax_profile_id, vat_source) = order_line_vat_source(
+    let (mut tax_profile_id, mut vat_source) = order_line_vat_source(
         resolved_agency_price.is_some(),
         resolved_agency_price
             .as_ref()
@@ -11209,6 +11214,53 @@ async fn add_leistung(
             StatusCode::UNPROCESSABLE_ENTITY,
             "A pass-through cost cannot have a discount",
         );
+    }
+    // The position's tax profile (owner 2026-11-19): the one staff chose,
+    // else the catalogue's, the pass-through profile for a pass-through cost
+    // or the one profile of the typed rate. Its rate is the position's VAT.
+    let chosen_profile = match body.tax_profile_id {
+        Some(profile_id) => match line_tax::active_profile(&state.db, profile_id).await {
+            Ok(Some(profile)) => Some(profile),
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The tax profile is not active",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %order_id, "load the tax profile of a service");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to add service");
+            }
+        },
+        None => None,
+    };
+    let fallback_profile = if chosen_profile.is_some() {
+        Ok(None)
+    } else if passthrough {
+        line_tax::pass_through_profile(&state.db).await
+    } else if let Some(catalog_profile) = tax_profile_id {
+        line_tax::active_profile(&state.db, catalog_profile).await
+    } else {
+        line_tax::unique_profile_for_rate(&state.db, vat).await
+    };
+    let profile = match fallback_profile {
+        Ok(fallback) => chosen_profile.or(fallback),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "resolve the tax profile of a service");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to add service");
+        }
+    };
+    if let Some(profile) = profile {
+        if let Some(message) = line_tax::mismatch(&profile, passthrough) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+        }
+        tax_profile_id = Some(profile.id);
+        vat_source = "tax_profile";
+        vat = profile.vat_rate;
+    } else if passthrough {
+        // Without the profile (not migrated yet) a pass-through still bills
+        // 0 %: the patient is never charged its purchase VAT (S1-1).
+        vat = rust_decimal::Decimal::ZERO;
     }
     let client_reference = normalize_optional_text(body.client_reference);
     if let Err(resp) =
