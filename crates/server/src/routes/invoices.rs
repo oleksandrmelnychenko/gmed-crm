@@ -935,6 +935,9 @@ struct InvoicePdfContext {
     /// A final invoice: the interim invoices of its quote that already
     /// billed part of the services (number, gross); not in its amount.
     previous_interims: Vec<(String, Decimal)>,
+    /// An interim invoice: the paid advances of the order not set off yet,
+    /// which the final invoice sets off (QA3 A S3-8).
+    advance_cover_numbers: Vec<String>,
     notes: Option<String>,
     patient_pid: String,
     patient_name: String,
@@ -1023,6 +1026,66 @@ const INTERIM_UNDELIVERED_PASS_THROUGH: &str = "interim_undelivered_pass_through
 /// VAT after the estimate; what is billed is the signed estimate, so a new
 /// KV/EA version comes first (QA3 D S2-2).
 const ESTIMATE_TERMS_OUTDATED: &str = "estimate_terms_outdated";
+
+/// Error code: the quantities asked for are reserved by an unreleased draft
+/// of the order (QA3 D S3-9).
+const QUANTITIES_HELD_BY_DRAFT: &str = "quote_quantities_held_by_draft";
+
+/// A 409 about quote quantities that an unreleased draft of the order holds
+/// says so (and names the draft) instead of «fully invoiced» (QA3 D S3-9).
+async fn quantities_held_by_draft(
+    state: &AppState,
+    order_id: Uuid,
+    response: axum::response::Response,
+) -> axum::response::Response {
+    if response.status() != StatusCode::CONFLICT {
+        return response;
+    }
+    let (parts, body) = response.into_parts();
+    let bytes = axum::body::to_bytes(body, 64 * 1024)
+        .await
+        .unwrap_or_default();
+    let quantity_conflict = serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .is_some_and(|message| {
+            matches!(
+                message.as_str(),
+                "A selected quote line has already been fully invoiced"
+                    | "Selected quantity exceeds the remaining quote line quantity"
+                    | "This quote has no remaining quantities to invoice"
+            )
+        });
+    if !quantity_conflict {
+        return axum::response::Response::from_parts(parts, axum::body::Body::from(bytes));
+    }
+    let draft = sqlx::query(
+        r#"SELECT id, invoice_type FROM invoices
+           WHERE order_id = $1 AND status = 'draft'
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await;
+    match draft {
+        Ok(Some(row)) => coded_err(
+            StatusCode::CONFLICT,
+            QUANTITIES_HELD_BY_DRAFT,
+            "An unreleased draft invoice of this order reserves these quantities; release or delete the draft first",
+            json!({
+                "draft_invoice_id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "draft_invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+            }),
+        ),
+        _ => axum::response::Response::from_parts(parts, axum::body::Body::from(bytes)),
+    }
+}
 
 fn estimate_terms_outdated(line_index: usize) -> axum::response::Response {
     coded_err(
@@ -3929,8 +3992,12 @@ fn fallback_vat_source(line: &serde_json::Map<String, Value>) -> &'static str {
     if line.get("source").and_then(Value::as_str) == Some("external_invoice") {
         return "pass_through";
     }
+    // The closing line of a final and the credit of a never delivered
+    // quantity take the VAT of the estimate line they stand for (QA3 D S3-8).
     let from_quote = line.contains_key("quote_id")
         || line.contains_key("quote_line_index")
+        || line.contains_key("credited_quote_line_index")
+        || line.get("source").and_then(Value::as_str) == Some(closing_final::CLOSING_LINE_SOURCE)
         || line
             .get("source")
             .and_then(Value::as_str)
@@ -6921,9 +6988,35 @@ async fn load_invoice_pdf_context_on(
         }
         _ => None,
     };
-    let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
+    let mut deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
+    // A draft final previews the deductions its release will make (QA3 D S3-3).
+    if deducted_advances.is_empty() {
+        deducted_advances = final_preview::planned_draft_deductions(conn, invoice_id).await?;
+    }
     let advance_rests = document::load_set_off_advance_rests(conn, invoice_id).await?;
     let previous_interims = load_previous_interims(&mut *conn, invoice_id).await?;
+    // An interim names the paid advances of its order the final sets off
+    // («Покрывается авансом», QA3 A S3-8).
+    let advance_cover_numbers = sqlx::query_scalar::<_, String>(
+        r#"SELECT advance.invoice_number
+           FROM invoices interim
+           JOIN invoices advance ON advance.order_id = interim.order_id
+           WHERE interim.id = $1
+             AND interim.invoice_type = 'interim'
+             AND advance.invoice_type = 'advance'
+             AND advance.status NOT IN ('draft', 'cancelled')
+             AND advance.invoice_number IS NOT NULL
+             AND LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
+                 > COALESCE((
+                     SELECT SUM(allocation.amount_gross)
+                     FROM invoice_prepayment_allocations allocation
+                     WHERE allocation.advance_invoice_id = advance.id
+                 ), 0)
+           ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await?;
     let payment_term_days = if row.try_get::<bool, _>("released").unwrap_or(false) {
         release::DEFAULT_INVOICE_PAYMENT_TERM_DAYS
     } else {
@@ -7004,6 +7097,7 @@ async fn load_invoice_pdf_context_on(
         deducted_advances,
         advance_rests,
         previous_interims,
+        advance_cover_numbers,
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -7906,6 +8000,18 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     if let Some(text) =
         previous_interims_text(language, &context.previous_interims, &context.currency)
     {
+        layout.text_block(&text, 8.5, false, 0.0, InvoicePdfColor::Muted, 3.0, 0.0);
+    }
+    if !context.advance_cover_numbers.is_empty() {
+        let numbers = context.advance_cover_numbers.join(", ");
+        let text = match language {
+            "ru" => format!("Внесённый аванс ({numbers}) засчитывается в заключительном счёте."),
+            "uk" => format!("Внесений аванс ({numbers}) зараховується в остаточному рахунку."),
+            "en" => format!("The advance paid ({numbers}) is set off in the final invoice."),
+            _ => format!(
+                "Die geleistete Anzahlung ({numbers}) wird mit der Schlussrechnung verrechnet."
+            ),
+        };
         layout.text_block(&text, 8.5, false, 0.0, InvoicePdfColor::Muted, 3.0, 0.0);
     }
 
@@ -10107,7 +10213,7 @@ async fn create_invoice_from_quote(
     };
     let mut invoice_snapshot = match invoice_snapshot {
         Ok(value) => value,
-        Err(resp) => return resp,
+        Err(resp) => return quantities_held_by_draft(&state, ctx.order_id, resp).await,
     };
     let extra_service_ids = match final_delivery::append_order_service_lines(
         &mut invoice_snapshot,
@@ -18606,6 +18712,7 @@ mod tests {
             deducted_advances: Vec::new(),
             advance_rests: Vec::new(),
             previous_interims: Vec::new(),
+            advance_cover_numbers: Vec::new(),
             notes: Some("Оплатить после получения счёта.".to_string()),
             patient_pid: "PT-INV-UNIT".to_string(),
             patient_name: "Макс Мюллер".to_string(),

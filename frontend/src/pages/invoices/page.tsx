@@ -375,6 +375,7 @@ const INVOICE_STATUS_LABEL_KEYS = {
   cancelled: "revenue_invoice_status_cancelled",
   credited: "revenue_invoice_status_credited",
   advance_covered: "revenue_invoice_status_advance_covered",
+  advance_set_off: "revenue_invoice_status_advance_set_off",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const INVOICE_TYPE_LABEL_KEYS = {

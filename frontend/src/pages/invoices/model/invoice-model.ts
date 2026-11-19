@@ -67,9 +67,20 @@ export const INVOICE_FILTER_STATUSES: InvoiceDisplayStatus[] = [
 /** Status shown to users (server `display_status`, else the stored status). */
 export function invoiceDisplayStatus(
   invoice: Pick<InvoiceItem, "status" | "display_status">
-    & Partial<Pick<InvoiceItem, "amount_to_pay" | "prepayment_applied_amount" | "advance_credit_available">>,
+    & Partial<Pick<InvoiceItem, "amount_to_pay" | "prepayment_applied_amount" | "advance_credit_available" | "paid_amount">>,
 ): string {
   const status = invoice.display_status || invoice.status;
+  // Only the advance was set off and the rest is open: not «Частично
+  // оплачен» right after the issue (QA3 A S3-15).
+  if (
+    status === "partially_paid"
+    && invoice.amount_to_pay !== undefined && invoice.amount_to_pay !== null
+    && toCents(Number(invoice.amount_to_pay)) > 0
+    && toCents(Number(invoice.prepayment_applied_amount ?? 0)) > 0
+    && toCents(Number(invoice.paid_amount ?? 0)) <= 0
+  ) {
+    return "advance_set_off";
+  }
   // A settlement invoice the order's advances cover in full reads paid, not
   // part paid (money QA 2026-11-15, D-03), once the advance is set off on it.
   // Covered only by advance money not yet set off, it is not paid yet (QA
@@ -458,7 +469,8 @@ export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateFo
   const extraQuantities = form.invoiceType === "interim"
     ? extras.map((extra) => ({ extra, quantity: finalServiceQuantity(form, extra.order_leistung_id) }))
     : [];
-  if (extraQuantities.some(({ extra, quantity }) => !Number.isFinite(quantity) || quantity < 0 || quantity > Number(extra.quantity))) return false;
+  // Whole or not at all: a part would leave the rest unbillable (server `interim_order_service_whole`).
+  if (extraQuantities.some(({ extra, quantity }) => !Number.isFinite(quantity) || (quantity !== 0 && quantity !== Number(extra.quantity)))) return false;
   const billsExtras = extraQuantities.some(({ quantity }) => quantity > 0);
   if ((!selected.size && !billsExtras) || selected.size !== form.selectedLineIndexes.length) return false;
   for (const index of selected) {

@@ -1790,10 +1790,7 @@ async fn load_patient_account_statement(
             "available_prepayment": decimal_to_string(available_prepayment),
             "credit_balance": decimal_to_string(credit_balance),
             "invoice_due": decimal_to_string(invoice_due),
-            // «К оплате с учётом авансов и переплат»: the overpayments of the
-            // patient's own invoices count too (QA3 B S2-1); a credit transfer
-            // by Billing still settles them on the invoices.
-            "amount_to_pay": decimal_to_string((amount_to_pay - credit_balance).max(Decimal::ZERO)),
+            "amount_to_pay": decimal_to_string(amount_to_pay),
             "external_receivable": if portal_scope { Value::Null } else { serde_json::json!(decimal_to_string(external_receivable)) },
             "total_due": if reconciliation_required || (portal_scope && (hidden_amount_count > 0 || external_item_count > 0)) { Value::Null } else { serde_json::json!(decimal_to_string(total_due)) },
             "reconciliation_required": reconciliation_required,

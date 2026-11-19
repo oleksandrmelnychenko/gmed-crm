@@ -4492,13 +4492,6 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
     items
 }
 
-async fn load_quote_line_items_from_order_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    order_id: Uuid,
-) -> Result<Vec<QuoteLineItem>, sqlx::Error> {
-    load_order_quote_lines_tx(tx, order_id, false).await
-}
-
 /// The order services a stored quote is checked against: the services not
 /// invoiced yet, or — for the quote of an order document of an order billed
 /// in part — the whole order (`load_order_quote_lines_tx`).

@@ -229,12 +229,14 @@ pub(super) async fn preview_final_invoice(
         r#"SELECT id, invoice_number, total_gross - credited_amount AS total_gross,
                   status::text AS status
            FROM invoices
-           WHERE quote_id = $1
+           -- Interims of the order, also of a superseded quote (QA3 A S2-1).
+           WHERE order_id = $1
+             AND quote_id IS NOT NULL
              AND invoice_type = 'interim'
              AND status NOT IN ('draft', 'cancelled')
            ORDER BY release_sequence NULLS FIRST, issued_at, id"#,
     )
-    .bind(ctx.quote_id)
+    .bind(ctx.order_id)
     .fetch_all(&mut *conn)
     .await
     {
@@ -263,4 +265,99 @@ pub(super) async fn preview_final_invoice(
         })).collect::<Vec<_>>(),
     }))
     .into_response()
+}
+
+/// The advance deductions a draft final invoice will get at its release, by
+/// the plan of the release (`advance_rows::plan_final_set_off`), for the
+/// draft's preview PDF: the preview states what the issued document will
+/// state (QA3 D S3-3). Empty for any other invoice.
+pub(super) async fn planned_draft_deductions(
+    conn: &mut sqlx::PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<super::document::DeductedAdvance>, sqlx::Error> {
+    let Some(draft) = sqlx::query(
+        r#"SELECT order_id, patient_id, quote_id, line_items, total_gross
+           FROM invoices
+           WHERE id = $1 AND status = 'draft' AND invoice_type = 'final'
+             AND order_id IS NOT NULL"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let line_items = draft.try_get::<Value, _>("line_items")?;
+    let total_gross = draft.try_get::<Decimal, _>("total_gross")?;
+    let advances = sqlx::query(
+        r#"SELECT advance.id, advance.invoice_number, advance.issued_at,
+                  GREATEST(
+                      LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
+                      - COALESCE((
+                          SELECT SUM(allocation.amount_gross)
+                          FROM invoice_prepayment_allocations allocation
+                          WHERE allocation.advance_invoice_id = advance.id
+                      ), 0),
+                      0
+                  ) AS available_amount
+           FROM invoices advance
+           WHERE advance.order_id = $1
+             AND advance.patient_id = $2
+             AND advance.invoice_type = 'advance'
+             AND advance.status NOT IN ('draft', 'cancelled')
+           ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#,
+    )
+    .bind(draft.try_get::<Uuid, _>("order_id")?)
+    .bind(draft.try_get::<Uuid, _>("patient_id")?)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut set_off = Vec::with_capacity(advances.len());
+    for advance in &advances {
+        let advance_id = advance.try_get::<Uuid, _>("id")?;
+        let available_gross = advance
+            .try_get::<Decimal, _>("available_amount")
+            .unwrap_or(Decimal::ZERO);
+        let categorised = advance_rows::settlement_rows(&mut *conn, advance_id)
+            .await?
+            .is_some();
+        let available_rows = if categorised && available_gross > Decimal::ZERO {
+            Some(advance_rows::advance_available_rows(&mut *conn, advance_id).await?)
+        } else if categorised {
+            Some(Vec::new())
+        } else {
+            None
+        };
+        set_off.push(advance_rows::SetOffAdvance {
+            available_rows,
+            available_gross,
+            rest_allowed: true,
+        });
+    }
+    let plans = advance_rows::plan_final_set_off(
+        &advance_vat_rows(&line_items, &[]),
+        total_gross,
+        &set_off,
+    );
+    let mut deducted = Vec::new();
+    for (advance, plan) in advances.iter().zip(&plans) {
+        let rows = plan
+            .rows
+            .iter()
+            .filter(|row| !row.gross.is_zero() || !row.vat.is_zero())
+            .cloned()
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            continue;
+        }
+        deducted.push(super::document::DeductedAdvance {
+            invoice_number: advance
+                .try_get::<Option<String>, _>("invoice_number")?
+                .unwrap_or_default(),
+            issue_date: super::invoice_document_date(
+                advance.try_get::<chrono::DateTime<chrono::Utc>, _>("issued_at")?,
+            ),
+            rows,
+        });
+    }
+    Ok(deducted)
 }

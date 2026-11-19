@@ -2671,12 +2671,10 @@ async fn second_active_non_advance_invoice_for_same_quote_is_rejected() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap()
-            .contains("no remaining quantities to invoice")
-    );
+    // The final is still a draft: the refusal says the draft holds the
+    // quantities (QA3 D S3-9).
+    assert_eq!(body["error"], "quote_quantities_held_by_draft", "{body}");
+    assert!(body["draft_invoice_id"].is_string(), "{body}");
 }
 
 /// Cancelling an invoice returns each billed service to the stage it had

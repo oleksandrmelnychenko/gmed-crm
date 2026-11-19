@@ -344,6 +344,7 @@ export interface RevenueTranslations {
   revenue_invoice_status_cancelled: string;
   revenue_invoice_status_credited: string;
   revenue_invoice_status_advance_covered: string;
+  revenue_invoice_status_advance_set_off: string;
   revenue_estimated_outlays: string;
   revenue_invoices_storno_title: string;
   revenue_invoices_storno_download: string;
@@ -1291,6 +1292,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoice_status_cancelled: "Отменён",
   revenue_invoice_status_credited: "Закрыт кредит-нотой",
   revenue_invoice_status_advance_covered: "Покрывается авансом",
+  revenue_invoice_status_advance_set_off: "Зачтён аванс, остаток к оплате",
   revenue_estimated_outlays: "Предполагаемые расходы",
   revenue_invoices_storno_title: "Документ сторно",
   revenue_invoices_storno_download: "Сторно (PDF)",
@@ -1716,6 +1718,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoice_status_cancelled: "Storniert",
   revenue_invoice_status_credited: "Gutgeschrieben",
   revenue_invoice_status_advance_covered: "Durch Anzahlung gedeckt",
+  revenue_invoice_status_advance_set_off: "Anzahlung verrechnet, Rest offen",
   revenue_estimated_outlays: "Voraussichtliche Auslagen",
   revenue_invoices_storno_title: "Stornorechnung",
   revenue_invoices_storno_download: "Stornorechnung (PDF)",

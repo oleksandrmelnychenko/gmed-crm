@@ -896,6 +896,18 @@ async fn a_changed_line_waits_for_a_new_estimate_version_which_refreshes_a_part_
         .await
         .unwrap();
     assert_eq!(old_status, "superseded");
+    // QA3 B S1-1: the new version prints the new quote.
+    let (printed, new_number): (Option<String>, String) = sqlx::query_as(
+        r#"SELECT document.generated_bindings ->> '_quote_number', quote.quote_number
+           FROM documents document, quotes quote
+           WHERE document.id = $1::uuid AND quote.id = $2::uuid"#,
+    )
+    .bind(&renewed)
+    .bind(&new_quote)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(printed.as_deref(), Some(new_number.as_str()));
     let (status, signed) = sign_on_paper(&ctx.app, &renewed, &ceo).await;
     assert!(status.is_success(), "{signed:?}");
     assert_eq!(open_quote(&ctx.pool, case.order_id).await.1, "accepted");
@@ -1165,6 +1177,20 @@ async fn a_credit_note_on_a_final_sets_released_advance_money_off_and_its_revers
     .await;
     assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
     let final_id = invoice["id"].as_str().unwrap().to_string();
+    // QA3 D S3-3: the draft's preview PDF states the deduction of the advance.
+    let advance_number = invoice_detail(&ctx, &ceo, &advance_id).await["invoice_number"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, draft_pdf) =
+        raw_get(&ctx.app, &format!("/api/v1/invoices/{final_id}/pdf"), &ceo).await;
+    assert_eq!(status, StatusCode::OK);
+    let draft_text = pdf_extract::extract_text_from_mem(&draft_pdf).unwrap();
+    assert!(draft_text.contains(&advance_number), "{draft_text}");
+    assert!(
+        draft_text.contains(&de_money(Decimal::from(1000))),
+        "{draft_text}"
+    );
     let released = release_invoice(&ctx, &ceo, &final_id).await;
     assert_eq!(money(&released["prepayment_applied_amount"]), own);
     assert_eq!(money(&released["balance_due"]), Decimal::from(1000));
@@ -1232,79 +1258,161 @@ async fn a_credit_note_on_a_final_sets_released_advance_money_off_and_its_revers
     assert_eq!(money(&advance["refundable_cash_amount"]), Decimal::ZERO);
 }
 
-/// QA3 B S2-1: the statement's «К оплате с учётом авансов и переплат»
-/// subtracts the overpayment of the patient's own invoices.
+/// QA3 C S1-1 with a paid advance (tester C's shape): 1.500 estimated
+/// outlays billed on a paid interim, 1.200 clinic costs actually incurred,
+/// own services prepaid. The final's pass-through category is negative
+/// (−300): it bills the own services, credits the outlays and the release
+/// sets off no more than the final asks; preview, release and e-invoice
+/// agree and the 300 overpaid stay with the patient.
 #[tokio::test]
-async fn the_statement_amount_to_pay_counts_overpayments() {
+async fn the_outlays_credit_with_a_paid_advance_leaves_the_overpayment_refundable() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
     let ceo = bearer(ctx.admin_id, "ceo");
     seed_agency(&ctx.pool, ctx.admin_id).await;
-    let case =
-        interpreter_case_with_tariff(&ctx, &ceo, 3, Some(Decimal::from(95)), Decimal::ZERO).await;
-    report_hours(&ctx, &ceo, &case, 3.0, 1).await;
-    let (status, first) = create_invoice(
+    let case = interpreter_case_with_outlays(
+        &ctx,
+        &ceo,
+        10,
+        Some(Decimal::from(95)),
+        Decimal::ZERO,
+        Some(Decimal::from(1500)),
+    )
+    .await;
+    let own = gross_of(Decimal::from(10), Decimal::from(95));
+    let advance_id = paid_prepayment_advance(&ctx, &ceo, &case, own, own).await;
+    let quote = get_quote(&ctx, &ceo, &case.quote_id).await;
+    let outlays_index = line_index_of(&quote, "Voraussichtliche Auslagen");
+    let hours_index = 1 - outlays_index;
+    // Legacy data: the interim billed the outlays and was paid.
+    let outlays_id: Uuid = sqlx::query_scalar(
+        r#"UPDATE order_leistungen
+           SET description = 'Auslagen Vorschuss', status = 'delivered', delivered_at = now()
+           WHERE order_id = $1 AND description = 'Voraussichtliche Auslagen'
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let path = vec![outlays_index.to_string(), "description".to_string()];
+    for description in ["Auslagen Vorschuss"] {
+        sqlx::query(
+            "UPDATE quotes SET line_items = jsonb_set(line_items, $2, to_jsonb($3::text)) WHERE id = $1::uuid",
+        )
+        .bind(&case.quote_id)
+        .bind(&path)
+        .bind(description)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    }
+    let (status, interim) = create_invoice(
         &ctx,
         &ceo,
         &case.quote_id,
-        json!({ "invoice_type": "interim", "line_items": [{ "line_index": 0, "quantity": 1 }] }),
+        json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": outlays_index, "quantity": 1 }],
+        }),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{first:?}");
-    let first_id = first["id"].as_str().unwrap().to_string();
-    release_invoice(&ctx, &ceo, &first_id).await;
-    let one = money(&first["total_gross"]);
+    assert_eq!(status, StatusCode::CREATED, "{interim:?}");
+    let interim_id = interim["id"].as_str().unwrap().to_string();
+    release_invoice(&ctx, &ceo, &interim_id).await;
     let (status, paid) = call(
         &ctx.app,
         "POST",
-        &format!("/api/v1/invoices/{first_id}/payments"),
+        &format!("/api/v1/invoices/{interim_id}/payments"),
         &ceo,
         Some(json!({
             "request_id": Uuid::new_v4(),
-            "amount_gross": one.to_string(),
+            "amount_gross": "1500",
             "payment_method": "bank_transfer",
             "received_on": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{paid:?}");
-    let (status, credit) = call(
+    sqlx::query(
+        "UPDATE order_leistungen SET description = 'Voraussichtliche Auslagen', delivered_at = NULL WHERE id = $1",
+    )
+    .bind(outlays_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE quotes SET line_items = jsonb_set(line_items, $2, to_jsonb($3::text)) WHERE id = $1::uuid",
+    )
+    .bind(&case.quote_id)
+    .bind(&path)
+    .bind("Voraussichtliche Auslagen")
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    report_hours(&ctx, &ceo, &case, 10.0, 1).await;
+    let clinic_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               is_cost_passthrough, status, delivered_at
+           ) VALUES ($1, $2, 'Klinik', 1, 1200, 'EUR', 0, TRUE, 'delivered', now())
+           RETURNING id"#,
+    )
+    .bind(case.order_id)
+    .bind(case.patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let body = json!({
+        "invoice_type": "final",
+        "line_items": [{ "line_index": hours_index, "quantity": 10 }],
+        "order_services": [{ "order_leistung_id": clinic_id, "quantity": 1 }],
+    });
+    let total = own + Decimal::from(1200) - Decimal::from(1500);
+    let (status, preview) = call(
         &ctx.app,
         "POST",
-        &format!("/api/v1/invoices/{first_id}/credit-notes"),
+        &format!("/api/v1/quotes/{}/final-preview", case.quote_id),
         &ceo,
-        Some(json!({
-            "request_id": Uuid::new_v4(),
-            "lines": [{ "line_index": 0 }],
-            "reason": "Doppelt",
-            "issued_on": gmed_server::app_time::today().to_string(),
-            "portal_visible": true,
-        })),
+        Some(body.clone()),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
-    let (status, second) = create_invoice(
-        &ctx,
-        &ceo,
-        &case.quote_id,
-        json!({ "invoice_type": "interim", "line_items": [{ "line_index": 0, "quantity": 2 }] }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{second:?}");
-    release_invoice(&ctx, &ceo, second["id"].as_str().unwrap()).await;
-    let two = money(&second["total_gross"]);
-    let (status, statement) = call(
+    assert_eq!(status, StatusCode::OK, "{preview:?}");
+    assert_eq!(money(&preview["total_gross"]), total, "{preview:?}");
+    let (status, final_invoice) = create_invoice(&ctx, &ceo, &case.quote_id, body).await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice:?}");
+    assert_eq!(money(&final_invoice["total_gross"]), total);
+    let final_id = final_invoice["id"].as_str().unwrap().to_string();
+    let released = release_invoice(&ctx, &ceo, &final_id).await;
+    assert_eq!(
+        money(&preview["due_gross"]),
+        money(&released["balance_due"]),
+        "{preview:?} {released:?}"
+    );
+    assert_eq!(
+        money(&released["balance_due"]),
+        Decimal::ZERO,
+        "{released:?}"
+    );
+    let (status, xml) = raw_get(
         &ctx.app,
-        "GET",
-        &format!("/api/v1/patients/{}/account-statement", case.patient_id),
+        &format!("/api/v1/invoices/{final_id}/zugferd.xml"),
         &ceo,
-        None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{statement:?}");
-    let summary = &statement["summary"];
-    assert_eq!(money(&summary["credit_balance"]), one, "{summary:?}");
-    assert_eq!(money(&summary["invoice_due"]), two, "{summary:?}");
-    assert_eq!(money(&summary["amount_to_pay"]), two - one, "{summary:?}");
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    // Paid 1.500 + own, owed own + 1.200: 300 stay with the patient.
+    let advance = invoice_detail(&ctx, &ceo, &advance_id).await;
+    assert_eq!(
+        money(&advance["advance_settlement"]["applied_amount"]),
+        total,
+        "{advance:?}"
+    );
+    assert_eq!(
+        money(&advance["advance_settlement"]["open_rest"]),
+        Decimal::from(300),
+        "{advance:?}"
+    );
 }

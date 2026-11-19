@@ -867,9 +867,22 @@ pub(crate) fn budget_payload(
     invoiced: Amounts,
     parts: BudgetParts,
 ) -> Value {
-    let remaining = contract.map(|contract| Amounts {
-        net: contract.amounts.net - planned.net,
-        gross: contract.amounts.gross - planned.gross,
+    // Each invoice rounds the VAT of its own lines (owner rule), so a line
+    // split over invoices may pass the contract gross by cents while the nets
+    // agree: the comparison follows the nets, a gross below the contract only
+    // by that rounding is no overrun (QA3 A S3-4 / D S3-1).
+    let remaining = contract.map(|contract| {
+        let net = contract.amounts.net - planned.net;
+        let gross = contract.amounts.gross - planned.gross;
+        Amounts {
+            net,
+            gross: if net >= Decimal::ZERO && gross < Decimal::ZERO && gross >= Decimal::new(-5, 2)
+            {
+                Decimal::ZERO
+            } else {
+                gross
+            },
+        }
     });
     let over_by = remaining
         .filter(|remaining| remaining.gross < Decimal::ZERO)

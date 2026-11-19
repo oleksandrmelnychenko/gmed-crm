@@ -4535,6 +4535,7 @@ async fn get_order(
                    -- (QA3 A S2-2); a final's credit of a never delivered
                    -- quantity is not a billing of the line.
                    WHERE allocation.order_leistung_id = ol.id
+                     AND allocation.order_id = ol.order_id
                      AND allocation.quantity > 0
                      -- A draft only reserves the service; it is billed once
                      -- the invoice is released.
@@ -5486,6 +5487,7 @@ async fn get_order_economics(
                      AND (line_credit.quote_line_index = allocation.quote_line_index
                           OR line_credit.invoice_line_index = allocation.invoice_line_index)
                WHERE invoice.order_id = $1
+                 AND allocation.order_id = $1
                  AND invoice.invoice_type <> 'advance'
                  AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')
                  AND allocation.order_leistung_id IS NOT NULL

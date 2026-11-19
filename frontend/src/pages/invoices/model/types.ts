@@ -14,7 +14,7 @@ export type InvoiceStatus =
  * Status shown to users: the stored status, or `credited` (RU "Закрыт кредит-нотой",
  * DE "Gutgeschrieben") for an issued invoice fully covered by credit notes.
  */
-export type InvoiceDisplayStatus = InvoiceStatus | "credited" | "advance_covered";
+export type InvoiceDisplayStatus = InvoiceStatus | "credited" | "advance_covered" | "advance_set_off";
 
 /** Cancellation document (Stornorechnung) of a released, cancelled invoice. */
 export type InvoiceStornoDocument = {

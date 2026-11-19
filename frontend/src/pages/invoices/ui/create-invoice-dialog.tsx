@@ -576,7 +576,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       {interimExtras.map((extra) => {
                         const raw = form.orderServiceQuantities?.[extra.order_leistung_id] ?? "";
                         const quantity = finalServiceQuantity(form, extra.order_leistung_id);
-                        const invalid = !Number.isFinite(quantity) || quantity < 0 || quantity > Number(extra.quantity);
+                        const invalid = !Number.isFinite(quantity) || (quantity !== 0 && quantity !== Number(extra.quantity));
                         const amounts = finalServiceAmounts(extra, Number.isFinite(quantity) ? quantity : 0);
                         const name = agencyServiceNameLabel(undefined, extra.name || extra.description, t);
                         return (
@@ -595,7 +595,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                             )}
                             amount={<InvoiceLineAmount gross={amounts.gross} net={amounts.net}
                               discount={invoiceLineDiscountAmount(Number.isFinite(quantity) ? quantity : 0, extra.unit_price, amounts.net)} money={money} />}>
-                            {invalid ? <p role="alert" className="text-xs text-destructive">{de ? `Menge höchstens ${extra.quantity}.` : `Количество не больше ${extra.quantity}.`}</p> : null}
+                            {invalid ? <p role="alert" className="text-xs text-destructive">{de ? `Menge 0 oder ${extra.quantity}.` : `Количество 0 или ${extra.quantity}.`}</p> : null}
                           </InvoiceLineRow>
                         );
                       })}

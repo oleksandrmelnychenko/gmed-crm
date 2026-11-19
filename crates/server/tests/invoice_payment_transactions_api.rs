@@ -3145,18 +3145,20 @@ async fn a_partial_credit_note_removing_a_vat_category_releases_its_advance_dedu
         money(&credit["invoice"]["prepayment_applied_amount"]),
         dec("326.58")
     );
-    // 2.000 − 1.000 credited − 326,58 deducted: 673,42 (was 1.200).
-    assert_eq!(money(&credit["invoice"]["balance_due"]), dec("673.42"));
+    // 2.000 − 1.000 credited − 326,58 deducted: 673,42 (was 1.200); the
+    // released 473,42 is set off against it (owner 2026-11-17, QA3 B S1-2): 200.
+    assert_eq!(money(&credit["invoice"]["balance_due"]), dec("200"));
     let deducted = assert_deductions_fit(&pool, final_invoice).await;
     assert!(!deducted.contains_key("taxed 19"), "{deducted:?}");
     assert_eq!(deducted["zero_rated"].0, dec("326.58"));
 
-    // The released 19 % money is closed on the advance and refundable.
+    // The released 19 % money is closed on the advance and set off against
+    // the final (no refundable rest while the final is open).
     let detail = invoice_detail(&app, &billing, advance).await;
     assert_eq!(money(&detail["credited_amount"]), dec("473.42"), "{detail}");
     assert_eq!(
         money(&detail["refundable_cash_amount"]),
-        dec("473.42"),
+        dec("0"),
         "{detail}"
     );
 
@@ -3241,15 +3243,16 @@ async fn a_partial_credit_note_within_a_category_releases_only_the_excess() {
         money(&credit["invoice"]["prepayment_applied_amount"]),
         dec("626.58")
     );
-    // 2.000 − 1.200 credited − 626,58: 173,42 (was 700).
-    assert_eq!(money(&credit["invoice"]["balance_due"]), dec("173.42"));
+    // 2.000 − 1.200 credited − 626,58: 173,42 (was 700), and the released
+    // 173,42 is set off against it (QA3 B S1-2): nothing left to pay.
+    assert_eq!(money(&credit["invoice"]["balance_due"]), dec("0"));
     let deducted = assert_deductions_fit(&pool, final_invoice).await;
     assert_eq!(deducted["taxed 19"], (dec("300"), dec("47.90")));
     assert_eq!(deducted["zero_rated"].0, dec("326.58"));
     let detail = invoice_detail(&app, &billing, advance).await;
     assert_eq!(
         money(&detail["refundable_cash_amount"]),
-        dec("173.42"),
+        dec("0"),
         "{detail}"
     );
 

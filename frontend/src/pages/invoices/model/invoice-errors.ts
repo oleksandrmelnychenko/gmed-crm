@@ -49,6 +49,22 @@ const EXACT: Record<string, Pair> = {
     "Die Fälligkeit darf nicht vor dem Rechnungsdatum (heute) liegen.",
     "Срок оплаты не может быть раньше даты счёта (сегодня).",
   ],
+  "an unreleased draft invoice of this order reserves these quantities; release or delete the draft first": [
+    "Ein nicht ausgestellter Rechnungsentwurf dieses Auftrags reserviert diese Mengen. Entwurf zuerst ausstellen oder löschen.",
+    "Эти количества заняты невыпущенным черновиком счёта по этому заказу. Сначала выпустите или удалите черновик.",
+  ],
+  "the estimate is outdated: the terms of a position changed. create a new version of the cost estimate and the single order first": [
+    "Kostenvoranschlag veraltet: Konditionen einer Position wurden geändert. Zuerst eine neue Version von KV und Einzelauftrag erstellen.",
+    "Смета устарела: условия позиции изменены. Сначала создайте новую версию КВ и Einzelauftrag.",
+  ],
+  "estimated outlays are not billed on an interim invoice; the advance covers them": [
+    "Voraussichtliche Auslagen kommen nicht auf eine Zwischenrechnung; die Anzahlung deckt sie.",
+    "Ожидаемые расходы не выставляются промежуточным счётом — их покрывает аванс.",
+  ],
+  "a pass-through cost is billed on an interim invoice only once it is incurred": [
+    "Ein durchlaufender Posten kommt erst auf eine Zwischenrechnung, wenn er angefallen ist.",
+    "Транзитный расход выставляется промежуточным счётом только после его возникновения.",
+  ],
   "selected quantity exceeds the remaining quote line quantity": [
     "Die Menge ist größer als der offene Rest der Angebotsposition.",
     "Количество больше открытого остатка позиции сметы.",

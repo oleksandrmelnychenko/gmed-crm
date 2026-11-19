@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { orderBudgetState, orderBudgetText, type OrderBudget } from "@/components/order-budget/order-budget";
+
 import { finalInvoiceTotals } from "./final-invoice";
-import { invoiceLineQuantityAvailable, isInvoiceSelectionValid, lineBlockedText } from "./invoice-model";
+import { invoiceDisplayStatus, invoiceLineQuantityAvailable, isInvoiceSelectionValid, lineBlockedText } from "./invoice-model";
 import type { CreateForm, DeliveredOrderService, InvoiceLineItem } from "./types";
 
 function line(overrides: Partial<InvoiceLineItem> = {}): InvoiceLineItem {
@@ -43,6 +45,43 @@ function form(overrides: Partial<CreateForm>): CreateForm {
     ...overrides,
   } as CreateForm;
 }
+
+describe("order budget cent rounding (QA3 A S3-4 / D S3-1)", () => {
+  const budget = {
+    currency: "EUR",
+    contract: null,
+    contract_own_services_net: "513",
+    contract_own_services_gross: "610.47",
+    planned_own_services_net: "513",
+    planned_own_services_gross: "610.48",
+    invoiced_own_services_net: "513",
+    invoiced_own_services_gross: "610.48",
+    remaining_net: "0",
+    remaining_gross: "0",
+    over_by_net: null,
+    over_by_gross: null,
+  } as unknown as OrderBudget;
+
+  it("shows no overrun of a cent when the nets agree", () => {
+    const state = orderBudgetState(budget, { basis: "invoiced" });
+    expect(state.kind).not.toBe("over");
+    expect(orderBudgetText(state, "ru")).not.toContain("Превышение");
+  });
+
+  it("still shows a real overrun", () => {
+    const over = { ...budget, invoiced_own_services_net: "600", invoiced_own_services_gross: "714" } as OrderBudget;
+    expect(orderBudgetState(over, { basis: "invoiced" }).kind).toBe("over");
+  });
+});
+
+describe("final status after the advance set-off (QA3 A S3-15)", () => {
+  it("reads «advance set off» instead of part paid when only the advance was applied", () => {
+    expect(invoiceDisplayStatus({ status: "partially_paid", amount_to_pay: "100", prepayment_applied_amount: "300", paid_amount: "0" }))
+      .toBe("advance_set_off");
+    expect(invoiceDisplayStatus({ status: "partially_paid", amount_to_pay: "100", prepayment_applied_amount: "300", paid_amount: "50" }))
+      .toBe("partially_paid");
+  });
+});
 
 describe("QA3 billing rules in the create dialog (qa-fix-114)", () => {
   it("never offers the estimated outlays on an interim", () => {

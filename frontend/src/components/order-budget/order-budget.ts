@@ -84,7 +84,18 @@ export function orderBudgetState(
   );
   const delta = Number.isFinite(options.deltaGross) ? options.deltaGross ?? 0 : 0;
   const projected = roundCents(current + delta);
-  const remaining = roundCents(contract - projected);
+  let remaining = roundCents(contract - projected);
+  // Each invoice rounds its own VAT (owner rule): a line split over invoices
+  // may pass the contract gross by a cent while the nets agree. That is no
+  // overrun (QA3 A S3-4 / D S3-1): the nets decide, and a projection only
+  // cents above the contract is rounding.
+  if (remaining < 0 && remaining >= -0.05) {
+    const rawCurrentNet = basis === "invoiced" ? budget.invoiced_own_services_net : budget.planned_own_services_net;
+    const netsKnown = budget.contract_own_services_net != null && rawCurrentNet != null;
+    const netsAgree = delta === 0 && netsKnown
+      && moneyNumber(rawCurrentNet) <= moneyNumber(budget.contract_own_services_net);
+    if (netsAgree || (delta !== 0 && remaining >= -0.02)) remaining = 0;
+  }
   const kind = remaining < 0 ? "over" : projected > contract * ORDER_BUDGET_NEAR_SHARE ? "near" : "ok";
   return {
     kind,

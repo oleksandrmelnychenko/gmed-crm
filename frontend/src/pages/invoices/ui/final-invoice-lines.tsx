@@ -289,6 +289,21 @@ export function FinalInvoiceLines({ lines, extras, form, busy, money, onFormChan
                 onChange: (value) => onFormChange((current) => ({ ...current, lineComments: { ...current.lineComments, [String(index)]: value } })),
               }}>
               {invalid ? <p role="alert" className="text-xs text-destructive">{de ? "Menge muss 0 oder größer sein." : "Количество должно быть 0 или больше."}</p> : null}
+              {Number(line.invoiced_quantity ?? 0) > 0 ? (
+                <p className="text-xs text-muted-foreground" data-testid="final-line-billed-before">
+                  {de ? "bereits mit Zwischenrechnungen abgerechnet" : "выставлено промежуточными"} {unitCount(formatQuantity(Number(line.invoiced_quantity)), line.unit)}
+                </p>
+              ) : null}
+              {Number(line.not_delivered_credit_gross ?? 0) > 0 && !(quantity > 0) ? (
+                <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="final-line-not-delivered-credit">
+                  {de ? "nicht erbracht – Gutschrift" : "не оказано — возврат"} −{money(line.not_delivered_credit_gross)}
+                </p>
+              ) : null}
+              {line.terms_outdated ? (
+                <p role="alert" className="text-xs text-destructive">
+                  {de ? "Konditionen nach dem Kostenvoranschlag geändert — neue Version von KV/EA erstellen" : "Условия изменены после сметы — создайте новую версию КВ/ЕА"}
+                </p>
+              ) : null}
             </InvoiceLineRow>
             {siblings.map((extra) => serviceRow(extra, true))}
           </div>

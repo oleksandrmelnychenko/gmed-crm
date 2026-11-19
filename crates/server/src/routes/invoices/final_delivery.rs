@@ -582,6 +582,16 @@ pub(super) fn append_order_service_lines(
                 json!({ "order_leistung_id": selection.order_leistung_id }),
             ));
         };
+        // An interim bills a service outside the estimate whole: a part would
+        // leave the rest unbillable (the service counts as billed).
+        if invoice_type == "interim" && quantity != extra.fact.quantity.round_commercial(2) {
+            return Err(super::coded_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "interim_order_service_whole",
+                "An interim invoice bills a service outside the estimate with its whole delivered quantity",
+                json!({ "order_leistung_id": extra.fact.id }),
+            ));
+        }
         let comment = super::line_comments::normalize_line_comment(selection.comment.as_deref())
             .map_err(|message| super::err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
         // The hours of a separate line of the same service are billed on that

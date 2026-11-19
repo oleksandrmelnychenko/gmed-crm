@@ -9,6 +9,7 @@ export function statusBadgeClass(status: string): StatusTone {
     // advance_covered: covered by advance money not set off yet.
     case "sent":
     case "advance_covered":
+    case "advance_set_off":
       return "info";
     // Fully credited: settled by the correction, not by a payment.
     case "credited":

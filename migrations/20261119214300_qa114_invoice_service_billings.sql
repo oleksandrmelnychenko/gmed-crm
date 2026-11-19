@@ -26,9 +26,16 @@ CREATE OR REPLACE VIEW invoice_service_billings AS
     UNION ALL
     SELECT invoice.id,
            invoice.order_id,
-           (CASE WHEN line.value ->> 'source' = 'final_not_delivered_credit'
-                 THEN line.value ->> 'credited_order_leistung_id'
-                 ELSE line.value ->> 'source_order_leistung_id' END)::UUID,
+           -- Cast only a well-formed id: the planner may evaluate this
+           -- before the WHERE below.
+           CASE WHEN COALESCE(CASE WHEN line.value ->> 'source' = 'final_not_delivered_credit'
+                                   THEN line.value ->> 'credited_order_leistung_id'
+                                   ELSE line.value ->> 'source_order_leistung_id' END, '')
+                     ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                THEN (CASE WHEN line.value ->> 'source' = 'final_not_delivered_credit'
+                           THEN line.value ->> 'credited_order_leistung_id'
+                           ELSE line.value ->> 'source_order_leistung_id' END)::UUID
+           END,
            invoice.quote_id,
            NULL::INTEGER,
            (line.position - 1)::INTEGER,
@@ -84,6 +91,7 @@ AS $$
                FROM invoice_service_billings billing
                JOIN invoices invoice ON invoice.id = billing.invoice_id
                WHERE invoice.status <> 'cancelled'
+                 AND billing.order_id = (SELECT order_id FROM quotes WHERE id = target_quote_id)
                  AND billing.quote_line_index IS NULL
                  AND billing.quantity > 0
                  AND line.order_leistung_id IS NOT NULL
