@@ -226,14 +226,6 @@ function ComboboxSelect({
   ...ariaProps
 }: ComboboxSelectProps) {
   const actionsRef = React.useRef<ComboboxPrimitive.Root.Actions | null>(null)
-  // When an option was picked: the click that follows the pick lands on the
-  // trigger and must not open the list again (QA3: the catalog picker reopened).
-  const pickedAtRef = React.useRef(0)
-  const swallowReopen = (event: React.SyntheticEvent) => {
-    if (Date.now() - pickedAtRef.current > 400) return
-    ;(event as React.SyntheticEvent & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.()
-    event.preventDefault()
-  }
   const isMultiSelect = selectedValues !== EMPTY_SELECTED_VALUES
   const { t } = useLang()
   const pageText = useComboboxText()
@@ -333,7 +325,6 @@ function ComboboxSelect({
       // A multi-select closes on each pick; the Escape that follows belongs to
       // it, not to the dialog behind (QA 2026-11-13, F-C2).
       onOpenChange={(nextOpen, eventDetails) => {
-        if (!nextOpen && eventDetails.reason === "item-press") pickedAtRef.current = Date.now()
         if (!nextOpen && isMultiSelect && eventDetails.reason === "item-press") noteMultiSelectPick()
       }}
     >
@@ -346,9 +337,6 @@ function ComboboxSelect({
         data-placeholder={!selectedValue && selectedLabel == null ? "" : undefined}
         onBlur={onBlur}
         onFocus={onFocus}
-        onPointerDown={swallowReopen}
-        onMouseDown={swallowReopen}
-        onClick={swallowReopen}
         // Escape while the focus is still on the trigger of an open list (right
         // after opening, before it moves into the search box): the list does
         // not hear the key itself, so the trigger closes it — one Escape, as in
