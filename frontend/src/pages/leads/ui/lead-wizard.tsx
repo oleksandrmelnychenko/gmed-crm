@@ -10042,6 +10042,7 @@ ${serviceCommentLines.join("\n")}`
                       visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : "",
                     ].filter(Boolean).join(" ") || undefined}
                     className={inputClass}
+                    placeholder={minorEmailOptional(draft) ? tx("Не нужен — вход у родителей", "Nicht nötig – Zugang über die Eltern") : undefined}
                     value={draft.email}
                     onBlur={() => touchMasterField("email")}
                     onChange={(event) => patch("email", event.target.value)}
@@ -11398,7 +11399,9 @@ ${serviceCommentLines.join("\n")}`
               <Section
                 icon={IdCard}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
-                title={tx("Документ, удостоверяющий личность", "Ausweisdokument")}
+                title={draft && isMinor(draft.birthDate, new Date())
+                  ? tx("Документ, удостоверяющий личность ребёнка", "Ausweisdokument des Kindes")
+                  : tx("Документ, удостоверяющий личность", "Ausweisdokument")}
                 accessory={(
                   <span className="inline-flex flex-wrap items-center justify-end gap-2">
                     <StatusChip tone="warning">

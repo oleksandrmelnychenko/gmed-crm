@@ -10840,6 +10840,17 @@ async fn a_parents_own_login_is_reset_on_the_own_request_and_the_refusal_names_i
         0,
         "a refused reset leaves no audit row"
     );
+    // The CEO resets it here (owner 2026-11-21).
+    let ceo_id = seed_user(pool, "lead-guardian-own-login", "ceo").await;
+    let ceo = bearer(ceo_id, "ceo");
+    let (status, reset) = json_request(router, "POST", &reset_path, &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+    assert!(
+        reset["one_time_password"]
+            .as_str()
+            .is_some_and(|p| !p.is_empty()),
+        "{reset}"
+    );
 }
 
 /// Tester's question 2026-10-27: Adolf is the father of one child and the

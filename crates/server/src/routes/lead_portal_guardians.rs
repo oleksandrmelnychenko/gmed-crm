@@ -1042,7 +1042,12 @@ async fn reset_guardian_password(
         Ok(id) => id,
         Err(error) => return internal(error, "read access"),
     };
-    if link.try_get::<bool, _>("own_patient_login").unwrap_or(true) {
+    // The CEO resets it here as well (owner 2026-11-21: «Новый пароль» of a
+    // parent who is also a patient did nothing); a patient manager may not be
+    // assigned to the parent's own record, so they reset it there.
+    if link.try_get::<bool, _>("own_patient_login").unwrap_or(true)
+        && auth.role != gmed_domain::role::Role::Ceo
+    {
         // Where staff reset it instead: the parent's own request or record.
         let own = |col: &str| link.try_get::<Option<Uuid>, _>(col).ok().flatten();
         return (

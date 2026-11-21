@@ -19,6 +19,7 @@ import {
   type RepresentativeUploadKind,
 } from "../data/lead-risk-api";
 import type { LeadCustody, LeadPortalIntake, LeadRepresentative } from "../data/lead-portal-intake-api";
+import { isMinor } from "../model/lead-wizard.model";
 import {
   ID_DOCUMENT_TYPES,
   identityDocumentDraft,
@@ -856,7 +857,7 @@ export function LeadIdentityDocumentData({
   return (
     <div className="space-y-3" data-testid="lead-identity-document-data">
       {representatives.length > 0 ? (
-        <h4><SectionHeading icon={IdCardLanyard}>{tx("Документ пациента", "Ausweis des Patienten")}</SectionHeading></h4>
+        <h4><SectionHeading icon={IdCardLanyard}>{patientBirthDate && isMinor(patientBirthDate, new Date()) ? tx("Документ ребёнка", "Ausweis des Kindes") : tx("Документ пациента", "Ausweis des Patienten")}</SectionHeading></h4>
       ) : null}
       {patientScans ? <div data-testid="lead-id-patient-scans">{patientScans}</div> : null}
       {cabinetScans.length > 0 ? (

@@ -303,8 +303,10 @@ export function passportNameRuleText(tx: LeadErrorTranslator): string {
 export function guardianOwnLoginError(
   error: unknown,
 ): { href: string; target: "lead" | "patient" } | { href: null; target: null } | null {
-  if (leadErrorStatus(error) !== 409 || leadErrorCode(error) !== "use_patient_access") return null;
   const body = leadErrorBody(error);
+  // The server sends the code in `code` beside `error: "Conflict"`.
+  const isOwnLogin = body?.code === "use_patient_access" || leadErrorCode(error) === "use_patient_access";
+  if (leadErrorStatus(error) !== 409 || !isOwnLogin) return null;
   const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
   const leadId = text(body?.own_lead_id);
   if (leadId) return { href: `/leads?lead=${encodeURIComponent(leadId)}&view=wizard`, target: "lead" };

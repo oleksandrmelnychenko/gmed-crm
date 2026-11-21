@@ -517,6 +517,9 @@ describe("QA 2026-10-25 lead texts", () => {
     expect(guardianOwnLoginError(conflict({ own_lead_id: null, patient_id: null }))).toEqual({ href: null, target: null });
     expect(leadErrorMessage(conflict({ own_lead_id: "lead-7" }), tx)).toBe("У этого человека своя заявка — выдайте пароль в его заявке.");
     expect(guardianOwnLoginError(new ApiRequestError("x", { status: 409, code: "other", body: {} }))).toBeNull();
+    // As the server sends it: `error: "Conflict"`, the code beside it.
+    const real = new ApiRequestError("x", { status: 409, code: "Conflict", body: { error: "Conflict", code: "use_patient_access", own_lead_id: null, patient_id: "patient-9" } });
+    expect(guardianOwnLoginError(real)).toEqual({ href: "/patients/patient-9", target: "patient" });
   });
   it("names a refused representative key at the contact (F-11)", () => {
     const refused = new ApiRequestError("x", {
