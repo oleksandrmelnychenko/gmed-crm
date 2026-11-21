@@ -37,6 +37,8 @@ export type StepContext = {
    * pays; trigger flow 2026-10-07): it sends the keys. Absent on an older server.
    */
   organisationExtras?: boolean;
+  /** The identity document's data are asked (staff's paper form); the payer's own link asks for the copy only. */
+  documentData?: boolean;
 };
 
 /** Uploads of one kind, as the form runs them. */

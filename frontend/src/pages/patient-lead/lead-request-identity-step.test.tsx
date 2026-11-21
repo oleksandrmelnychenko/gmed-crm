@@ -7,6 +7,7 @@ import { PayerMissingLists } from "./lead-request-payer-questionnaire";
 import { payerMissingParts } from "./lead-request-payer-questionnaire-model";
 import { LegalQuestionsSection, type IdentificationForm } from "./lead-request-identification";
 import { draftFromIdentification } from "./lead-request-model";
+import { CabinetStaffModeContext } from "./lead-request-staff-mode";
 import { IdentityStep, type StepNav } from "./lead-request-step-forms";
 import { leadRequestText, submitFieldLabel } from "./lead-request-text";
 
@@ -74,19 +75,21 @@ function request(options: { guardian: boolean; minor: boolean; representatives?:
 
 const nav: StepNav = { index: 2, total: 5, onBack: () => undefined, onNext: () => undefined, missingShown: false, onShowMissing: () => undefined };
 
-function render(lead: LeadRequest, lang: "de" | "ru" = "ru") {
+function render(lead: LeadRequest, lang: "de" | "ru" = "ru", staffMode = false) {
   return renderToStaticMarkup(
-    <CabinetGoToContext.Provider value={() => undefined}>
-      <IdentityStep
-        request={lead}
-        text={leadRequestText(lang)}
-        lang={lang}
-        enqueue={(task) => task()}
-        onChange={() => undefined}
-        missing={[]}
-        nav={nav}
-      />
-    </CabinetGoToContext.Provider>,
+    <CabinetStaffModeContext.Provider value={staffMode}>
+      <CabinetGoToContext.Provider value={() => undefined}>
+        <IdentityStep
+          request={lead}
+          text={leadRequestText(lang)}
+          lang={lang}
+          enqueue={(task) => task()}
+          onChange={() => undefined}
+          missing={[]}
+          nav={nav}
+        />
+      </CabinetGoToContext.Provider>
+    </CabinetStaffModeContext.Provider>,
   );
 }
 
@@ -233,40 +236,41 @@ describe("the legal questions of a minor", () => {
   });
 });
 
-// QA 2026-11-10, A-1: after the send the date fields of a locked step stayed open (they are no
-// form controls of the browser, so the disabled fieldset alone did not reach them).
-describe("the sent request locks the date fields too", () => {
-  const sent = (followUp?: LeadRequest["follow_up"]) => ({
-    ...request({ guardian: false, minor: false }),
-    submitted_at: "2026-11-10T10:00:00Z",
-    follow_up: followUp,
-  }) as LeadRequest;
-  // The date field marks its disabled state on its own elements (`class="… Mui-disabled"`).
-  const disabledPickers = (html: string) => (html.match(/class="[^"]*\bMui-disabled\b/g) ?? []).length;
+// Owner 2026-11-21 (reverses 2026-11-10): the client's form asks for the photo or scan of the
+// identity document only; type, number, authority, country and dates are entered by staff.
+describe("the client uploads the identity document only", () => {
+  const dataFields = ["id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_issued_on", "id_valid_until"];
+  const sent = { ...request({ guardian: false, minor: false }), submitted_at: "2026-11-10T10:00:00Z" } as LeadRequest;
 
-  it("disables the dates of the document in the locked step, and none before the send", () => {
-    const open = render(request({ guardian: false, minor: false }));
-    expect(open).not.toContain("lead-request-step-locked");
-    expect(disabledPickers(open)).toBe(0);
-    const locked = render(sent());
-    expect(locked).toContain("lead-request-step-locked");
-    expect(locked).toContain("lead-request-sent-locked");
-    expect(disabledPickers(locked)).toBeGreaterThan(0);
+  it("shows the upload without the document's data fields, before and after the send", () => {
+    for (const lead of [request({ guardian: false, minor: false }), sent]) {
+      for (const lang of ["ru", "de"] as const) {
+        const html = render(lead, lang);
+        expect(html).toContain("lead-request-identity-upload");
+        expect(html).not.toContain("lead-request-identity-data");
+        for (const field of dataFields) expect(html).not.toContain(`id="lead-request-${field}"`);
+        // No mistranslated «exhibition» country anywhere (owner 2026-11-21).
+        expect(html).not.toMatch(/выставк|виставк/i);
+      }
+    }
   });
 
-  it("keeps the typed data read-only while only a new copy of a refused document is asked for", () => {
-    // GMED refused the only copy: the step stays open for a new one; the typed data are still
-    // the sent ones (the server refuses them unless GMED asks for more).
-    const refused = sent({
-      required: false, blocks: [], missing: {}, answered_at: null,
-      refused_identity_documents: [{ id: "doc-child", representative_id: null, file_name: "pass-kind.jpg", uploaded_at: "2026-10-21T08:00:00Z", reason: "unreadable" }],
-    } as unknown as LeadRequest["follow_up"]);
-    const html = render({ ...refused, identity_documents: [] } as LeadRequest);
-    expect(html).not.toContain("lead-request-step-locked");
-    expect(html).toContain("lead-request-part-locked");
-    expect(disabledPickers(html)).toBeGreaterThan(0);
-    // GMED asks for more: the data can be typed again.
-    const asked = render({ ...refused, identity_documents: [], follow_up: { ...refused.follow_up!, required: true } } as LeadRequest);
-    expect(asked).not.toContain("lead-request-part-locked");
+  it("asks a parent's own document without its data either", () => {
+    const html = render(request({ guardian: true, minor: true, representatives: [mother] }));
+    expect(html).toContain("pass-mutter.jpg");
+    expect(html).not.toContain("lead-request-rep1-identity-data");
+    for (const field of dataFields) expect(html).not.toContain(`id="lead-request-rep1_${field}"`);
+  });
+
+  it("keeps the data fields for staff filling in the form for the client", () => {
+    const html = render(request({ guardian: false, minor: false }), "ru", true);
+    expect(html).toContain("lead-request-identity-data");
+    for (const field of ["id_document_type", "id_document_number", "id_issuing_authority"]) {
+      expect(html).toContain(`id="lead-request-${field}"`);
+    }
+    expect(html).toContain("Страна выдачи");
+    // Staff keep editing after the send (QA 2026-11-13 D-08).
+    expect(render(sent, "ru", true)).toContain("lead-request-identity-data");
   });
 });
+

@@ -3760,3 +3760,106 @@ async fn a_stale_cabinet_tab_never_writes_onto_the_other_parents_recipient() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
+
+/// The staff warning of a lead: an identity copy whose data nobody entered.
+async fn identity_data_missing(app: &TestApp, lead_id: Uuid) -> bool {
+    let (status, list) = json_request(
+        &app.suite.app,
+        "GET",
+        "/api/v1/leads",
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let item = list
+        .as_array()
+        .expect("leads list array")
+        .iter()
+        .find(|item| item["id"] == json!(lead_id))
+        .cloned()
+        .expect("the lead in the list");
+    item["identity_data_missing"] == json!(true)
+}
+
+/// Owner 2026-11-21: the client uploads a representative's identity copy
+/// only; its data are staff's. Nothing in the cabinet waits for them, staff
+/// are told and enter them in the wizard.
+#[tokio::test]
+async fn a_representatives_copy_alone_completes_the_cabinet_and_staff_enter_its_data() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let (lead_id, patient) = adult_lead(&app, json!([])).await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let agent = Uuid::new_v4();
+    let agent_path = format!("{request}/representatives/{agent}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/representation"),
+        &patient,
+        Some(json!({ "has_representative": true, "under_guardianship": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &agent_path,
+        &patient,
+        Some(complete_adult_person("authorised_representative")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    answer_pep(router, &agent_path, &patient).await;
+    give_inquiry_consent(router, lead_id, &patient).await;
+    for (kind, file_name) in [
+        ("identity-document", "ausweis.pdf"),
+        ("authority-document", "vollmacht.pdf"),
+    ] {
+        let (status, body) = upload_file(
+            router,
+            &format!("{agent_path}/{kind}"),
+            &patient,
+            file_name,
+            "application/pdf",
+            PDF,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+    let (_, body) = json_request(router, "GET", &request, &patient, None).await;
+    // The copy without its data completes the representative in the cabinet.
+    assert_eq!(
+        missing_representation(&body),
+        Vec::<String>::new(),
+        "{body}"
+    );
+    assert!(
+        missing(&body)
+            .iter()
+            .all(|key| !key.starts_with("agent_id_") || key == "agent_id_upload"),
+        "{body}"
+    );
+    let person = representative(&body, agent);
+    assert!(person["id_document_number"].is_null(), "{person}");
+
+    // Staff see that the data are missing and enter them in the wizard.
+    assert!(identity_data_missing(&app, lead_id).await);
+    let (status, data) = json_request(
+        router,
+        "PUT",
+        &format!("/api/v1/leads/{lead_id}/representatives/{agent}/identity-document-data"),
+        &app.staff("patient_manager"),
+        Some(json!({
+            "id_document_type": "passport",
+            "id_document_number": "C01X00T47",
+            "id_issuing_authority": "Stadt München",
+            "id_issuing_country": "DE",
+            "id_valid_until": "2099-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    assert!(!identity_data_missing(&app, lead_id).await);
+}

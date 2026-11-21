@@ -311,20 +311,6 @@ export function StepFrame({
   );
 }
 
-/**
- * A part of a sent step that the server no longer takes, inside a step that stays open for
- * something else (the typed document data next to the new copy of a refused document):
- * read-only like a locked step.
- */
-function SentReadOnly({ active, children }: { active: boolean; children: ReactNode }) {
-  if (!active) return <>{children}</>;
-  return (
-    <fieldset disabled className="m-0 min-w-0 space-y-3 border-0 p-0" data-testid="lead-request-part-locked">
-      <ReadOnlyScope banner={false}>{children}</ReadOnlyScope>
-    </fieldset>
-  );
-}
-
 const GRID = "grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3";
 
 /**
@@ -860,8 +846,9 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
 }
 
 /**
- * Step 3 "Ausweis": a photo or scan of the identity document, and its data
- * typed next to it (owner 2026-11-10, optional; GMED adds what is missing).
+ * Step 3 "Ausweis": a photo or scan of the identity document. The client only
+ * uploads it (owner 2026-11-21, reverses 2026-11-10): staff enter the
+ * document's data in the wizard.
  */
 export function IdentityStep({ request, text, lang, enqueue, onChange, missing, nav }: StepProps) {
   const parts = usePartStates();
@@ -888,19 +875,21 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
             onChange={onChange}
             title={forChild ? text.childDocumentTitle : undefined}
           />
-          {/* After the send only a new copy of a refused document is taken here; the typed data
-              stay as sent unless GMED asks for more (the server refuses them otherwise). */}
-          <SentReadOnly active={Boolean(request.submitted_at) && !staffMode && !request.follow_up?.required}>
-            <LeadRequestIdentityRecognition
-              leadId={request.lead_id}
-              documents={request.identity_documents ?? []}
-              draft={identification.draft}
-              onTake={(field, value) => identification.set(field, value)}
-              text={text}
-              lang={lang}
-            />
-            <IdentityDocumentDataFields form={identification} text={text} lang={lang} />
-          </SentReadOnly>
+          {/* The client only uploads the copy (owner 2026-11-21); staff filling in the form
+              for the client keep the document's data and the reading of the scan. */}
+          {staffMode ? (
+            <>
+              <LeadRequestIdentityRecognition
+                leadId={request.lead_id}
+                documents={request.identity_documents ?? []}
+                draft={identification.draft}
+                onTake={(field, value) => identification.set(field, value)}
+                text={text}
+                lang={lang}
+              />
+              <IdentityDocumentDataFields form={identification} text={text} lang={lang} />
+            </>
+          ) : null}
         </div>
       ) : null}
       {parentOfMinor ? (

@@ -32,21 +32,45 @@ function state(patch: Record<string, unknown> = {}): LeadPayerLinkState {
 }
 
 function render(value: LeadPayerLinkState, options: { canEdit?: boolean; tx?: typeof ru; leadLanguage?: string; leadSubmitted?: boolean } = {}) {
+  // Staff's card of the payer's document data has date pickers: they need the app's adapter.
   return renderToStaticMarkup(
-    <LeadPayerLinkPanel
-      leadId="lead-1"
-      state={value}
-      controller={controller}
-      canEdit={options.canEdit ?? true}
-      leadLanguage={options.leadLanguage ?? "uk"}
-      tx={options.tx ?? ru}
-      errorText={() => "error"}
-      leadSubmitted={options.leadSubmitted}
-    />,
+    <LocalizationProvider dateAdapter={AdapterDayjs}>
+      <LeadPayerLinkPanel
+        leadId="lead-1"
+        state={value}
+        controller={controller}
+        canEdit={options.canEdit ?? true}
+        leadLanguage={options.leadLanguage ?? "uk"}
+        tx={options.tx ?? ru}
+        errorText={() => "error"}
+        leadSubmitted={options.leadSubmitted}
+      />
+    </LocalizationProvider>,
   );
 }
 
 describe("LeadPayerLinkPanel", () => {
+  // Owner 2026-11-21: the payer's link asks for the copy only; staff enter the document's data.
+  it("offers staff the payer's document data once the payer sent the answers", () => {
+    const answered = state({
+      link: { status: "submitted", email: "viktor.zahler@example.com", sent_at: "2026-10-06T10:00:00Z" },
+      questionnaire: {
+        answers: { id_document_number: "C01X00T47" },
+        identity_documents: [{ id: "doc-p", file_name: "zahler-pass.jpg" }],
+        submitted_at: "2026-10-06T10:30:00Z",
+        missing_for_submit: [],
+      },
+    });
+    const html = render(answered);
+    expect(html).toContain("lead-payer-id-data-card");
+    expect(html).toContain("C01X00T47");
+    // The payer's document has no «unreadable» trigger of its own.
+    expect(html).not.toContain("id_document_unreadable");
+    // Read-only roles and an unanswered link: no card.
+    expect(render(answered, { canEdit: false })).not.toContain("lead-payer-id-data-card");
+    expect(render(state({ link: { status: "opened", sent_at: "2026-10-06T10:00:00Z" } }))).not.toContain("lead-payer-id-data-card");
+  });
+
   it("keeps 'the patient sent the request' for a lead who has not submitted yet", () => {
     // Only "no link yet" and the send button; the sentence about the request waits (QA 2026-10-25).
     const html = render(state(), { leadSubmitted: false });
@@ -180,15 +204,17 @@ describe("LeadPayerLinkPanel", () => {
     });
     const line = (summary: Parameters<typeof LeadPayerLinkPanel>[0]["packageSummary"], tx = ru) =>
       renderToStaticMarkup(
-        <LeadPayerLinkPanel
-          leadId="lead-1"
-          state={answered}
-          controller={controller}
-          canEdit
-          tx={tx}
-          errorText={() => "error"}
-          packageSummary={summary}
-        />,
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <LeadPayerLinkPanel
+            leadId="lead-1"
+            state={answered}
+            controller={controller}
+            canEdit
+            tx={tx}
+            errorText={() => "error"}
+            packageSummary={summary}
+          />
+        </LocalizationProvider>,
       );
     expect(line(null)).toContain("ещё не подготовлен");
     expect(line(null)).toContain("Договор и смета");

@@ -687,11 +687,11 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "identity");
     await expect(identity.getByTestId("lead-request-step-missing")).toContainText("Ausweisdokument: Foto oder Scan des Ausweises");
     await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveText("1");
-    // The lead may type the data of the own document under the copy (owner 2026-11-10), without an intro (owner 2026-11-15).
-    await expect(page.getByTestId("lead-request-identity-data")).not.toContainText("Diese Angaben sind jetzt optional");
-    await expect(page.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(1);
-    await expect(page.getByRole("textbox", { name: "Dokumentnummer" })).toHaveCount(1);
-    await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(1);
+    // The lead uploads the copy only; staff enter its data (owner 2026-11-21).
+    await expect(page.getByTestId("lead-request-identity-data")).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Dokumentnummer" })).toHaveCount(0);
+    await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(0);
     await page.locator("#lead-request-identity-files").setInputFiles({
       name: "reisepass.pdf",
       mimeType: "application/pdf",

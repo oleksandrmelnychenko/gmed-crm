@@ -34,6 +34,7 @@ import { LeadPayerLinkDialog } from "./lead-payer-link-dialog";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadPayerManualCodeDialog } from "./lead-payer-manual-code-dialog";
 import { LeadPayerQuestionnairePreview } from "./lead-payer-questionnaire-preview";
+import { LeadPayerIdentityDocumentData } from "./lead-payer-identity-data";
 
 const PACKAGE_TONES: Record<PayerPackageStatus, StatusChipTone> = {
   prepared: "success", sending: "info", pending: "info", signed: "success",
@@ -216,6 +217,17 @@ export function LeadPayerLinkPanel({
       </div>
 
       <LeadPayerQuestionnairePreview key={leadId} state={state} tx={tx} />
+      {/* The payer's link takes the copy only (owner 2026-11-21): staff enter its data here. */}
+      {canEdit ? (
+        <LeadPayerIdentityDocumentData
+          leadId={leadId}
+          state={state}
+          tx={tx}
+          lang={tx("ru", "de")}
+          disabled={disabled}
+          onSaved={() => void controller.reload()}
+        />
+      ) : null}
 
       {actions.cabinet ? (
         <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-cabinet">

@@ -4574,3 +4574,144 @@ async fn the_code_status_poll_sees_a_manual_code_and_changes_nothing() {
     assert_eq!(status, StatusCode::GONE, "{body}");
     assert_eq!(body["code"], "link_revoked");
 }
+
+/// Owner 2026-11-21: the payer's own link asks for the copy of the identity
+/// document only; type, number, authority, country and dates are staff's,
+/// entered from the copy — also after the payer sent the questionnaire.
+#[tokio::test]
+async fn the_payer_uploads_the_identity_copy_only_and_staff_enter_its_data() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "iddata").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    let id_keys = [
+        "id_document_type",
+        "id_document_number",
+        "id_issuing_authority",
+        "id_issuing_country",
+        "id_valid_until",
+    ];
+    let mut answers = person_answers();
+    for key in id_keys {
+        answers.as_object_mut().unwrap().remove(key);
+    }
+    let (status, body) = patch(&app, &token, &session, answers).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The payer is asked for the copy only.
+    assert_eq!(
+        body["missing_for_submit"],
+        json!(["id_document_upload"]),
+        "{body}"
+    );
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = submit_answers(&app, &token, &session).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Staff's view keeps requiring the document's data.
+    let path = format!("/api/v1/leads/{lead_id}/payer-link");
+    let (_, staff) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    let missing = staff["questionnaire"]["missing_for_submit"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for key in id_keys {
+        assert!(missing.contains(&json!(key)), "{key}: {staff}");
+    }
+    assert!(!missing.contains(&json!("id_document_upload")), "{staff}");
+
+    let data_path = format!("/api/v1/leads/{lead_id}/payer-questionnaire/identity-document-data");
+    // A read-only role, another answer and an expired document are refused.
+    let (status, body) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.staff("ceo_assistant"),
+        Some(json!({ "id_document_number": "P1234567" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.manager(),
+        Some(json!({ "occupation": "Kaufmann" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["field"], "occupation", "{body}");
+    let (status, body) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.manager(),
+        Some(json!({ "id_valid_until": "2020-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "id_document_expired", "{body}");
+
+    // Staff enter the data after the send; the shared form's «unreadable» is ignored.
+    let (status, body) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.manager(),
+        Some(json!({
+            "id_document_type": "passport",
+            "id_document_number": "p1234567",
+            "id_issuing_authority": "BH Wien",
+            "id_issuing_country": "at",
+            "id_issued_on": "2019-01-02",
+            "id_valid_until": "2099-12-31",
+            "id_document_unreadable": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answers"]["id_document_number"], "P1234567", "{body}");
+    assert_eq!(body["answers"]["id_issuing_country"], "AT", "{body}");
+    assert!(body["submitted_at"].is_string(), "still sent: {body}");
+    let (_, staff) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(
+        staff["questionnaire"]["missing_for_submit"],
+        json!([]),
+        "{staff}"
+    );
+    let events = audit_contexts(pool, "payer_identity_document_data_updated", lead_id).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    let (user, context) = &events[0];
+    assert!(user.is_some());
+    assert_eq!(context["fields"].as_array().unwrap().len(), 6, "{context}");
+    assert!(!context.to_string().contains("P1234567"), "{context}");
+    // The same values again change nothing.
+    let (status, _) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.manager(),
+        Some(json!({ "id_document_number": "P1234567" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        audit_contexts(pool, "payer_identity_document_data_updated", lead_id)
+            .await
+            .len(),
+        1
+    );
+    // Every other answer stays the payer's.
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-questionnaire"),
+        &app.manager(),
+        Some(json!({ "occupation": "Lehrer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}

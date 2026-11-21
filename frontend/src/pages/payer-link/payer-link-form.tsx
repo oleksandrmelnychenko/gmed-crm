@@ -30,6 +30,7 @@ import {
   stillRejected,
   withEmptiedKept,
   withRejectedField,
+  isIdDocumentDataField,
   type OwnerDraft,
   type OwnerField,
   type OwnersBlocker,
@@ -338,6 +339,7 @@ export function PayerLinkForm({
   lang,
   signature = null,
   softNext = false,
+  documentData = false,
   onQuestionnaire,
   onLinkProblem,
 }: {
@@ -352,6 +354,12 @@ export function PayerLinkForm({
    * 2026-10-09): for staff who copy the payer's signed paper form. The payer's own link holds.
    */
   softNext?: boolean;
+  /**
+   * The identity document's data (type, number, authority, country, dates) are asked: for
+   * staff who copy the paper form. The payer's own link asks for the copy only (owner
+   * 2026-11-21); staff enter its data.
+   */
+  documentData?: boolean;
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onLinkProblem: (problem: LinkProblem) => void;
 }) {
@@ -369,6 +377,7 @@ export function PayerLinkForm({
       text={text}
       lang={lang}
       softNext={softNext}
+      documentData={documentData}
       onQuestionnaire={onQuestionnaire}
       onLinkProblem={onLinkProblem}
     />
@@ -382,6 +391,7 @@ function DraftForm({
   text,
   lang,
   softNext,
+  documentData,
   onQuestionnaire,
   onLinkProblem,
 }: {
@@ -391,6 +401,7 @@ function DraftForm({
   text: PayerLinkText;
   lang: string;
   softNext: boolean;
+  documentData: boolean;
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onLinkProblem: (problem: LinkProblem) => void;
 }) {
@@ -524,6 +535,8 @@ function DraftForm({
     if (!base.has(field)) return false;
     // The extract lifts the representative's ID, on this page too (QA 2026-10-31).
     if (questionnaire.register_extract_on_file && String(field).startsWith("id_")) return false;
+    // The payer uploads the copy only; its data are staff's (owner 2026-11-21).
+    if (!documentData && isIdDocumentDataField(field)) return false;
     if (field === "funds_description") return form.draft.funds_sources.includes("other");
     // The profession and the industry only with the enhanced check (owner 2026-10-24); the relationship stays required.
     if (field === "occupation") return occupationRequired(questionnaire);
@@ -539,6 +552,7 @@ function DraftForm({
     required,
     fundsSources: fundsSourceOptions(questionnaire),
     organisationExtras: questionnaire.answers.legal_form !== undefined,
+    documentData,
   };
 
   const goTo = (next: PayerStep) => {

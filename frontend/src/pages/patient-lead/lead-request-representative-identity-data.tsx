@@ -18,11 +18,11 @@ import { CabinetHint, LabeledField, errorBody, useAutosave, type RequestQueue } 
 import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
 
-// The data of a representative's identity document, typed next to the copy
-// (owner 2026-11-10: parents and other representatives may enter them like
-// the lead, with the reading of the scan). Optional; staff compare them with
-// the copy in the wizard, and once staff saved them there they are read-only
-// here.
+// The data of a representative's identity document, typed next to the copy.
+// Since 2026-11-21 (owner) only staff filling in the form for the client see
+// these fields: the client uploads the copy only, staff enter the data (here
+// or in the wizard). Data a client typed before stay stored and are shown to
+// staff.
 
 export const REPRESENTATIVE_ID_FIELDS = [
   "id_document_type",

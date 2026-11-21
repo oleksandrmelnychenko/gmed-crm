@@ -116,6 +116,8 @@ export function LeadPayerPaperQuestionnaireDialog({
                 lang={lang}
                 // Staff copy what the paper says and may go on past an answer it leaves open.
                 softNext
+                // The identity document's data are staff's entry (owner 2026-11-21).
+                documentData
                 onQuestionnaire={changed}
                 onLinkProblem={() => setError(tx("Анкета сейчас недоступна — обновите страницу", "Fragebogen derzeit nicht verfügbar – Seite neu laden"))}
               />

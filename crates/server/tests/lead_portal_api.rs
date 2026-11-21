@@ -1331,6 +1331,30 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
             .any(|consent| consent["type"] == "lead_inquiry_processing"),
         "{intake}"
     );
+    // The client sent the copy without its data (owner 2026-11-21: the
+    // cabinet asks for the copy only); staff are told the data are missing
+    // and the identity cannot be confirmed until they enter them.
+    assert!(
+        intake["identification"]["id_document_number"].is_null(),
+        "{intake}"
+    );
+    let (status, list) = json_request(
+        router,
+        "GET",
+        "/api/v1/leads",
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let row = list
+        .as_array()
+        .expect("leads list array")
+        .iter()
+        .find(|item| item["id"] == json!(lead_id))
+        .cloned()
+        .expect("the lead in the list");
+    assert_eq!(row["identity_data_missing"], true, "{row}");
 
     // Nothing changed since sending: there is nothing to send again.
     assert_eq!(body["changed_since_submit"], false, "{body}");

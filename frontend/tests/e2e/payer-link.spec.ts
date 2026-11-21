@@ -395,8 +395,8 @@ async function setup(page: Page, options: Options = {}) {
     } else {
       need("first_name", "last_name", "date_of_birth", "birth_place", "birth_country", "citizenships", "street", "zip", "city", "country");
     }
+    // The payer's own link asks for the copy only; its data are staff's (owner 2026-11-21).
     if (!q.register_extract_on_file) {
-      need("id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_valid_until");
       if (q.identity_documents.length === 0) missing.push("id_document_upload");
     }
     // Every legal entity names its beneficial owners, an insurer need not (QA 2026-10-11 A-36b).
@@ -1440,19 +1440,13 @@ test.describe("payer link", () => {
     await expect(page.getByTestId("payer-link-save-state")).toHaveText("Gespeichert");
     await next(page);
 
-    // 3 Identity document: an expired document is refused and named, a valid one is kept.
+    // 3 Identity document: the payer uploads the copy only; staff enter its data (owner 2026-11-21).
     await expect(stepTitle(page)).toHaveText("Ausweisdokument");
     const identity = page.getByTestId("payer-link-step-identity");
-    await choose(page, identity.getByRole("combobox", { name: "Art des Dokuments" }), "Reisepass");
-    await identity.getByRole("textbox", { name: "Dokumentnummer" }).fill("P1234567");
-    await identity.getByRole("textbox", { name: "Ausstellende Behörde" }).fill("BH Wien");
-    await choose(page, identity.getByRole("combobox", { name: "Ausstellungsland" }), "Österreich");
-    await setDatePickerValue(page.locator("#payer-link-id_valid_until"), "2020-01-01");
-    await expect(identity.getByText("Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.")).toBeVisible();
-    await expect(page.getByTestId("payer-link-save-state")).toHaveText("Nicht gespeichert");
-    await setDatePickerValue(page.locator("#payer-link-id_valid_until"), "2031-03-04");
-    await expect.poll(() => q.answers.id_valid_until).toBe("2031-03-04");
-    await expect(identity.getByText("Das Dokument ist abgelaufen.")).toHaveCount(0);
+    for (const field of ["id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_issued_on", "id_valid_until"]) {
+      await expect(page.locator(`#payer-link-${field}`)).toHaveCount(0);
+    }
+    await expect(identity.getByRole("textbox", { name: "Dokumentnummer" })).toHaveCount(0);
     // An empty file is refused on the page, with its reason; nothing is sent (QA 2026-11-10).
     await page.locator("#payer-link-identity-files").setInputFiles({ name: "leer.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(0) });
     await expect(page.getByTestId("payer-link-identity-upload")).toContainText("leer.pdf ist leer (0 Bytes).");
@@ -1464,25 +1458,10 @@ test.describe("payer link", () => {
     });
     await expect(page.getByTestId("payer-link-identity-upload")).toContainText("pass.pdf");
     expect(q.identity_documents.map((item) => item.file_name)).toEqual(["pass.pdf"]);
-    // The copy is read as a proposal: equal values have no box, a different
-    // one is never ticked by itself, and nothing changes before «übernehmen».
-    await page.getByTestId("payer-link-recognition-run").click();
-    const proposal = page.getByTestId("payer-link-recognition-proposal");
-    await expect(proposal).toHaveAttribute("data-status", "verified");
-    await expect(proposal.getByTestId("payer-link-recognition-id_document_number")).toHaveAttribute("data-state", "same");
-    const readExpiry = proposal.getByTestId("payer-link-recognition-id_valid_until");
-    await expect(readExpiry).toHaveAttribute("data-state", "differs");
-    await expect(readExpiry).toContainText("05.03.2031");
-    await expect(readExpiry).toContainText("im Formular: 04.03.2031");
-    await expect(readExpiry.getByRole("checkbox")).not.toBeChecked();
-    await expect(page.getByTestId("payer-link-recognition-apply")).toBeDisabled();
-    expect(q.answers.id_valid_until).toBe("2031-03-04");
-    await readExpiry.getByRole("checkbox").check();
-    await page.getByTestId("payer-link-recognition-apply").click();
-    await expect.poll(() => q.answers.id_valid_until).toBe("2031-03-05");
-    // Back to the date the rest of this walk expects.
-    await setDatePickerValue(page.locator("#payer-link-id_valid_until"), "2031-03-04");
-    await expect.poll(() => q.answers.id_valid_until).toBe("2031-03-04");
+    // The copy is not read on the payer's page: staff read it in the wizard.
+    await expect(page.getByTestId("payer-link-recognition")).toHaveCount(0);
+    expect(q.missing_for_submit.filter((key) => key.startsWith("id_"))).toEqual([]);
+    expect(calls.patches.some((patch) => Object.keys(patch).some((key) => key.startsWith("id_")))).toBe(false);
     await next(page);
 
     // 5 Relationship and funds (no step 4 for a person).
@@ -1524,8 +1503,8 @@ test.describe("payer link", () => {
     await expect(page.getByTestId("payer-link-complete")).toHaveText("Alle erforderlichen Angaben sind vorhanden.");
     const summary = page.getByTestId("payer-link-summary");
     await expect(summary).toContainText("03.02.1970");
-    await expect(summary).toContainText("04.03.2031");
-    await expect(summary).toContainText("Reisepass");
+    // The copy, without document data the payer was never asked for.
+    await expect(summary).not.toContainText("Reisepass");
     await expect(summary).toContainText("pass.pdf");
     await expect(summary).toContainText("Musterbank");
     await expect(summary).toContainText("E-Mail, Telefon");

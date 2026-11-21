@@ -487,6 +487,9 @@ export function RepresentativeUpload({
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
   const consentNoteAbove = useContext(ConsentNoteAboveContext);
+  // The client only uploads the copy (owner 2026-11-21): the document's data are staff's,
+  // typed here only by staff filling in the form for the client.
+  const staffMode = useCabinetStaffMode();
   // A representative's files count to the request's file limit like the medical documents.
   const full = uploadLimitReached(request);
   const ready = consentReady && person !== null && !full;
@@ -593,7 +596,7 @@ export function RepresentativeUpload({
         testId={`${id}-list`}
         onRemove={(documentId) => void remove(documentId)}
       />
-      {kind === "identity" && person && lang ? (
+      {kind === "identity" && person && lang && staffMode ? (
         <RepresentativeIdentityData request={request} slot={slot} person={person} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
       ) : null}
     </div>

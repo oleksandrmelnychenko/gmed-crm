@@ -163,9 +163,12 @@ export function LeadIdentityDocumentDataForm({
   clientMayType = false,
   typedByStaffInClientForm = false,
   noScanText,
+  unreadableToggle = true,
 }: {
   /** See `IdentityDocumentStatusChip`. */
   noScanText?: string;
+  /** «Документ нечитаем»: the lead's and the representatives' documents (T12); not the payer's. */
+  unreadableToggle?: boolean;
   source: IdentityDocumentSource | null | undefined;
   /** The wizard's old "passport valid until", read only while nothing is stored in the new place. */
   fallbackValidUntil?: string;
@@ -524,17 +527,19 @@ export function LeadIdentityDocumentDataForm({
           />
         </FormField>
       </div>
-      <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
-        <input
-          type="checkbox"
-          name="id_document_unreadable"
-          className={checkboxClass}
-          checked={draft.unreadable}
-          disabled={disabled}
-          onChange={(event) => patch({ unreadable: event.target.checked })}
-        />
-        {tx("Документ нечитаем (запросить новый скан)", "Ausweis unleserlich (neuen Scan anfordern)")}
-      </label>
+      {unreadableToggle ? (
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            name="id_document_unreadable"
+            className={checkboxClass}
+            checked={draft.unreadable}
+            disabled={disabled}
+            onChange={(event) => patch({ unreadable: event.target.checked })}
+          />
+          {tx("Документ нечитаем (запросить новый скан)", "Ausweis unleserlich (neuen Scan anfordern)")}
+        </label>
+      ) : null}
       {status.kind === "expired" ? (
         <p className="text-xs font-medium text-destructive" data-testid={`${testId}-expired`}>
           {tx(

@@ -344,9 +344,9 @@ export function IdentificationCountrySelect({
 }
 
 /**
- * The data of the lead's own identity document, typed next to the scan
- * (owner 2026-11-10): optional, printed on the documents as typed; staff
- * check them against the copy and correct them in the wizard.
+ * The data of the lead's own identity document, typed next to the scan.
+ * Since 2026-11-21 (owner) only for staff filling in the form for the
+ * client: the client uploads the copy only.
  */
 export function IdentityDocumentDataFields({
   form,

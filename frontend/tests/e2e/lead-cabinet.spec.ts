@@ -1969,10 +1969,11 @@ test.describe("lead cabinet", () => {
     const button = upload.getByRole("button", { name: "Foto oder Scan des Ausweises hochladen" });
     const list = page.getByTestId("lead-request-identity-list");
 
-    // The lead may type the data of the own document under the copy (owner 2026-11-10).
-    await expect(page.getByTestId("lead-request-identity-data")).not.toContainText("Diese Angaben sind jetzt optional");
-    await expect(page.locator("#lead-request-id_document_type")).toHaveCount(1);
-    await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(1);
+    // The lead uploads the copy only; staff enter its data in the wizard (owner 2026-11-21).
+    await expect(page.getByTestId("lead-request-identity-data")).toHaveCount(0);
+    for (const field of ["id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_issued_on", "id_valid_until"]) {
+      await expect(page.locator(`#lead-request-${field}`)).toHaveCount(0);
+    }
     // Like the health consent before the medical documents: no consent, no upload.
     await expect(button).toBeDisabled();
     await expect(page.locator("#lead-request-identity-files")).toBeDisabled();
@@ -1998,17 +1999,14 @@ test.describe("lead cabinet", () => {
     // A copy of the identity document is not a medical document.
     expect(calls.identityUploads).toBe(1);
     expect(calls.uploads).toBe(0);
-    // Uploading alone is enough: no manual data or recognition is needed to continue.
-    await expect(page.locator("#lead-request-id_document_number")).toHaveValue("");
+    // Uploading alone is enough: no document data and no reading of the scan in the client's form.
+    await expect(page.locator("#lead-request-id_document_number")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-recognition")).toHaveCount(0);
     expect(calls.recognitions).toHaveLength(0);
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.getByTestId("lead-request-identity").screenshot({ path: testInfo.outputPath("identity-optional-desktop.png") });
+    await page.getByTestId("lead-request-identity").screenshot({ path: testInfo.outputPath("identity-upload-only-desktop.png") });
     await page.setViewportSize({ width: 390, height: 844 });
-    const recognition = page.getByTestId("lead-request-recognition-run");
-    await recognition.scrollIntoViewIfNeeded();
-    await expect(recognition).toBeVisible();
-    await expect(page.getByTestId("lead-request-identity-data").getByRole("note")).toHaveCount(0);
-    await page.screenshot({ path: testInfo.outputPath("identity-optional-mobile.png") });
+    await page.screenshot({ path: testInfo.outputPath("identity-upload-only-mobile.png") });
     await page.getByRole("button", { name: "Weiter", exact: true }).click();
     await expect(page.getByTestId("lead-request-step-billing")).toBeVisible();
     await step(page, "documents");
@@ -2023,7 +2021,9 @@ test.describe("lead cabinet", () => {
     await expect(list).toHaveText("");
   });
 
-  test("the data of the document is read from the copy as a proposal the person takes over", async ({ page }) => {
+  // Owner 2026-11-21: staff read the copy in the wizard (lead-representation-staff.spec.ts);
+  // the client's form neither reads it nor sends document data.
+  test("the copy is not read in the client's form and no document data are sent", async ({ page }) => {
     const { calls } = await setup(page, "lead", {
       prepare: (request) => {
         for (const field of ["id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_issued_on", "id_valid_until"]) {
@@ -2032,9 +2032,6 @@ test.describe("lead cabinet", () => {
       },
     });
     await page.goto("/");
-    await step(page, "identity");
-    // Without a copy there is nothing to read.
-    await expect(page.getByTestId("lead-request-recognition")).toHaveCount(0);
     await step(page, "person");
     await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
     await expect(page.getByTestId("lead-request-inquiry-consent")).toContainText("Zugestimmt am");
@@ -2045,25 +2042,12 @@ test.describe("lead cabinet", () => {
       buffer: Buffer.from("synthetic image"),
     });
     await expect(page.getByTestId("lead-request-identity-list")).toContainText("reisepass.jpg");
-
-    await page.locator("#lead-request-id_document_number").fill("X1");
-    await page.getByTestId("lead-request-recognition-run").click();
-    const proposal = page.getByTestId("lead-request-recognition-proposal");
-    await expect(proposal).toContainText("Prüfziffern stimmen");
-    await expect(proposal).toContainText("Reisepass");
-    await expect(proposal).toContainText("15.04.2032");
-    expect(calls.recognitions).toEqual(["id-doc-1"]);
-    // Nothing is in the form yet, and the typed number is not ticked by itself.
-    await expect(page.locator("#lead-request-id_valid_until")).toHaveValue("");
-    await expect(page.getByTestId("lead-request-recognition-id_document_number").getByRole("checkbox")).not.toBeChecked();
-    await expect(page.getByTestId("lead-request-recognition-id_valid_until").getByRole("checkbox")).toBeChecked();
-
-    await page.getByTestId("lead-request-recognition-apply").click();
-    await expect(page.locator("#lead-request-id_valid_until")).toHaveValue("15.04.2032");
-    await expect(page.locator("#lead-request-id_document_number")).toHaveValue("X1");
-    await expect
-      .poll(() => calls.identification.at(-1))
-      .toMatchObject({ id_document_type: "passport", id_issuing_country: "DE", id_valid_until: "2032-04-15" });
+    await expect(page.getByTestId("lead-request-recognition")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-identity-data")).toHaveCount(0);
+    expect(calls.recognitions).toHaveLength(0);
+    for (const body of calls.identification) {
+      expect(Object.keys(body as Record<string, unknown>).filter((key) => key.startsWith("id_"))).toEqual([]);
+    }
   });
 
   test("acting for somebody else asks who that is (follow-up block L)", async ({ page }) => {

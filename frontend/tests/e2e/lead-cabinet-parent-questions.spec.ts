@@ -421,7 +421,7 @@ test.describe("Parent country follow-up", () => {
     expect(writes).toHaveLength(1);
   });
 
-  test("a parent reads the data of the own document from the copy and takes them over (owner 2026-11-10)", async ({ page }) => {
+  test("a parent uploads the own document as a copy only, its data are staff's (owner 2026-11-21)", async ({ page }) => {
     const { dataCalls } = await setup(page, (request) => {
       Object.assign(request.representation.representatives[0], {
         identity_documents: [{
@@ -444,27 +444,15 @@ test.describe("Parent country follow-up", () => {
     });
     await page.goto("/");
     await step(page, "identity");
-    const data = page.getByTestId("lead-request-rep1-identity-data");
-    await expect(data).toBeVisible();
-    // The other parent has no copy yet: nothing to read there.
-    await expect(page.getByTestId("lead-request-rep2-recognition")).toHaveCount(0);
-    await page.getByTestId("lead-request-rep1-recognition-run").click();
-    const proposal = page.getByTestId("lead-request-rep1-recognition-proposal");
-    await expect(proposal).toContainText("Prüfziffern stimmen");
-    expect(read).toEqual(["parent-copy-1"]);
-    // Nothing is in the form before the parent takes it over.
-    await expect(page.locator("#lead-request-rep1_id_document_number")).toHaveValue("");
+    // The parent's copy is listed; its data and the reading of the scan are staff's (owner 2026-11-21).
+    await expect(page.getByText("pass-mutter.jpg")).toBeVisible();
+    for (const slot of ["rep1", "rep2"]) {
+      await expect(page.getByTestId(`lead-request-${slot}-identity-data`)).toHaveCount(0);
+      await expect(page.getByTestId(`lead-request-${slot}-recognition`)).toHaveCount(0);
+      await expect(page.locator(`#lead-request-${slot}_id_document_number`)).toHaveCount(0);
+    }
+    expect(read).toEqual([]);
     expect(dataCalls).toHaveLength(0);
-    await page.getByTestId("lead-request-rep1-recognition-apply").click();
-    await expect(page.locator("#lead-request-rep1_id_document_number")).toHaveValue("L898902C3");
-    await expect(page.locator("#lead-request-rep1_id_valid_until")).toHaveValue("15.04.2032");
-    await expect.poll(() => dataCalls.at(-1)).toEqual({
-      id: ANNA,
-      patch: { id_document_type: "passport", id_document_number: "L898902C3", id_issuing_country: "DE", id_valid_until: "2032-04-15" },
-    });
-    // What the reading leaves open is typed by hand and saved on its own.
-    await page.locator("#lead-request-rep1_id_issuing_authority").fill("Stadt Musterstadt");
-    await expect.poll(() => dataCalls.at(-1)?.patch).toEqual({ id_issuing_authority: "Stadt Musterstadt" });
   });
 
   test("document stage keeps the full representative form and required uploads visible", async ({ page }) => {

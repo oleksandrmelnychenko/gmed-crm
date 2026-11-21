@@ -357,7 +357,8 @@ export function IdentityStep({
           <DocumentList documents={extractDocuments} text={text} emptyText="" />
         </div>
       ) : null}
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* The payer uploads the copy only (owner 2026-11-21); staff copying the paper form type its data. */}
+      {context.documentData ? <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="id_document_type">
           <ChoiceInput context={context} field="id_document_type" options={ID_DOCUMENT_TYPES} labels={text.idDocumentTypes} />
         </Field>
@@ -377,7 +378,7 @@ export function IdentityStep({
         <Field context={context} field="id_valid_until">
           <DateInput context={context} field="id_valid_until" />
         </Field>
-      </div>
+      </div> : null}
       <UploadBlock
         id="payer-link-identity-files"
         label={text.identityFiles}
@@ -393,8 +394,8 @@ export function IdentityStep({
         onFiles={uploads.upload}
         onRemove={uploads.remove}
       />
-      {/* The copy is read on the server; the values are a proposal the payer confirms. */}
-      <PayerIdentityRecognition context={context} uploads={uploads} />
+      {/* The copy is read on the server; the values are a proposal staff confirm. */}
+      {context.documentData ? <PayerIdentityRecognition context={context} uploads={uploads} /> : null}
     </div>
   );
 }

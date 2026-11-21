@@ -71,6 +71,21 @@ export function saveStaffPayerAnswers(leadId: string, patch: PayerAnswersPatch) 
 }
 
 /**
+ * `PUT /leads/{id}/payer-questionnaire/identity-document-data`: staff enter the
+ * data of the payer's identity document from the uploaded copy (owner
+ * 2026-11-21: the payer's link asks for the copy only), also after the payer
+ * sent the questionnaire.
+ */
+export function saveStaffPayerIdentityDocumentData(
+  leadId: string,
+  input: Record<string, string | boolean | null>,
+  options: { keepalive?: boolean } = {},
+) {
+  // A refused field comes back as the API's own error: the staff form marks it at the field.
+  return apiFetch<unknown>(`${base(leadId)}/identity-document-data`, { method: "PUT", body: JSON.stringify(input), ...options });
+}
+
+/**
  * The payer page's client, bound to staff's routes of one lead. The code step
  * does not exist here; staff's own files are removed in the documents list.
  */

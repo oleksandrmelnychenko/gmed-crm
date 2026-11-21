@@ -50,7 +50,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use chrono::{DateTime, Duration, NaiveDate, SecondsFormat, SubsecRound, Utc};
 use rand::RngExt;
@@ -368,6 +368,12 @@ pub fn router() -> Router<AppState> {
         .route(
             "/leads/{lead_id}/payer-questionnaire/identity-document",
             post(paper_identity_document).layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
+        // The payer's link asks for the copy only; staff enter its data
+        // (owner 2026-11-21), also after the payer sent the questionnaire.
+        .route(
+            "/leads/{lead_id}/payer-questionnaire/identity-document-data",
+            put(paper_identity_data),
         )
         .route(
             "/leads/{lead_id}/payer-questionnaire/funds-proof",
@@ -2420,6 +2426,12 @@ fn questionnaire(
                     | "id_valid_until"
             )
         });
+    } else if viewer == Viewer::Payer {
+        // The payer's own link asks for the copy of the identity document
+        // only (owner 2026-11-21): its data are staff's, entered from the
+        // copy (`PUT …/payer-questionnaire/identity-document-data`). Staff's
+        // view and the paper path keep requiring them.
+        missing.retain(|key| !crate::risk::cabinet::ID_DATA_KEYS.contains(key));
     }
     let email = statement
         .confirmed_email
@@ -5529,6 +5541,106 @@ async fn paper_patch(
         return intake::internal(error, "commit payer answers");
     }
     if changed {
+        publish(&state, Some(auth.user_id), lead_id, Some("staff")).await;
+    }
+    questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await
+}
+
+/// `PUT /leads/{id}/payer-questionnaire/identity-document-data`
+/// (`leads.edit`): staff enter the data of the third-party payer's identity
+/// document from the copy the payer uploaded. Since 2026-11-21 (owner) the
+/// payer's own link asks for the copy only, so staff write these six answers
+/// also after the payer sent the questionnaire; every other answer stays
+/// frozen. `id_document_unreadable` of the shared staff form is ignored.
+async fn paper_identity_data(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let mut patch: Map<String, Value> = match serde_json::from_slice::<Value>(&body) {
+        Ok(Value::Object(map)) => map,
+        _ => return invalid_field("body", "A JSON object is expected"),
+    };
+    patch.remove("id_document_unreadable");
+    if let Some(key) = patch
+        .keys()
+        .find(|key| !crate::risk::cabinet::ID_DATA_KEYS.contains(&key.as_str()))
+    {
+        return invalid_field(key, "Only the identity document's data are accepted here");
+    }
+    let today = crate::app_time::today();
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    let mut context = match lock_paper_context(&mut tx, lead_id).await {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    if context.statement.is_none() {
+        if let Err(response) =
+            ensure_staff_statement(&mut tx, &context, lead_id, auth.user_id).await
+        {
+            return response;
+        }
+        context.statement = match load_statement(&mut tx, lead_id).await {
+            Ok(statement) => statement,
+            Err(error) => return database(error),
+        };
+    }
+    let Some(statement) = context.statement.as_ref() else {
+        return intake::internal(sqlx::Error::RowNotFound, "load payer statement");
+    };
+    let organisation = context
+        .declaration
+        .as_ref()
+        .is_some_and(Declaration::is_organisation);
+    let next = match apply_answers_patch(&statement.answers, &patch, organisation, today) {
+        Ok(next) => next,
+        Err(error) => return error.into_response(),
+    };
+    let changed: Vec<&'static str> = crate::risk::cabinet::ID_DATA_KEYS
+        .iter()
+        .copied()
+        .filter(|key| statement.answers.value(key) != next.value(key))
+        .collect();
+    if !changed.is_empty() {
+        let writer = Writer::Staff {
+            user_id: auth.user_id,
+        };
+        let stored = async {
+            store_answers(&mut tx, lead_id, &next, writer.actor()).await?;
+            audit::write_in_transaction(
+                &mut tx,
+                &writer.event(
+                    "payer_identity_document_data_updated",
+                    "lead",
+                    lead_id,
+                    json!({ "fields": changed }),
+                ),
+            )
+            .await?;
+            crate::risk::store::reassess(
+                &mut tx,
+                lead_id,
+                crate::risk::store::Cause::Staff,
+                Some(auth.user_id),
+            )
+            .await
+        }
+        .await;
+        if let Err(error) = stored {
+            return database(error);
+        }
+    }
+    if let Err(error) = tx.commit().await {
+        return intake::internal(error, "commit payer identity data");
+    }
+    if !changed.is_empty() {
         publish(&state, Some(auth.user_id), lead_id, Some("staff")).await;
     }
     questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await

@@ -722,6 +722,23 @@ const DECLARATIONS_MISSING = [
   "sanctions_links_details",
 ] as const;
 
+/**
+ * The identity document's data the payer's own link no longer asks (owner 2026-11-21): the
+ * payer uploads the copy, staff enter type, number, authority, country and dates.
+ */
+export const ID_DOCUMENT_DATA_FIELDS = [
+  "id_document_type",
+  "id_document_number",
+  "id_issuing_authority",
+  "id_issuing_country",
+  "id_issued_on",
+  "id_valid_until",
+] as const satisfies readonly PayerField[];
+
+export function isIdDocumentDataField(field: string): boolean {
+  return (ID_DOCUMENT_DATA_FIELDS as readonly string[]).includes(field);
+}
+
 const ID_MISSING = [
   "id_document_type",
   "id_document_number",
