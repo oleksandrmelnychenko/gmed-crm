@@ -1482,7 +1482,14 @@ async fn the_service_period_comes_from_the_order_and_can_be_set_on_the_draft() {
     assert_eq!(status, StatusCode::OK, "{issued}");
     let text = pdf_text(&fixture, &invoice_id).await;
     assert!(text.contains("bis 12.2026"), "{text}");
-    assert!(!text.contains("20.11.2026"), "{text}");
+    // The order default 20.11.–25.11. is no longer the period; the date alone
+    // may still be the invoice date when the test runs on that day.
+    assert!(
+        !text
+            .match_indices("20.11.2026")
+            .any(|(at, _)| text[at..].chars().take(40).collect::<String>().contains("25.11.2026")),
+        "{text}"
+    );
 }
 
 /// QA 2026-11-19: an interim keeps the period chosen in «Новый счёт» (S2),
