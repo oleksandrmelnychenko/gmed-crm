@@ -998,6 +998,17 @@ WHERE h.status = 'open'
 ORDER BY h.created_at DESC
 LIMIT 20;
 
+-- [WARN] Stored invoice or dunning-letter PDFs not in German (owner
+-- 2026-11-21: every invoice is German; another language only as a translated
+-- copy). Released before 9b89a7f6, they keep the archived PDF: Storno and a
+-- new invoice. Shown by invoice number, type and status only.
+SELECT 'I04_stored_invoice_pdf_not_german' AS check_id, i.invoice_number, i.invoice_type, i.status,
+       d.document_kind, d.document_language, d.generated_at
+FROM invoice_documents d
+JOIN invoices i ON i.id = d.invoice_id
+WHERE d.document_language <> 'de'
+ORDER BY d.generated_at;
+
 -- =============================================================================
 -- End. Expected: n = 0 for every [BUG] check.
 -- =============================================================================
