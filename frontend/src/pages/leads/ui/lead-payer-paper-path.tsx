@@ -191,7 +191,7 @@ export function LeadPayerPaperPath({
       data-testid="lead-payer-paper-path"
       data-identified={identification.identified && !onlyPreviousPapers ? "true" : "false"}
     >
-      <AdminSectionTitle icon={Printer}>{tx("Бумажный путь (без ссылки)", "Papierweg (ohne Link)")}</AdminSectionTitle>
+      <AdminSectionTitle icon={Printer}>{tx("Анкета на бумаге", "Fragebogen auf Papier")}</AdminSectionTitle>
       {line ? (
         <p
           className={cn(

@@ -41,7 +41,7 @@ describe("LeadPayerPaperPath (re-check V-A7)", () => {
     const html = render(missing);
     expect(html).toContain('id="lead-wizard-payer-paper-path"');
     expect(html).toContain('data-identified="false"');
-    expect(html).toContain("Бумажный путь (без ссылки)");
+    expect(html).toContain("Анкета на бумаге");
     expect(html).toContain(
       "Заполните анкету плательщика по ссылке или загрузите подписанную на бумаге Selbstauskunft и документ плательщика",
     );
