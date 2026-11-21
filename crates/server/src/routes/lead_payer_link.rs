@@ -1741,12 +1741,26 @@ fn payer_phone(value: &str, stored: Option<&str>) -> Result<Option<String>, Fiel
 /// gets stored. Details belong to a "yes", "nobody over 25 %" clears the
 /// list; the sources of funds are those of the payer type
 /// (`organisation`); the rules that look at the declaration too are applied
-/// by the caller ([`save_patch`]).
+/// by the caller ([`save_patch`]). An expired identity document is refused.
 fn apply_answers_patch(
     current: &Answers,
     patch: &Map<String, Value>,
     organisation: bool,
     today: NaiveDate,
+) -> Result<Answers, FieldError> {
+    apply_answers_patch_with(current, patch, organisation, today, false)
+}
+
+/// [`apply_answers_patch`]; `allow_expired` stores an expired identity
+/// document (staff entering its data from the copy, qa-fix-117: as the
+/// patient's, recorded but never identifying — the conversion readiness and
+/// the payer's GwG sheet name it).
+fn apply_answers_patch_with(
+    current: &Answers,
+    patch: &Map<String, Value>,
+    organisation: bool,
+    today: NaiveDate,
+    allow_expired: bool,
 ) -> Result<Answers, FieldError> {
     let mut next = current.clone();
     for key in ANSWER_KEYS {
@@ -1805,7 +1819,7 @@ fn apply_answers_patch(
             "id_valid_until" => {
                 let valid_until = intake::optional_date(text_of(value, key)?, key)?;
                 // The last day of validity still counts.
-                if valid_until.is_some_and(|date| date < today) {
+                if !allow_expired && valid_until.is_some_and(|date| date < today) {
                     return Err(FieldError {
                         code: "id_document_expired",
                         field: key,
@@ -5595,7 +5609,10 @@ async fn paper_identity_data(
         .declaration
         .as_ref()
         .is_some_and(Declaration::is_organisation);
-    let next = match apply_answers_patch(&statement.answers, &patch, organisation, today) {
+    // An expired document is stored, as the patient's (qa-fix-117): the
+    // readiness and the payer's GwG sheet say it does not identify.
+    let next = match apply_answers_patch_with(&statement.answers, &patch, organisation, today, true)
+    {
         Ok(next) => next,
         Err(error) => return error.into_response(),
     };
@@ -7769,6 +7786,19 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(expired.code, "id_document_expired");
+        // Staff entering the data from the copy store it (qa-fix-117).
+        let stored_expired = apply_answers_patch_with(
+            &stored,
+            &patch(json!({ "id_valid_until": "2026-10-05" })),
+            false,
+            today(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            stored_expired.id_valid_until,
+            NaiveDate::from_ymd_opt(2026, 10, 5)
+        );
     }
 
     /// A new phone needs six digits, the payer declaration's rule (owner decision

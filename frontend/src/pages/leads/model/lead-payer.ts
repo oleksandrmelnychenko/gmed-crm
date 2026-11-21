@@ -1219,6 +1219,15 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
     ),
     payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass die zahlende Person über die Verarbeitung ihrer Daten informiert wurde"),
     payer_not_identified: payerNotIdentifiedText(tx),
+    // qa-fix-117: the payer's link takes the copy only; staff enter its data.
+    payer_document_data_missing: tx(
+      "Данные документа плательщика не внесены — внесите их в карточке «Документ плательщика»",
+      "Ausweisdaten des Zahlers fehlen – im Feld „Ausweis des Zahlers“ erfassen",
+    ),
+    payer_document_expired: tx(
+      "Документ плательщика просрочен — нужен действующий документ («Документ плательщика»)",
+      "Ausweis des Zahlers abgelaufen – ein gültiger Ausweis ist nötig („Ausweis des Zahlers“)",
+    ),
     // Where it is made: the hint stood on the documents step without a button (QA 2026-11-10).
     cost_assumption_missing: tx(
       "Создайте заявление о принятии расходов (Kostenübernahmeerklärung) — на шаге «Договор и смета»",
@@ -1308,6 +1317,9 @@ export const PAYER_READINESS_REASON_CODES: Record<string, string> = {
   "Payer is not informed about the processing of their data": "payer_not_informed",
   // Readiness check `payer_identified` (backend 2026-10-25): questionnaire and ID document of a third-party payer.
   "Third-party payer is not identified": "payer_not_identified",
+  // Readiness check `payer_document_data_entered` (qa-fix-117): the person payer's ID data staff enter.
+  "Payer identity document data are not entered": "payer_document_data_missing",
+  "Payer identity document has expired": "payer_document_expired",
   "Cost assumption declaration is missing": "cost_assumption_missing",
   "Cost assumption declaration names another payer": "cost_assumption_outdated",
   "Cost assumption declaration is out of date": "cost_assumption_terms_outdated",
@@ -1335,15 +1347,29 @@ export function payerReadinessReasonSteps(): Record<string, "documents"> {
 export const PAYER_SECTION_ID = "lead-wizard-payer-declaration";
 
 /**
+ * The card «Документ плательщика» where staff enter the person payer's ID
+ * data (qa-fix-117). Shown once the payer sent the answers on the link; the
+ * wizard falls back to {@link PAYER_SECTION_ID} while it is not there.
+ */
+export const PAYER_ID_DATA_CARD_ID = "lead-wizard-payer-id-data";
+
+const PAYER_REASON_FIELDS: Record<string, string> = {
+  payer_not_identified: PAYER_PAPER_PATH_ID,
+  payer_document_data_missing: PAYER_ID_DATA_CARD_ID,
+  payer_document_expired: PAYER_ID_DATA_CARD_ID,
+};
+
+/**
  * Every payer readiness reason focuses the payer section; the missing
  * identification of a third-party payer its paper path beside the link
- * (re-check V-A7).
+ * (re-check V-A7), the person payer's missing document data the card
+ * «Документ плательщика».
  */
 export function payerReadinessReasonFields(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(PAYER_READINESS_REASON_CODES).map(([reason, code]) => [
       reason,
-      code === "payer_not_identified" ? PAYER_PAPER_PATH_ID : PAYER_SECTION_ID,
+      PAYER_REASON_FIELDS[code] ?? PAYER_SECTION_ID,
     ]),
   );
 }

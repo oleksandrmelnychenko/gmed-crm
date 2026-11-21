@@ -9551,18 +9551,26 @@ async fn convert_lead(
         // QA R-8 (owner decision 2026-10-25): the unidentified payer is named
         // by its code, so the wizard can say what is missing; the CEO's risk
         // release does not lift it.
-        let payer_not_identified = super::lead_payer::PayerReason::PayerNotIdentified;
-        if readiness
-            .conversion_reasons
-            .iter()
-            .any(|reason| reason == payer_not_identified.message())
-        {
-            return lead_gate_err_coded(
-                payer_not_identified.code(),
-                "Lead is not conversion-ready",
-                &readiness.conversion_reasons,
-                &readiness.payload,
-            );
+        // The person payer's document data staff have not entered (or that
+        // show it expired) likewise (qa-fix-117).
+        use super::lead_payer::PayerReason;
+        for coded in [
+            PayerReason::PayerNotIdentified,
+            PayerReason::PayerDocumentDataMissing,
+            PayerReason::PayerDocumentExpired,
+        ] {
+            if readiness
+                .conversion_reasons
+                .iter()
+                .any(|reason| reason == coded.message())
+            {
+                return lead_gate_err_coded(
+                    coded.code(),
+                    "Lead is not conversion-ready",
+                    &readiness.conversion_reasons,
+                    &readiness.payload,
+                );
+            }
         }
         return lead_gate_err(
             "Lead is not conversion-ready",

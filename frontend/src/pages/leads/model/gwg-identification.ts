@@ -266,9 +266,52 @@ export function gwgSheetErrorText(error: unknown, tx: Tx): string | null {
     );
   }
   if (codes.includes(PAYER_DETAILS_INCOMPLETE)) {
-    return gwgPayerSheetMissingText(error.body?.missing, tx);
+    return error.body?.scope === PAYER_PERSON_SCOPE
+      ? gwgPersonPayerSheetMissingText(error.body?.missing, tx)
+      : gwgPayerSheetMissingText(error.body?.missing, tx);
   }
   return null;
+}
+
+/**
+ * `scope` of `payer_details_incomplete` for the sheet of a person who pays
+ * (qa-fix-117): the document data staff enter from the payer's copy.
+ */
+export const PAYER_PERSON_SCOPE = "payer_person";
+
+/** The person payer's missing document data in words (keys `payer_id_*`). */
+export function gwgPersonPayerSheetMissingLabels(missing: unknown, tx: Tx): string[] {
+  const person: Record<string, [string, string]> = {
+    id_document_type: ["вид документа", "Ausweisart"],
+  };
+  const labels: string[] = [];
+  for (const key of Array.isArray(missing) ? missing : []) {
+    if (typeof key !== "string") continue;
+    const field = key.startsWith("payer_") ? key.slice("payer_".length) : key;
+    const pair = person[field] ?? PAYER_SHEET_FIELD_LABELS[field];
+    const label = pair ? tx(...pair) : field.replaceAll("_", " ");
+    if (!labels.includes(label)) labels.push(label);
+  }
+  return labels;
+}
+
+/** Where staff enter the person payer's document data, and that the sheet is made again. */
+export function gwgPersonPayerSheetHint(tx: Tx): string {
+  return tx(
+    "Внесите данные со скана в карточке «Документ плательщика» (раздел «Кто платит»), затем сформируйте лист заново.",
+    "Daten aus der Kopie im Feld „Ausweis des Zahlers“ (Bereich „Wer zahlt“) erfassen, danach den Bogen neu erstellen.",
+  );
+}
+
+/** "Подтвердить подпись нельзя: данные документа плательщика не внесены: …" */
+export function gwgPersonPayerSheetMissingText(missing: unknown, tx: Tx): string {
+  const labels = gwgPersonPayerSheetMissingLabels(missing, tx);
+  const base = tx(
+    "Подтвердить подпись нельзя: данные документа плательщика не внесены",
+    "Die Unterschrift kann nicht bestätigt werden: Ausweisdaten des Zahlers fehlen",
+  );
+  const hint = gwgPersonPayerSheetHint(tx);
+  return labels.length > 0 ? `${base}: ${labels.join(", ")}. ${hint}` : `${base}. ${hint}`;
 }
 
 const PAYER_SHEET_FIELD_LABELS: Record<string, [string, string]> = {

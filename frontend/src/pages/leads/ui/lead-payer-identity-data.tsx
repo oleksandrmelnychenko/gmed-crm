@@ -5,7 +5,7 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import type { LeadPayerLinkState } from "../data/lead-payer-link-api";
 import { saveStaffPayerIdentityDocumentData } from "../data/lead-payer-paper-questionnaire-api";
 import type { IdentityDocumentSource } from "../model/lead-identity-document-data";
-import type { Tx } from "../model/lead-payer";
+import { PAYER_ID_DATA_CARD_ID, type Tx } from "../model/lead-payer";
 import { LeadIdentityDocumentDataForm } from "./lead-identity-document-data";
 
 /** The payer's answers as the staff form's source (no staff marks: the statement has none). */
@@ -52,7 +52,12 @@ export function LeadPayerIdentityDocumentData({
     .filter((document) => !document.register_extract)
     .map((document) => ({ id: document.id, name: document.file_name }));
   return (
-    <section className="space-y-2 rounded-xl border border-border/70 bg-card p-3" data-testid="lead-payer-id-data-card">
+    <section
+      id={PAYER_ID_DATA_CARD_ID}
+      tabIndex={-1}
+      className="space-y-2 rounded-xl border border-border/70 bg-card p-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      data-testid="lead-payer-id-data-card"
+    >
       <h4><SectionHeading icon={IdCardLanyard}>{tx("Документ плательщика", "Ausweis des Zahlers")}</SectionHeading></h4>
       <LeadIdentityDocumentDataForm
         key={leadId}

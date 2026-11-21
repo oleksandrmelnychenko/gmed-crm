@@ -361,6 +361,20 @@ export function leadErrorMessage(
       "Fragebogen des Zahlers über den Link ausfüllen lassen oder die auf Papier unterschriebene Selbstauskunft und den Ausweis des Zahlers hochladen",
     );
   }
+  // 422 of the conversion (readiness check `payer_document_data_entered`, qa-fix-117).
+  const payerDocumentCode = leadErrorBody(error)?.code ?? leadErrorCode(error);
+  if (payerDocumentCode === "payer_document_data_missing") {
+    return tx(
+      "Данные документа плательщика не внесены — внесите их в карточке «Документ плательщика»",
+      "Ausweisdaten des Zahlers fehlen – im Feld „Ausweis des Zahlers“ erfassen",
+    );
+  }
+  if (payerDocumentCode === "payer_document_expired") {
+    return tx(
+      "Документ плательщика просрочен — нужен действующий документ («Документ плательщика»)",
+      "Ausweis des Zahlers abgelaufen – ein gültiger Ausweis ist nötig („Ausweis des Zahlers“)",
+    );
+  }
   if (guardianOwnLoginError(error)) {
     return tx(
       "У этого человека своя заявка — выдайте пароль в его заявке.",
@@ -825,6 +839,7 @@ const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> =
   payer_declaration_complete: "lead_readiness_check_payer_declaration_complete",
   cost_assumption_signed: "lead_readiness_check_cost_assumption_signed",
   payer_identified: "lead_readiness_check_payer_identified",
+  payer_document_data_entered: "lead_readiness_check_payer_document_data_entered",
 };
 
 /** Server readiness blocking reasons (crates/server/src/routes/leads.rs). */
@@ -883,6 +898,8 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Paying parent or legal representative is not named": "lead_readiness_reason_payer_representative_missing",
   "Payer is not informed about the processing of their data": "lead_readiness_reason_payer_not_informed",
   "Third-party payer is not identified": "lead_readiness_reason_payer_not_identified",
+  "Payer identity document data are not entered": "lead_readiness_reason_payer_document_data_missing",
+  "Payer identity document has expired": "lead_readiness_reason_payer_document_expired",
   "Cost assumption declaration is missing": "lead_readiness_reason_cost_assumption_missing",
   "Cost assumption declaration names another payer": "lead_readiness_reason_cost_assumption_outdated",
   "Cost assumption declaration is out of date": "lead_readiness_reason_cost_assumption_terms_outdated",

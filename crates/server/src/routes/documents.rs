@@ -21911,6 +21911,7 @@ async fn gwg_sheet_signature_details(
     .await?;
     let scope = match details {
         super::lead_representatives::SignatureDetails::PayerOrganisation => "payer",
+        super::lead_representatives::SignatureDetails::PayerPerson => "payer_person",
         super::lead_representatives::SignatureDetails::Representative(_)
         | super::lead_representatives::SignatureDetails::Patient => "person",
         super::lead_representatives::SignatureDetails::Contract

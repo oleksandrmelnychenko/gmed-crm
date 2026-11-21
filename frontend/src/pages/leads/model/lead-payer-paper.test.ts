@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DocumentItem } from "@/pages/documents/model/types";
 
-import { normalizePayerDeclarationResponse, payerReadinessReasonFields, payerReasonLabel, PAYER_SECTION_ID } from "./lead-payer";
+import { normalizePayerDeclarationResponse, payerReadinessReasonFields, payerReasonLabel, PAYER_ID_DATA_CARD_ID, PAYER_SECTION_ID } from "./lead-payer";
 import {
   payerPreviousPapersLine,
   EMPTY_PAYER_IDENTITY_FIELDS,
@@ -116,6 +116,13 @@ describe("payer paper path (re-check V-A7)", () => {
     const fields = payerReadinessReasonFields();
     expect(fields["Third-party payer is not identified"]).toBe(PAYER_PAPER_PATH_ID);
     expect(fields["Payer declaration is missing"]).toBe(PAYER_SECTION_ID);
+    // qa-fix-117: the person payer's document data go to «Документ плательщика».
+    expect(fields["Payer identity document data are not entered"]).toBe(PAYER_ID_DATA_CARD_ID);
+    expect(fields["Payer identity document has expired"]).toBe(PAYER_ID_DATA_CARD_ID);
+    expect(payerReasonLabel("payer_document_data_missing", ru)).toBe(
+      "Данные документа плательщика не внесены — внесите их в карточке «Документ плательщика»",
+    );
+    expect(payerReasonLabel("payer_document_expired", de)).toContain("Ausweis des Zahlers abgelaufen");
   });
 
   it("reads the identification of the payer declaration's status", () => {

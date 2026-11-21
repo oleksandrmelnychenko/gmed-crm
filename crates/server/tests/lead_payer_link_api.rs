@@ -4183,6 +4183,30 @@ async fn an_organisation_uploads_its_register_extract_on_the_link() {
     .expect("the extract is filed with the lead");
     assert!(name.starts_with("Handelsregisterauszug"), "{name}");
     assert!(notes.unwrap_or_default().contains("über den Link"));
+    // qa-fix-117: the person payer's document-data gate leaves an
+    // organisation to its GwG sheet, also once its answers are sent.
+    sqlx::query("UPDATE lead_payer_statements SET submitted_at = now() WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, lead) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        readiness_check(&lead, "payer_document_data_entered")["passed"],
+        true,
+        "{lead}"
+    );
+    assert!(!blocks_with(
+        &lead,
+        "Payer identity document data are not entered"
+    ));
 
     // A person payer is refused.
     let (person_lead, _) = lead_with_payer(&app, "register-extract-person").await;
@@ -4635,7 +4659,8 @@ async fn the_payer_uploads_the_identity_copy_only_and_staff_enter_its_data() {
     }
     assert!(!missing.contains(&json!("id_document_upload")), "{staff}");
 
-    // A read-only role, another answer and an expired document are refused.
+    // A read-only role and another answer are refused (an expired document
+    // is stored since qa-fix-117: see the next test).
     let (status, body) = with_login(
         &app,
         "PUT",
@@ -4655,16 +4680,6 @@ async fn the_payer_uploads_the_identity_copy_only_and_staff_enter_its_data() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["field"], "occupation", "{body}");
-    let (status, body) = with_login(
-        &app,
-        "PUT",
-        &data_path,
-        &app.manager(),
-        Some(json!({ "id_valid_until": "2020-01-01" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert_eq!(body["code"], "id_document_expired", "{body}");
 
     // Staff enter the data after the send; the shared form's «unreadable» is ignored.
     let (status, body) = with_login(
@@ -4736,4 +4751,218 @@ async fn the_payer_uploads_the_identity_copy_only_and_staff_enter_its_data() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}
+
+fn readiness_check<'a>(lead: &'a Value, key: &str) -> &'a Value {
+    lead["readiness"]["checks"]
+        .as_array()
+        .and_then(|checks| checks.iter().find(|check| check["key"] == key))
+        .unwrap_or_else(|| panic!("readiness check {key} missing: {lead}"))
+}
+
+fn blocks_with(lead: &Value, reason: &str) -> bool {
+    lead["readiness"]["blocking_reasons"]
+        .as_array()
+        .is_some_and(|reasons| reasons.iter().any(|value| value == reason))
+}
+
+/// `POST /leads/{id}/convert` as the CEO; a risk hold is released first, so
+/// the answer names what else holds the conversion.
+async fn convert_refusal(app: &PayerApp, lead_id: Uuid) -> (StatusCode, Value) {
+    let convert = format!("/api/v1/leads/{lead_id}/convert");
+    let ceo = app.staff("ceo");
+    let (status, body) = with_login(app, "POST", &convert, &ceo, None).await;
+    if body["error"] != "risk_review_required" {
+        return (status, body);
+    }
+    let (status, released) = with_login(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),
+        &ceo,
+        Some(json!({ "decision": "release", "reason": "Payer checked in the video call" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{released}");
+    with_login(app, "POST", &convert, &ceo, None).await
+}
+
+/// qa-fix-117 (owner «дай валідатор»): a person who pays sent the copy of the
+/// ID only; until staff enter the document's data in «Документ плательщика»
+/// the conversion and the payer's GwG sheet are held. An expired document is
+/// stored (as the patient's) and holds them as expired.
+#[tokio::test]
+async fn a_person_payers_copy_without_document_data_holds_conversion_and_sheet() {
+    let Some(app) = payer_app().await else { return };
+    let (lead_id, _) = lead_with_payer(&app, "iddata-gate").await;
+    let lead_path = format!("/api/v1/leads/{lead_id}");
+    let data_path = format!("/api/v1/leads/{lead_id}/payer-questionnaire/identity-document-data");
+    let missing_reason = "Payer identity document data are not entered";
+    let expired_reason = "Payer identity document has expired";
+
+    // Before the payer answers nothing is asked of staff here.
+    let (status, lead) = with_login(&app, "GET", &lead_path, &app.manager(), None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(
+        readiness_check(&lead, "payer_document_data_entered")["passed"],
+        true,
+        "{lead}"
+    );
+
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    let mut answers = person_answers();
+    for key in [
+        "id_document_type",
+        "id_document_number",
+        "id_issuing_authority",
+        "id_issuing_country",
+        "id_valid_until",
+    ] {
+        answers.as_object_mut().unwrap().remove(key);
+    }
+    let (status, body) = patch(&app, &token, &session, answers).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = submit_answers(&app, &token, &session).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The copy alone: blocked, named, compliance stage.
+    let (_, lead) = with_login(&app, "GET", &lead_path, &app.manager(), None).await;
+    let check = readiness_check(&lead, "payer_document_data_entered");
+    assert_eq!(check["passed"], false, "{check}");
+    assert_eq!(check["blocking_for"], "conversion", "{check}");
+    assert_eq!(check["stage"], "compliance", "{check}");
+    assert!(blocks_with(&lead, missing_reason), "{lead}");
+    assert_eq!(lead["readiness"]["conversion_ready"], false, "{lead}");
+    let (status, refused) = convert_refusal(&app, lead_id).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "payer_document_data_missing", "{refused}");
+
+    // The payer's GwG sheet is made, but its signature waits for the data.
+    let (status, sheet) = with_login(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &app.staff("ceo"),
+        Some(json!({
+            "template_id": "gwg_identification",
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active",
+            "bindings": { "gwg_identification": { "subject": "payer" } }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+    assert_eq!(
+        sheet["signature_details"]["scope"], "payer_person",
+        "{sheet}"
+    );
+    let sheet_id = sheet["id"].as_str().unwrap().to_string();
+    let mark_signed = format!("/api/v1/documents/{sheet_id}/mark-signed");
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        &mark_signed,
+        &app.staff("ceo"),
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "payer_details_incomplete", "{refused}");
+    assert_eq!(refused["scope"], "payer_person", "{refused}");
+    let missing = refused["missing"].as_array().cloned().unwrap_or_default();
+    for key in [
+        "payer_id_document_type",
+        "payer_id_document_number",
+        "payer_id_issuing_authority",
+        "payer_id_issuing_country",
+        "payer_id_valid_until",
+    ] {
+        assert!(missing.contains(&json!(key)), "{key}: {refused}");
+    }
+
+    // An expired document is stored and named as expired.
+    let (status, body) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.manager(),
+        Some(json!({
+            "id_document_type": "passport",
+            "id_document_number": "P1234567",
+            "id_issuing_authority": "BH Wien",
+            "id_issuing_country": "AT",
+            "id_issued_on": "2010-01-02",
+            "id_valid_until": "2020-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answers"]["id_valid_until"], "2020-01-01", "{body}");
+    let (_, lead) = with_login(&app, "GET", &lead_path, &app.manager(), None).await;
+    assert_eq!(
+        readiness_check(&lead, "payer_document_data_entered")["passed"],
+        false,
+        "{lead}"
+    );
+    assert!(blocks_with(&lead, expired_reason), "{lead}");
+    assert!(!blocks_with(&lead, missing_reason), "{lead}");
+    let (status, refused) = convert_refusal(&app, lead_id).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "payer_document_expired", "{refused}");
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        &mark_signed,
+        &app.staff("ceo"),
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["missing"],
+        json!(["payer_id_document_expired"]),
+        "{refused}"
+    );
+
+    // A valid document: the payer's part is released.
+    let (status, body) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.manager(),
+        Some(json!({ "id_valid_until": "2099-12-31" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, lead) = with_login(&app, "GET", &lead_path, &app.manager(), None).await;
+    assert_eq!(
+        readiness_check(&lead, "payer_document_data_entered")["passed"],
+        true,
+        "{lead}"
+    );
+    assert!(!blocks_with(&lead, missing_reason), "{lead}");
+    assert!(!blocks_with(&lead, expired_reason), "{lead}");
+    let (status, refused) = convert_refusal(&app, lead_id).await;
+    assert!(
+        refused["code"] != "payer_document_data_missing"
+            && refused["code"] != "payer_document_expired",
+        "{status} {refused}"
+    );
+    let (status, signed) = with_login(
+        &app,
+        "POST",
+        &mark_signed,
+        &app.staff("ceo"),
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
+    assert_ne!(
+        signed["code"], "payer_details_incomplete",
+        "{status} {signed}"
+    );
 }

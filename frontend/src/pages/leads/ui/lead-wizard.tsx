@@ -155,6 +155,7 @@ import { CITIZENSHIP_FIELD_LABELS, CitizenshipMultiSelect, normalizeCitizenships
 import { nationalityCountryCode } from "@/pages/patients/model/nationalities";
 import {
   patientDeclarationLeadId,
+  PAYER_ID_DATA_CARD_ID,
   PAYER_SECTION_ID,
   payerAmlCountries,
   payerGateErrorText,
@@ -8731,7 +8732,10 @@ ${serviceCommentLines.join("\n")}`
     // The target step may still be mounting (lazy sections), so retry for a few frames.
     let attempts = 0;
     const focusField = () => {
-      const field = document.getElementById(fieldId);
+      // The card «Документ плательщика» stands only once the payer sent the
+      // answers on the link: otherwise the payer section (qa-fix-117).
+      const field = document.getElementById(fieldId)
+        ?? (fieldId === PAYER_ID_DATA_CARD_ID && attempts >= 10 ? document.getElementById(PAYER_SECTION_ID) : null);
       const panel = stepPanelRef.current;
       if (field && panel?.contains(field)) {
         // scrollIntoView also scrolls the overflow-hidden modal, which can move
@@ -9322,9 +9326,13 @@ ${serviceCommentLines.join("\n")}`
       };
     }
     if (isGwgPayerSheetIncomplete(error)) {
+      // A person who pays: straight to «Документ плательщика» (qa-fix-117).
+      const fieldId = error instanceof ApiRequestError && error.body?.scope === "payer_person"
+        ? PAYER_ID_DATA_CARD_ID
+        : PAYER_SECTION_ID;
       return {
         label: goToPayerLabel,
-        onClick: () => openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID }),
+        onClick: () => openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId }),
       };
     }
     if (riskGateRefusal(error)) {

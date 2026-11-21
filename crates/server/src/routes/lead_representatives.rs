@@ -1280,6 +1280,11 @@ pub(crate) enum SignatureDetails {
     /// insurer (owner decision 2026-10-22): the organisation's data, the
     /// person who acts for it, its beneficial owners and its answers.
     PayerOrganisation,
+    /// The GwG sheet of a third-party payer who is a person (qa-fix-117):
+    /// the data of the identity document staff enter from the copy the payer
+    /// sent ([`crate::routes::lead_payer::payer_person_document_missing`]);
+    /// nothing while the payer has not answered, or a parent pays.
+    PayerPerson,
 }
 
 impl SignatureDetails {
@@ -1309,10 +1314,12 @@ impl SignatureDetails {
         let form = binding
             .and_then(|binding| binding.get(crate::routes::documents::GWG_SHEET_FORM_KEY))
             .and_then(Value::as_str);
-        if subject.map(str::trim) == Some("payer")
-            && form == Some(crate::routes::documents::GWG_LEGAL_ENTITY_FORM)
-        {
-            return Self::PayerOrganisation;
+        if subject.map(str::trim) == Some("payer") {
+            return if form == Some(crate::routes::documents::GWG_LEGAL_ENTITY_FORM) {
+                Self::PayerOrganisation
+            } else {
+                Self::PayerPerson
+            };
         }
         subject
             .and_then(subject_representative)
@@ -1340,6 +1347,16 @@ pub(crate) async fn signature_details_missing(
                 let missing =
                     crate::routes::documents::gwg_legal_entity_signature_missing(conn, lead_id)
                         .await?;
+                if !missing.is_empty() {
+                    return Ok(missing);
+                }
+            }
+            Ok(Vec::new())
+        }
+        SignatureDetails::PayerPerson => {
+            for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
+                let missing =
+                    crate::routes::lead_payer::payer_person_document_missing(conn, lead_id).await?;
                 if !missing.is_empty() {
                     return Ok(missing);
                 }
@@ -1551,6 +1568,14 @@ pub(crate) fn signature_details_incomplete(
             "payer_details_incomplete",
             "Complete the paying organisation's details before confirming the signature",
             json!({"missing":missing, "scope":"payer"}),
+        );
+    }
+    if details == SignatureDetails::PayerPerson {
+        return intake::coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "payer_details_incomplete",
+            "Enter the payer's identity document data before confirming the signature",
+            json!({"missing":missing, "scope":"payer_person"}),
         );
     }
     if !matches!(
@@ -5994,19 +6019,23 @@ mod tests {
             ),
             SignatureDetails::Patient
         );
-        for subject in [
-            json!({"gwg_identification": {"subject": "payer"}}),
-            json!({}),
-        ] {
-            assert_eq!(
-                SignatureDetails::of_document(
-                    Some("gwg_identification"),
-                    "gwg_identification",
-                    Some(&subject)
-                ),
-                SignatureDetails::Nobody
-            );
-        }
+        // A person who pays: the document data staff enter (qa-fix-117).
+        assert_eq!(
+            SignatureDetails::of_document(
+                Some("gwg_identification"),
+                "gwg_identification",
+                Some(&json!({"gwg_identification": {"subject": "payer"}}))
+            ),
+            SignatureDetails::PayerPerson
+        );
+        assert_eq!(
+            SignatureDetails::of_document(
+                Some("gwg_identification"),
+                "gwg_identification",
+                Some(&json!({}))
+            ),
+            SignatureDetails::Nobody
+        );
         assert_eq!(
             SignatureDetails::of_document(None, "gwg_identification", None),
             SignatureDetails::Nobody

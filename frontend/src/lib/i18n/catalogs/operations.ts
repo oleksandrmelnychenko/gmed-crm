@@ -435,6 +435,9 @@ export interface OperationsTranslations {
   lead_readiness_check_cost_assumption_signed: string;
   lead_readiness_check_payer_identified: string;
   lead_readiness_reason_payer_not_identified: string;
+  lead_readiness_check_payer_document_data_entered: string;
+  lead_readiness_reason_payer_document_data_missing: string;
+  lead_readiness_reason_payer_document_expired: string;
   lead_readiness_reason_risk_review_required: string;
   lead_readiness_reason_payer_declaration_missing: string;
   lead_readiness_reason_payer_beneficial_owner_missing: string;
@@ -1073,6 +1076,9 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_check_cost_assumption_signed: "Плательщик подписал заявление о принятии расходов",
   lead_readiness_check_payer_identified: "Плательщик идентифицирован (анкета и документ)",
   lead_readiness_reason_payer_not_identified: "Заполните анкету плательщика по ссылке или загрузите подписанную на бумаге Selbstauskunft и документ плательщика",
+  lead_readiness_check_payer_document_data_entered: "Данные документа плательщика внесены",
+  lead_readiness_reason_payer_document_data_missing: "Данные документа плательщика не внесены — внесите их в карточке «Документ плательщика»",
+  lead_readiness_reason_payer_document_expired: "Документ плательщика просрочен — нужен действующий документ («Документ плательщика»)",
   lead_readiness_reason_risk_review_required: "Нужно решение по оценке риска",
   lead_readiness_reason_payer_declaration_missing: "Нет данных о плательщике",
   lead_readiness_reason_payer_beneficial_owner_missing: "Не указан фактический выгодоприобретатель",
@@ -1728,6 +1734,9 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_check_cost_assumption_signed: "Kostenübernahmeerklärung vom Zahler unterschrieben",
   lead_readiness_check_payer_identified: "Zahler/in identifiziert (Fragebogen und Ausweis)",
   lead_readiness_reason_payer_not_identified: "Fragebogen des Zahlers über den Link ausfüllen lassen oder die auf Papier unterschriebene Selbstauskunft und den Ausweis des Zahlers hochladen",
+  lead_readiness_check_payer_document_data_entered: "Ausweisdaten des Zahlers erfasst",
+  lead_readiness_reason_payer_document_data_missing: "Ausweisdaten des Zahlers fehlen – im Feld „Ausweis des Zahlers“ erfassen",
+  lead_readiness_reason_payer_document_expired: "Ausweis des Zahlers abgelaufen – ein gültiger Ausweis ist nötig („Ausweis des Zahlers“)",
   lead_readiness_reason_risk_review_required: "Entscheidung zur Risikobewertung nötig",
   lead_readiness_reason_payer_declaration_missing: "Angaben zum Zahler fehlen",
   lead_readiness_reason_payer_beneficial_owner_missing: "Wirtschaftlich Berechtigter nicht angegeben",

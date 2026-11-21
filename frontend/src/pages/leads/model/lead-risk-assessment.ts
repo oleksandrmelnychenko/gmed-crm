@@ -13,7 +13,13 @@ import type { RepresentativeCountryQuestions } from "@/pages/patient-lead/lead-r
 import { REPRESENTATIVE_COUNTRY_FIELDS } from "@/pages/patient-lead/lead-request-representative-questions-model";
 
 import type { Tx } from "./lead-payer";
-import { gwgPayerSheetHint, gwgPayerSheetMissingLabels } from "./gwg-identification";
+import {
+  gwgPayerSheetHint,
+  gwgPayerSheetMissingLabels,
+  gwgPersonPayerSheetHint,
+  gwgPersonPayerSheetMissingLabels,
+  PAYER_PERSON_SCOPE,
+} from "./gwg-identification";
 
 export const RISK_TRIGGER_KEYS = [
   "T1",
@@ -1037,6 +1043,15 @@ export function gwgSheetSignatureNotice(details: unknown, tx: Tx): string | null
       base,
       `${tx("Не хватает данных организации-плательщика", "Es fehlen Angaben der zahlenden Organisation")}: ${labels.join(", ")}.`,
       gwgPayerSheetHint(tx),
+    ].join(" ");
+  }
+  // A person who pays: the document data staff enter from the copy (qa-fix-117).
+  if ((details as { scope?: unknown }).scope === PAYER_PERSON_SCOPE) {
+    const labels = gwgPersonPayerSheetMissingLabels(missing, tx);
+    return [
+      base,
+      `${tx("Данные документа плательщика не внесены", "Ausweisdaten des Zahlers fehlen")}: ${labels.join(", ")}.`,
+      gwgPersonPayerSheetHint(tx),
     ].join(" ");
   }
   return [base, representativeMissingText(missing, tx)].filter(Boolean).join(" ");

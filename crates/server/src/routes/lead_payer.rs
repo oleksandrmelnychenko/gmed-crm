@@ -1383,6 +1383,16 @@ pub(crate) enum PayerReason {
     /// decision 2026-10-25, QA R-8). Readiness only, never the agency gate;
     /// the CEO's risk release does not lift it.
     PayerNotIdentified,
+    /// A third-party payer who is a person sent the questionnaire with the
+    /// copy of the identity document, but staff have not entered (completely
+    /// and validly) the document's data from it (owner 2026-11-21: the link
+    /// asks for the copy only). Readiness only, like
+    /// [`Self::PayerNotIdentified`]; an organisation is held by its GwG sheet.
+    PayerDocumentDataMissing,
+    /// The data staff entered for that document show it has expired: the
+    /// document is stored (as the patient's), but it does not identify. No
+    /// payer trigger exists for it (T12 is the patient's), so it blocks.
+    PayerDocumentExpired,
 }
 
 impl PayerReason {
@@ -1400,6 +1410,8 @@ impl PayerReason {
             Self::CostAssumptionUnsigned => "cost_assumption_unsigned",
             Self::ClientOrderSignatureMissing => "client_order_signature_missing",
             Self::PayerNotIdentified => "payer_not_identified",
+            Self::PayerDocumentDataMissing => "payer_document_data_missing",
+            Self::PayerDocumentExpired => "payer_document_expired",
         }
     }
 
@@ -1420,6 +1432,8 @@ impl PayerReason {
             Self::CostAssumptionUnsigned => "Cost assumption declaration is not signed",
             Self::ClientOrderSignatureMissing => "Customer order signature is missing",
             Self::PayerNotIdentified => "Third-party payer is not identified",
+            Self::PayerDocumentDataMissing => "Payer identity document data are not entered",
+            Self::PayerDocumentExpired => "Payer identity document has expired",
         }
     }
 }
@@ -1545,6 +1559,19 @@ impl PayerReadiness {
             "key": "payer_identified",
             "label": "Third-party payer identified (questionnaire or paper Selbstauskunft, and identity document) at risk level 2",
             "passed": !self.reasons.contains(&PayerReason::PayerNotIdentified),
+            "blocking_for": "conversion",
+            "stage": "compliance",
+        }));
+        // qa-fix-117 (owner «дай валідатор»): a person who pays sends the copy
+        // of the ID only; staff enter its data in «Документ плательщика».
+        // Passed when nothing was sent or the payer is an organisation.
+        checks.push(json!({
+            "key": "payer_document_data_entered",
+            "label": "Third-party payer's identity document data entered and valid",
+            "passed": !self.reasons.iter().any(|reason| matches!(
+                reason,
+                PayerReason::PayerDocumentDataMissing | PayerReason::PayerDocumentExpired
+            )),
             "blocking_for": "conversion",
             "stage": "compliance",
         }));
@@ -1869,7 +1896,88 @@ pub(crate) async fn load_payer_readiness(
     if payer_identification_missing(&mut conn, lead_id, &state).await? {
         readiness.reasons.push(PayerReason::PayerNotIdentified);
     }
+    let problems = payer_person_document_problems(&mut conn, lead_id, &state).await?;
+    if problems
+        .iter()
+        .any(|problem| *problem != "id_document_expired")
+    {
+        readiness
+            .reasons
+            .push(PayerReason::PayerDocumentDataMissing);
+    }
+    if problems.contains(&"id_document_expired") {
+        readiness.reasons.push(PayerReason::PayerDocumentExpired);
+    }
     Ok(readiness)
+}
+
+/// Why the identity document of a third-party payer who is a person does not
+/// identify (qa-fix-117), as [`crate::services::identity_document::problems`]
+/// keys, read from the data staff entered from the copy of a sent (or
+/// adopted) questionnaire. Empty without such a statement, for an
+/// organisation (its GwG sheet asks the representative's document or the
+/// register extract) and for a minor's paying parent (a representative,
+/// checked as such).
+pub(crate) async fn payer_person_document_problems(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    state: &PayerState,
+) -> Result<Vec<&'static str>, sqlx::Error> {
+    let person = state
+        .declaration
+        .as_ref()
+        .is_some_and(|declaration| declaration.is_third_party() && !declaration.is_organisation());
+    if !person || state.paying_parent {
+        return Ok(Vec::new());
+    }
+    let Some(row) = sqlx::query(
+        r#"SELECT date_of_birth, id_document_type, id_document_number,
+                  id_issuing_authority, id_issuing_country, id_issued_on, id_valid_until
+           FROM lead_payer_statements
+           WHERE lead_id = $1
+             AND (submitted_at IS NOT NULL OR adopted_at IS NOT NULL)"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let text = |column: &str| row.try_get::<Option<String>, _>(column).ok().flatten();
+    let (kind, number, authority, country) = (
+        text("id_document_type"),
+        text("id_document_number"),
+        text("id_issuing_authority"),
+        text("id_issuing_country"),
+    );
+    let document = crate::services::identity_document::Document {
+        kind: kind.as_deref(),
+        number: number.as_deref(),
+        authority: authority.as_deref(),
+        country: country.as_deref(),
+        issued_on: row.try_get("id_issued_on")?,
+        valid_until: row.try_get("id_valid_until")?,
+        unreadable: false,
+    };
+    Ok(crate::services::identity_document::problems(
+        &document,
+        row.try_get("date_of_birth")?,
+        crate::app_time::today(),
+    ))
+}
+
+/// [`payer_person_document_problems`] as keys `payer_<problem>` (the keys of
+/// the organisation's sheet), for confirming the person payer's GwG sheet.
+pub(crate) async fn payer_person_document_missing(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    let state = load_payer_state(conn, lead_id).await?;
+    Ok(payer_person_document_problems(conn, lead_id, &state)
+        .await?
+        .into_iter()
+        .map(|problem| format!("payer_{problem}"))
+        .collect())
 }
 
 /// Triggers about the payer's own person (QA R-8): a listed country, a PEP,

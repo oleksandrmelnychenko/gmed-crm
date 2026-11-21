@@ -386,6 +386,23 @@ describe("refusals of the server to make a sheet", () => {
     expect(isGwgPayerSheetIncomplete(new Error("payer_details_incomplete"))).toBe(false);
   });
 
+  it("names the person payer's missing document data and the card to enter them (qa-fix-117)", () => {
+    const incomplete = new ApiRequestError("Unprocessable", {
+      status: 422,
+      body: {
+        error: "Unprocessable Entity",
+        code: "payer_details_incomplete",
+        scope: "payer_person",
+        missing: ["payer_id_document_type", "payer_id_document_number", "payer_id_document_expired"],
+      },
+    });
+    expect(isGwgPayerSheetIncomplete(incomplete)).toBe(true);
+    expect(gwgSheetErrorText(incomplete, ru)).toBe(
+      "Подтвердить подпись нельзя: данные документа плательщика не внесены: вид документа, номер документа, документ просрочен — нужен действующий. Внесите данные со скана в карточке «Документ плательщика» (раздел «Кто платит»), затем сформируйте лист заново.",
+    );
+    expect(gwgSheetErrorText(incomplete, de)).toContain("Ausweisdaten des Zahlers fehlen: Ausweisart, Ausweisnummer");
+  });
+
   it("tells the sheet for legal entities by the form the server recorded", () => {
     expect(isGwgLegalEntitySheet({ generated_bindings: { gwg_identification: { subject: "payer", form: "legal_entity" } } })).toBe(true);
     expect(isGwgLegalEntitySheet({ generated_bindings: { gwg_identification: { subject: "payer" } } })).toBe(false);
