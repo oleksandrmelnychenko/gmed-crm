@@ -4862,6 +4862,17 @@ async fn a_person_payers_copy_without_document_data_holds_conversion_and_sheet()
         "{sheet}"
     );
     let sheet_id = sheet["id"].as_str().unwrap().to_string();
+    // The unsigned payer sheet keeps «Комплаенс завершен» open.
+    let (_, lead) = with_login(&app, "GET", &lead_path, &app.manager(), None).await;
+    assert!(
+        blocks_with(&lead, "Payer GwG sheet is not signed"),
+        "{lead}"
+    );
+    assert_eq!(
+        readiness_check(&lead, "compliance_completed")["passed"],
+        false,
+        "{lead}"
+    );
     let mark_signed = format!("/api/v1/documents/{sheet_id}/mark-signed");
     let (status, refused) = with_login(
         &app,
