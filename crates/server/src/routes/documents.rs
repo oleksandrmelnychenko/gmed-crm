@@ -25021,7 +25021,14 @@ fn contract_vat_total_label(items: &[&GeneratedContractLineItem]) -> String {
 /// next to a taxed rate when a service of the document carries no VAT
 /// (§ 4 Nr. 14, exempt, or a pass-through cost).
 fn contract_zero_vat_total(items: &[&GeneratedContractLineItem]) -> Option<(String, &'static str)> {
-    let groups = contract_vat_groups(items);
+    // «Voraussichtliche Auslagen» are printed apart, below the Nettowert: they
+    // are no 0 % service of the table (owner 2026-11-21).
+    let in_table = items
+        .iter()
+        .copied()
+        .filter(|item| !is_estimated_outlays_item(item))
+        .collect::<Vec<_>>();
+    let groups = contract_vat_groups(&in_table);
     let exempt = groups.iter().any(|(treatment, _)| {
         matches!(
             treatment,
@@ -48126,6 +48133,21 @@ mod tests {
             Some(("MwSt. 0%".to_string(), "0,00 €"))
         );
         assert_eq!(super::contract_zero_vat_total(&[&taxed]), None);
+        // The estimated outlays are printed below the Nettowert: no 0 % line.
+        let placeholder = GeneratedContractLineItem {
+            is_cost_passthrough: true,
+            ..priced_line(
+                "Voraussichtliche Auslagen",
+                "1",
+                "1.000,00 €",
+                "1.000,00 €",
+                "0",
+            )
+        };
+        assert_eq!(
+            super::contract_zero_vat_total(&[&taxed, &placeholder]),
+            None
+        );
 
         let exempt = GeneratedContractLineItem {
             exemption_reason: Some("Steuerfreie Leistung".to_string()),

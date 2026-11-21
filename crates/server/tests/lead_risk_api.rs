@@ -326,9 +326,10 @@ async fn staff_see_the_preview_then_the_assessment_decide_and_the_gate_follows()
     .unwrap();
     let raised = assessment(&app, lead_id).await;
     assert_ne!(raised["status"], "released", "{raised}");
-    // T4 1 + T5 2 + T9 4 = 7 for the payer; the higher subject counts.
-    assert_eq!(raised["payer_points"], 7, "{raised}");
-    assert_eq!(raised["points"], 7);
+    // T4 1 + T5 2 + T9 3 = 6 for the payer (cash 3 since 2026-11-21); the
+    // higher subject counts.
+    assert_eq!(raised["payer_points"], 6, "{raised}");
+    assert_eq!(raised["points"], 6);
     assert!(held(&qualify(&app, lead_id).await));
     // History and decisions are kept.
     let kinds: Vec<&str> = raised["history"]

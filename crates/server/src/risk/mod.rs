@@ -193,7 +193,9 @@ impl Default for RiskConfig {
             ("T6", TriggerPoints::PerList([2, 4])),
             ("T7", TriggerPoints::Single(1)),
             ("T8", TriggerPoints::Single(2)),
-            ("T9", TriggerPoints::Single(4)),
+            // Cash alone is no enhanced check: with any other risk point it is
+            // (owner 2026-11-21, was 4 = level 2 by itself).
+            ("T9", TriggerPoints::Single(3)),
             ("T12", TriggerPoints::Single(2)),
             ("T13", TriggerPoints::Single(1)),
         ] {
@@ -1177,7 +1179,7 @@ mod tests {
         };
         assert_eq!(
             fire(route.clone()),
-            vec![("T8", "patient", None, 2), ("T9", "patient", None, 4)]
+            vec![("T8", "patient", None, 2), ("T9", "patient", None, 3)]
         );
         let payer = fire(Inputs {
             third_party: true,
@@ -1186,7 +1188,7 @@ mod tests {
             ..route
         });
         assert!(payer.contains(&("T8", "payer", None, 2)));
-        assert!(payer.contains(&("T9", "payer", None, 4)));
+        assert!(payer.contains(&("T9", "payer", None, 3)));
         // No amount fires anything (T10 / T11 retired 2026-10-12); two payers
         // on orders fire T8; an older crypto answer T9.
         assert_eq!(
@@ -1195,7 +1197,7 @@ mod tests {
                 payment_method: Some("crypto".into()),
                 ..clean()
             }),
-            vec![("T8", "patient", None, 2), ("T9", "patient", None, 4)]
+            vec![("T8", "patient", None, 2), ("T9", "patient", None, 3)]
         );
     }
 
