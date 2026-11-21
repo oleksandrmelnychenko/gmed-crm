@@ -3596,22 +3596,12 @@ fn invoice_pdf_type_label(language: &str, value: &str) -> &'static str {
     }
 }
 
-fn normalize_invoice_pdf_language(value: &str) -> Option<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "de" | "de-de" | "de_at" | "de-at" => Some("de"),
-        "uk" | "ua" | "uk-ua" | "ua-ua" => Some("uk"),
-        "ru" | "ru-ru" => Some("ru"),
-        "en" | "en-gb" | "en-us" => Some("en"),
-        _ => None,
-    }
-}
-
-fn resolve_invoice_pdf_language(languages: &[String]) -> String {
-    languages
-        .iter()
-        .find_map(|value| normalize_invoice_pdf_language(value))
-        .unwrap_or("de")
-        .to_string()
+/// The language of an invoice, a correction and a dunning letter: always
+/// German, whatever the patient speaks (client 2026-11-21: «Всі рахунки 100%
+/// на німецькій»; another language only as a translated copy). The patient's
+/// languages are kept in the signature for that copy.
+fn resolve_invoice_pdf_language(_patient_languages: &[String]) -> String {
+    "de".to_string()
 }
 
 fn invoice_pdf_value_to_string(value: Option<&Value>) -> String {
