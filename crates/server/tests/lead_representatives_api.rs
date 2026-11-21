@@ -3810,7 +3810,8 @@ async fn a_representatives_copy_alone_completes_the_cabinet_and_staff_enter_its_
         Some(complete_adult_person("authorised_representative")),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    // The first save creates the person.
+    assert_eq!(status, StatusCode::CREATED, "{body}");
     answer_pep(router, &agent_path, &patient).await;
     give_inquiry_consent(router, lead_id, &patient).await;
     for (kind, file_name) in [
