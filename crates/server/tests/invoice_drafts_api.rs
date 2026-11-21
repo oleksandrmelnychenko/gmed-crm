@@ -1485,9 +1485,11 @@ async fn the_service_period_comes_from_the_order_and_can_be_set_on_the_draft() {
     // The order default 20.11.–25.11. is no longer the period; the date alone
     // may still be the invoice date when the test runs on that day.
     assert!(
-        !text
-            .match_indices("20.11.2026")
-            .any(|(at, _)| text[at..].chars().take(40).collect::<String>().contains("25.11.2026")),
+        !text.match_indices("20.11.2026").any(|(at, _)| text[at..]
+            .chars()
+            .take(40)
+            .collect::<String>()
+            .contains("25.11.2026")),
         "{text}"
     );
 }
