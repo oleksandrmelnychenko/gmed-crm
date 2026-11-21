@@ -229,6 +229,8 @@ type Calls = {
   estimates: Record<string, unknown>[];
   /** Bodies of `POST /leads/{id}/payer-declaration/payment-route` (owner 2026-10-26). */
   routes: Record<string, unknown>[];
+  /** Bodies of `PUT /leads/{id}/payer-questionnaire/identity-document-data` (owner 2026-11-21). */
+  idData: Record<string, unknown>[];
 };
 
 type MountOptions = {
@@ -248,7 +250,7 @@ async function mount(
   await startClockAt(page);
   // `token`: the raw token of the newest prepared link; the server keeps only its hash.
   const state = { link: initial, declaration: { ...declaration } as Record<string, unknown>, token: null as string | null };
-  const calls: Calls = { prepares: [], sends: [], revokes: 0, estimates: [], routes: [] };
+  const calls: Calls = { prepares: [], sends: [], revokes: 0, estimates: [], routes: [], idData: [] };
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
     localStorage.setItem("gmed_access_token", "lead-payer-link-staff-token");
@@ -373,6 +375,16 @@ async function mount(
       calls.estimates.push(body);
       state.link = { ...state.link, estimated_total_eur: body.estimated_total_eur };
       response = state.link;
+    } else if (path === `/leads/${leadId}/payer-questionnaire/identity-document-data` && method === "PUT") {
+      // Staff enter the payer's document data from the copy (owner 2026-11-21).
+      const body = request.postDataJSON() as Record<string, unknown>;
+      calls.idData.push(body);
+      const questionnaire = state.link.questionnaire as LinkState;
+      const data = { ...body };
+      delete data.id_document_unreadable;
+      const next = { ...questionnaire, answers: { ...(questionnaire.answers as Record<string, unknown>), ...data } };
+      state.link = { ...state.link, questionnaire: next };
+      response = next;
     } else if (path === `/leads/${leadId}/payer-link`) {
       response = state.link;
     }
@@ -833,4 +845,36 @@ test("staff enter and correct the payer's payment route; the source is shown", a
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => noOverflow(wizard)).toBe(true);
   await expect.poll(() => noOverflow(block)).toBe(true);
+});
+
+// Owner 2026-11-21: the payer's link asks for the copy only; staff enter the document's data.
+test("staff enter the payer's document data from the copy after the payer answered", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { panel, calls } = await mount(
+    page,
+    "ru",
+    freshState({
+      link: sentLink({ status: "submitted" }),
+      questionnaire: answeredQuestionnaire({
+        answers: {
+          ...(answeredQuestionnaire().answers as Record<string, unknown>),
+          id_document_type: null,
+          id_document_number: null,
+          id_issuing_authority: null,
+          id_issuing_country: null,
+          id_issued_on: null,
+          id_valid_until: null,
+        },
+      }),
+    }),
+  );
+  const card = panel.getByTestId("lead-payer-id-data-card");
+  await expect(card).toContainText("Документ плательщика");
+  await expect(card).toContainText("Страна выдачи");
+  await expect(card).not.toContainText(/выставк/i);
+  // The copy the payer uploaded can be read here.
+  await expect(card.getByTestId("lead-payer-id-data-recognition-run")).toBeVisible();
+  await card.getByRole("textbox", { name: /Номер/ }).fill("P1234567");
+  await card.getByRole("textbox", { name: /Кем выдан/ }).click();
+  await expect.poll(() => calls.idData.at(-1)?.id_document_number).toBe("P1234567");
 });

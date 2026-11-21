@@ -643,8 +643,9 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect
       .poll(() => Object.assign({}, ...calls.persons.slice(2).map((call) => call.body)))
       .toEqual({ street: "Musterstraße 2", country: "DE" });
-    // The representative types the own document data too (owner 2026-11-10).
-    await expect(agent.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(1);
+    // The representative's document is a copy only; staff enter its data (owner 2026-11-21).
+    await expect(agent.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-agent-identity-data")).toHaveCount(0);
     expect(calls.persons.every((call) => call.id === id)).toBe(true);
     expect(request.representation.representatives).toHaveLength(1);
 

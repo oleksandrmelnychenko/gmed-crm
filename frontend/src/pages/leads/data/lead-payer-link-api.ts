@@ -179,6 +179,8 @@ export type PayerQuestionnaireDocument = {
   uploaded_at: string | null;
   reviewed: boolean;
   can_delete: boolean;
+  /** An organisation's register extract, no scan of an ID (absent on an older server). */
+  register_extract?: boolean;
 };
 
 /** Section 8 of the form as the payer answers it. */
@@ -218,6 +220,8 @@ export type StaffPayerQuestionnaire = {
   identity_documents: PayerQuestionnaireDocument[];
   funds_proof_documents: PayerQuestionnaireDocument[];
   funds_proof_required: boolean;
+  /** An organisation's register extract is on file: it stands for the representative's ID (owner 2026-10-30). */
+  register_extract_on_file?: boolean;
   missing_for_submit: string[];
   declared_correct_at: string | null;
   submitted_at: string | null;
@@ -470,6 +474,7 @@ export function normalizePayerDocuments(value: unknown): PayerQuestionnaireDocum
         uploaded_at: textOrNull(raw.uploaded_at),
         reviewed: raw.reviewed === true,
         can_delete: raw.can_delete === true,
+        register_extract: raw.register_extract === true,
       },
     ];
   });
@@ -515,6 +520,7 @@ export function normalizeStaffPayerQuestionnaire(value: unknown): StaffPayerQues
     identity_documents: normalizePayerDocuments(raw.identity_documents),
     funds_proof_documents: normalizePayerDocuments(raw.funds_proof_documents),
     funds_proof_required: raw.funds_proof_required === true,
+    register_extract_on_file: raw.register_extract_on_file === true,
     missing_for_submit: stringList(raw.missing_for_submit),
     declared_correct_at: textOrNull(raw.declared_correct_at),
     submitted_at: textOrNull(raw.submitted_at),

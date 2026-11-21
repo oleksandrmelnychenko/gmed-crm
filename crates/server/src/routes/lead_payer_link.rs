@@ -5577,23 +5577,19 @@ async fn paper_identity_data(
         Ok(tx) => tx,
         Err(error) => return intake::internal(error, "begin"),
     };
-    let mut context = match lock_paper_context(&mut tx, lead_id).await {
+    let context = match lock_paper_context(&mut tx, lead_id).await {
         Ok(context) => context,
         Err(response) => return response,
     };
-    if context.statement.is_none() {
-        if let Err(response) =
-            ensure_staff_statement(&mut tx, &context, lead_id, auth.user_id).await
-        {
-            return response;
-        }
-        context.statement = match load_statement(&mut tx, lead_id).await {
-            Ok(statement) => statement,
-            Err(error) => return database(error),
-        };
-    }
+    // Only the payer's (or staff's paper) statement takes the data: staff
+    // never start one here.
     let Some(statement) = context.statement.as_ref() else {
-        return intake::internal(sqlx::Error::RowNotFound, "load payer statement");
+        return coded(
+            StatusCode::CONFLICT,
+            "payer_statement_missing",
+            "The payer has not answered yet",
+            json!({}),
+        );
     };
     let organisation = context
         .declaration
@@ -5613,7 +5609,24 @@ async fn paper_identity_data(
             user_id: auth.user_id,
         };
         let stored = async {
-            store_answers(&mut tx, lead_id, &next, writer.actor()).await?;
+            // These six columns only: who answered the statement stays as it
+            // was (a payer's statement never becomes staff's).
+            sqlx::query(
+                r#"UPDATE lead_payer_statements SET
+                       id_document_type = $2, id_document_number = $3,
+                       id_issuing_authority = $4, id_issuing_country = $5,
+                       id_issued_on = $6, id_valid_until = $7, updated_at = now()
+                   WHERE lead_id = $1"#,
+            )
+            .bind(lead_id)
+            .bind(&next.id_document_type)
+            .bind(&next.id_document_number)
+            .bind(&next.id_issuing_authority)
+            .bind(&next.id_issuing_country)
+            .bind(next.id_issued_on)
+            .bind(next.id_valid_until)
+            .execute(&mut *tx)
+            .await?;
             audit::write_in_transaction(
                 &mut tx,
                 &writer.event(

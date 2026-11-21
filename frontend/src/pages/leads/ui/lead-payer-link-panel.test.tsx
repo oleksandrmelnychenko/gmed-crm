@@ -69,6 +69,12 @@ describe("LeadPayerLinkPanel", () => {
     // Read-only roles and an unanswered link: no card.
     expect(render(answered, { canEdit: false })).not.toContain("lead-payer-id-data-card");
     expect(render(state({ link: { status: "opened", sent_at: "2026-10-06T10:00:00Z" } }))).not.toContain("lead-payer-id-data-card");
+    // An organisation's register extract stands for the ID: nothing to enter.
+    const extract = state({
+      link: { status: "submitted", email: "office@example.com", sent_at: "2026-10-06T10:00:00Z" },
+      questionnaire: { answers: {}, payer_type: "company", register_extract_on_file: true, submitted_at: "2026-10-06T10:30:00Z", missing_for_submit: [] },
+    });
+    expect(render(extract)).not.toContain("lead-payer-id-data-card");
   });
 
   it("keeps 'the patient sent the request' for a lead who has not submitted yet", () => {

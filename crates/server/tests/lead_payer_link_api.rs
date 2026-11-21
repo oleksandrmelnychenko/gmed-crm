@@ -4583,6 +4583,18 @@ async fn the_payer_uploads_the_identity_copy_only_and_staff_enter_its_data() {
     let Some(app) = payer_app().await else { return };
     let pool = app.pool();
     let (lead_id, _) = lead_with_payer(&app, "iddata").await;
+    let data_path = format!("/api/v1/leads/{lead_id}/payer-questionnaire/identity-document-data");
+    // Staff never start a statement here: the payer answers first.
+    let (status, body) = with_login(
+        &app,
+        "PUT",
+        &data_path,
+        &app.manager(),
+        Some(json!({ "id_document_number": "P1234567" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_statement_missing", "{body}");
     let (token, _) = send_link(&app, lead_id, json!({})).await;
     let session = open_session(&app, &token).await;
     consent(&app, &token, &session).await;
@@ -4623,7 +4635,6 @@ async fn the_payer_uploads_the_identity_copy_only_and_staff_enter_its_data() {
     }
     assert!(!missing.contains(&json!("id_document_upload")), "{staff}");
 
-    let data_path = format!("/api/v1/leads/{lead_id}/payer-questionnaire/identity-document-data");
     // A read-only role, another answer and an expired document are refused.
     let (status, body) = with_login(
         &app,
@@ -4676,6 +4687,17 @@ async fn the_payer_uploads_the_identity_copy_only_and_staff_enter_its_data() {
     assert_eq!(body["answers"]["id_document_number"], "P1234567", "{body}");
     assert_eq!(body["answers"]["id_issuing_country"], "AT", "{body}");
     assert!(body["submitted_at"].is_string(), "still sent: {body}");
+    // The statement stays the payer's: staff added the document's data only.
+    assert_eq!(body["entered_by_staff"], false, "{body}");
+    let (source, answered_by): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT source, answered_by_user FROM lead_payer_statements WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(source.as_deref(), Some("link"));
+    assert_eq!(answered_by, None);
     let (_, staff) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(
         staff["questionnaire"]["missing_for_submit"],

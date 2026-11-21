@@ -46,7 +46,11 @@ export function LeadPayerIdentityDocumentData({
 }) {
   const questionnaire = state.questionnaire;
   if (state.mode !== "link" || !questionnaire?.submitted_at) return null;
-  const scans = questionnaire.identity_documents.map((document) => ({ id: document.id, name: document.file_name }));
+  // An organisation's register extract stands for the representative's ID: no data to enter.
+  if (questionnaire.register_extract_on_file) return null;
+  const scans = questionnaire.identity_documents
+    .filter((document) => !document.register_extract)
+    .map((document) => ({ id: document.id, name: document.file_name }));
   return (
     <section className="space-y-2 rounded-xl border border-border/70 bg-card p-3" data-testid="lead-payer-id-data-card">
       <h4><SectionHeading icon={IdCardLanyard}>{tx("Документ плательщика", "Ausweis des Zahlers")}</SectionHeading></h4>
