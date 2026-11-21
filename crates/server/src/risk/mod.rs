@@ -159,8 +159,8 @@ impl TriggerPoints {
     }
 }
 
-/// The configuration (contract 2.4). A change bumps `version`; it never
-/// lowers stored assessments, raises apply at the next reassessment.
+/// The configuration (contract 2.4). A change bumps `version`; raises and
+/// lowered points apply at the next reassessment ([`cap_to_config`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RiskConfig {
     pub version: i32,
@@ -747,6 +747,28 @@ impl Sticky {
     }
 }
 
+/// The stored triggers with their points capped at what the configuration
+/// now gives for the key (its highest variant): the ratchet keeps points
+/// against corrected data, not against GMED's own rule lowered later (owner
+/// 2026-11-21: cash T9 4 → 3 applies to the open leads too). A key the
+/// configuration no longer knows keeps its stored points.
+pub fn cap_to_config(stored: &[Sticky], config: &RiskConfig) -> Vec<Sticky> {
+    stored
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if let Some(max) = config
+                .points
+                .get(&entry.key)
+                .and_then(|points| points.values().into_iter().max())
+            {
+                entry.points = entry.points.min(max);
+            }
+            entry
+        })
+        .collect()
+}
+
 /// Result of [`merge`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Merged {
@@ -970,6 +992,41 @@ pub fn blocks_of(triggers: &[Sticky]) -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lowered_rule_caps_stored_points_and_corrected_data_does_not() {
+        let now = Utc::now();
+        let stored = |key: &str, points: i32| Sticky {
+            key: key.to_string(),
+            subject: SUBJECT_PATIENT.to_string(),
+            variant: None,
+            points,
+            knockout: false,
+            first_fired_at: now,
+            last_fired_at: now,
+            active: true,
+            inactive_since: None,
+            representative_id: None,
+        };
+        let config = RiskConfig::default();
+        // Cash stored at the old 4 points: the rule now gives 3.
+        let capped = cap_to_config(&[stored("T9", 4), stored("T10", 7)], &config);
+        assert_eq!(capped[0].points, 3);
+        // A key the configuration no longer knows keeps its points.
+        assert_eq!(capped[1].points, 7);
+        let merged = merge(&capped, &[], now, &[]);
+        assert_eq!(score(&merged.triggers, &config).level, 1);
+        // Within the rule the ratchet stays: no longer firing keeps 3.
+        assert_eq!(
+            merged
+                .triggers
+                .iter()
+                .find(|t| t.key == "T9")
+                .unwrap()
+                .points,
+            3
+        );
+    }
 
     fn config() -> RiskConfig {
         RiskConfig::default()

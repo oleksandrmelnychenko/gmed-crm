@@ -1193,7 +1193,7 @@ pub async fn payer_form_preview(
         });
     };
     let merged = merge_pending(
-        &stored.triggers,
+        &super::cap_to_config(&stored.triggers, &config),
         &inputs.sent_evaluation(&config),
         Utc::now(),
         &inputs.t16_kept_for(),
@@ -1404,7 +1404,7 @@ async fn evaluate_and_store(
     let previous_triggers = if starting {
         Vec::new()
     } else {
-        stored.triggers.clone()
+        super::cap_to_config(&stored.triggers, &config)
     };
     // A stored T16 goes once its side has no confirmed hit (only a confirmed
     // hit fires it; QA 2026-10-11 A-15/A-21/A-33): also the T16 an open hit

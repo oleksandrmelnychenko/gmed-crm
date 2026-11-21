@@ -1535,7 +1535,8 @@ test.describe("payer link", () => {
       expect(Object.keys(patch).length).toBeGreaterThan(0);
       for (const key of Object.keys(patch)) expect(ORGANISATION_ONLY).not.toContain(key);
     }
-    expect(calls.patches.filter((patch) => patch.id_valid_until === "2020-01-01")).toHaveLength(1);
+    // The document data come from staff, never from the payer (owner 2026-11-21).
+    expect(calls.patches.filter((patch) => Object.keys(patch).some((key) => key.startsWith("id_")))).toEqual([]);
     expect(calls.others).toEqual([]);
   });
 
