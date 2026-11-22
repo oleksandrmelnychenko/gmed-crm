@@ -1027,6 +1027,19 @@ WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(a.triggers) t
               WHERE t ->> 'key' = 'T9' AND (t ->> 'points')::int > 3)
 ORDER BY a.updated_at DESC;
 
+-- [INFO] Why an I06 lead was not lowered: start, config version, prints and
+-- the stored triggers as key:subject:points:active (no personal data).
+SELECT 'I07_lead_risk_t9_detail' AS check_id, a.lead_id AS lead, a.started_at IS NOT NULL AS started,
+       a.config_version, a.fingerprint, a.released_fingerprint,
+       (SELECT string_agg(concat_ws(':', t ->> 'key', t ->> 'subject', t ->> 'points', t ->> 'active'), ', ')
+        FROM jsonb_array_elements(a.triggers) t) AS triggers,
+       (SELECT max(e.at) FROM lead_risk_events e WHERE e.lead_id = a.lead_id) AS last_event
+FROM lead_risk_assessments a
+JOIN leads l ON l.id = a.lead_id
+WHERE l.qualification_status <> 'deleted'
+  AND EXISTS (SELECT 1 FROM jsonb_array_elements(a.triggers) t
+              WHERE t ->> 'key' = 'T9' AND (t ->> 'points')::int > 3);
+
 -- =============================================================================
 -- End. Expected: n = 0 for every [BUG] check.
 -- =============================================================================
