@@ -1017,8 +1017,9 @@ SELECT 'I05_risk_config_t9_points' AS check_id,
        (SELECT value ->> 'version' FROM system_settings WHERE key = 'risk_assessment_config') AS config_version;
 
 -- [INFO] Lead assessments that still hold T9 with more than 3 points. They drop
--- to 3 at the next reassessment (cap_to_config); shown by lead id prefix only.
-SELECT 'I06_lead_risk_t9_above_three' AS check_id, left(a.lead_id::text, 8) AS lead,
+-- to 3 at the next reassessment (cap_to_config, e.g. the wizard's documents
+-- step: /leads?lead=<id>&view=wizard); shown by lead id only.
+SELECT 'I06_lead_risk_t9_above_three' AS check_id, a.lead_id AS lead,
        a.level, a.points, a.status, a.updated_at
 FROM lead_risk_assessments a
 WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(a.triggers) t
