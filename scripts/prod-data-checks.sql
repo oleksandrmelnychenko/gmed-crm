@@ -1020,8 +1020,9 @@ SELECT 'I05_risk_config_t9_points' AS check_id,
 -- to 3 at the next reassessment (cap_to_config, e.g. the wizard's documents
 -- step: /leads?lead=<id>&view=wizard); shown by lead id only.
 SELECT 'I06_lead_risk_t9_above_three' AS check_id, a.lead_id AS lead,
-       a.level, a.points, a.status, a.updated_at
+       a.level, a.points, a.status, a.updated_at, l.qualification_status, l.converted_patient_id IS NOT NULL AS converted
 FROM lead_risk_assessments a
+JOIN leads l ON l.id = a.lead_id
 WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(a.triggers) t
               WHERE t ->> 'key' = 'T9' AND (t ->> 'points')::int > 3)
 ORDER BY a.updated_at DESC;
