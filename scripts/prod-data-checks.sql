@@ -1009,6 +1009,22 @@ JOIN invoices i ON i.id = d.invoice_id
 WHERE d.document_language <> 'de'
 ORDER BY d.generated_at;
 
+-- [INFO] Points of trigger T9 (cash) in the stored risk configuration (owner
+-- 2026-11-21: 3 points). No row: the code default (3) applies.
+SELECT 'I05_risk_config_t9_points' AS check_id,
+       coalesce((SELECT value -> 'points' ->> 'T9' FROM system_settings WHERE key = 'risk_assessment_config'),
+                'no stored config: code default 3') AS t9_points,
+       (SELECT value ->> 'version' FROM system_settings WHERE key = 'risk_assessment_config') AS config_version;
+
+-- [INFO] Lead assessments that still hold T9 with more than 3 points. They drop
+-- to 3 at the next reassessment (cap_to_config); shown by lead id prefix only.
+SELECT 'I06_lead_risk_t9_above_three' AS check_id, left(a.lead_id::text, 8) AS lead,
+       a.level, a.points, a.status, a.updated_at
+FROM lead_risk_assessments a
+WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(a.triggers) t
+              WHERE t ->> 'key' = 'T9' AND (t ->> 'points')::int > 3)
+ORDER BY a.updated_at DESC;
+
 -- =============================================================================
 -- End. Expected: n = 0 for every [BUG] check.
 -- =============================================================================
